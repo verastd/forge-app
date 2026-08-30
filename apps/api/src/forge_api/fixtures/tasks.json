@@ -1,0 +1,130 @@
+[
+  {
+    "id": 1,
+    "title": "Polish the CSV export on the history page",
+    "civilianSummary": "Let people download their activity history as a spreadsheet file.",
+    "size": "S",
+    "rewardClass": "none",
+    "rewardUsd": null,
+    "tierFloor": "T0",
+    "url": "https://github.com/verastd/forge-app/issues/1",
+    "labels": ["agent-ready", "status:open", "size:S"],
+    "acceptanceCriteria": [
+      "GET /api/export returns text/csv with columns [ts, type, amount]",
+      "Export button visible on /history for logged-in users (flag: csv_export)",
+      "10k-row export completes < 3s in CI fixture data"
+    ]
+  },
+  {
+    "id": 2,
+    "title": "Build the contributor leaderboard page",
+    "civilianSummary": "Add a page that shows who has helped build the app and how much they have shipped.",
+    "size": "S",
+    "rewardClass": "R2",
+    "rewardUsd": 200,
+    "tierFloor": "T1",
+    "url": "https://github.com/verastd/forge-app/issues/2",
+    "labels": ["agent-ready", "status:open", "size:S", "bounty:R2"],
+    "acceptanceCriteria": [
+      "/leaderboard renders contributors sorted by merged-and-surviving contributions",
+      "Each row shows login, tier, merged count and survival rate from the ledger API",
+      "Page renders with an empty-state message when the ledger returns no contributors"
+    ]
+  },
+  {
+    "id": 3,
+    "title": "Polish the forge CLI output and error messages",
+    "civilianSummary": "Make the project's helper tool explain itself clearly when something goes wrong.",
+    "size": "XS",
+    "rewardClass": "R1",
+    "rewardUsd": 50,
+    "tierFloor": "T0",
+    "url": "https://github.com/verastd/forge-app/issues/3",
+    "labels": ["agent-ready", "status:open", "size:XS", "bounty:R1"],
+    "acceptanceCriteria": [
+      "`forge --help` lists every subcommand with a one-line description",
+      "Unknown subcommands exit non-zero with a suggestion instead of a stack trace",
+      "Existing forge shell scripts keep their current exit codes"
+    ]
+  },
+  {
+    "id": 4,
+    "title": "Improve AGENTS.md build and scope instructions",
+    "civilianSummary": "Sharpen the instructions file that every helper agent reads before it starts work.",
+    "size": "XS",
+    "rewardClass": "R1",
+    "rewardUsd": 50,
+    "tierFloor": "T0",
+    "url": "https://github.com/verastd/forge-app/issues/4",
+    "labels": ["agent-ready", "status:open", "size:XS", "bounty:R1"],
+    "acceptanceCriteria": [
+      "Every command listed in AGENTS.md runs green from a clean checkout",
+      "The scope rules name the directories that are always out of bounds",
+      "The AGENTS.md lint workflow passes on the branch"
+    ]
+  },
+  {
+    "id": 5,
+    "title": "Format the daily triage digest",
+    "civilianSummary": "Turn the daily project summary into something a human can read over coffee.",
+    "size": "S",
+    "rewardClass": "R2",
+    "rewardUsd": 200,
+    "tierFloor": "T1",
+    "url": "https://github.com/verastd/forge-app/issues/5",
+    "labels": ["agent-ready", "status:open", "size:S", "bounty:R2"],
+    "acceptanceCriteria": [
+      "The digest groups items by stalled, needs-review and shipped",
+      "Output is deterministic for a fixed input fixture (snapshot test)",
+      "An empty day produces a short 'nothing to report' digest, not an empty file"
+    ]
+  },
+  {
+    "id": 6,
+    "title": "Copy pass on the in-app bug wizard",
+    "civilianSummary": "Reword the report-a-problem flow so it never uses developer jargon.",
+    "size": "XS",
+    "rewardClass": "none",
+    "rewardUsd": null,
+    "tierFloor": "T0",
+    "url": "https://github.com/verastd/forge-app/issues/6",
+    "labels": ["agent-ready", "status:open", "size:XS"],
+    "acceptanceCriteria": [
+      "Every wizard step's copy is jargon-free and under 140 characters",
+      "The submitted issue body keeps its existing machine-readable sections",
+      "Copy lives in the externalized strings file, not inline in components"
+    ]
+  },
+  {
+    "id": 7,
+    "title": "Build the feature-flags admin page",
+    "civilianSummary": "Give the team a simple screen to switch app features on and off.",
+    "size": "M",
+    "rewardClass": "R3",
+    "rewardUsd": 600,
+    "tierFloor": "T1",
+    "url": "https://github.com/verastd/forge-app/issues/7",
+    "labels": ["agent-ready", "status:open", "size:M", "bounty:R3"],
+    "acceptanceCriteria": [
+      "/admin/flags lists every flag with its current value and source of truth",
+      "Toggling a flag writes through the flags service and is reflected on reload",
+      "The page is unreachable for users without the admin role"
+    ]
+  },
+  {
+    "id": 8,
+    "title": "Extract hardcoded UI strings for translation",
+    "civilianSummary": "Pull the app's wording into one place so it can be translated into other languages.",
+    "size": "S",
+    "rewardClass": "R2",
+    "rewardUsd": 200,
+    "tierFloor": "T0",
+    "url": "https://github.com/verastd/forge-app/issues/8",
+    "labels": ["agent-ready", "status:open", "size:S", "bounty:R2"],
+    "acceptanceCriteria": [
+      "No user-visible string literals remain in apps/web components",
+      "Every extracted key exists in the English strings file with the same text",
+      "A lint rule fails the build when a new hardcoded string is added"
+    ]
+  }
+]

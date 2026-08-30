@@ -1,0 +1,61 @@
+name: Bug report
+description: Something in the app is broken. Feeds both the GitHub-native bug queue and the in-app Bridge bug wizard (PRD Appendix I.4).
+title: "[Bug] "
+labels: ["bug", "status:triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. The more detail you give, the more
+        likely this becomes an agent-ready Task Spec directly.
+
+  - type: textarea
+    id: what-were-you-doing
+    attributes:
+      label: What were you doing?
+      description: Describe the steps leading up to the problem.
+      placeholder: I was exporting my history to CSV from the /history page...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: What actually happened?
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro-steps
+    attributes:
+      label: Steps to reproduce
+      description: Numbered steps, as exact as you can make them.
+      placeholder: |
+        1. Go to /history
+        2. Click "Export CSV"
+        3. ...
+    validations:
+      required: true
+
+  - type: input
+    id: device-app-version
+    attributes:
+      label: Device and app version
+      description: e.g. "iPhone 15, Safari, app v1.4.2" or "Desktop Chrome 128, web app, commit/build shown in footer"
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: diagnostics-consent
+    attributes:
+      label: Diagnostics
+      options:
+        - label: I consent to attaching anonymized diagnostic data (device/app metadata, console/error logs) to this report to help reproduce the bug.
+          required: false

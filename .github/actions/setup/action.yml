@@ -1,0 +1,54 @@
+name: "FORGE setup"
+description: >
+  Toolchain + dependency bootstrap for Gauntlet jobs: pnpm (via corepack),
+  Node 22, Python 3.12 + uv, pnpm store cache, then `make setup-ci` — the
+  frozen-lockfile install of both surfaces (pnpm workspace, apps/api via uv)
+  plus the packages/* build that `make lint` depends on. Needs no secrets.
+
+  Installing dependencies DOES execute code from the pull request: the PR's own
+  workspace lifecycle scripts run, and any dependency the PR's manifests
+  allowlist under pnpm.onlyBuiltDependencies would run its build script (this
+  workspace allowlists none today). pnpm 10 blocks every other dependency
+  lifecycle script by default. This is acceptable only because every caller is
+  an unprivileged `pull_request`/`merge_group` job with `permissions: {}` at
+  workflow level, contents:read at most, and no secrets in scope — never call
+  this from a privileged workflow.
+runs:
+  using: composite
+  steps:
+    - name: Enable corepack (pnpm)
+      shell: bash
+      run: corepack enable
+
+    - name: Set up Node 22
+      uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4, SHA-pinned
+      with:
+        node-version: "22"
+
+    - name: Set up Python 3.12
+      uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5, SHA-pinned
+      with:
+        python-version: "3.12"
+
+    - name: Set up uv
+      uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5, SHA-pinned
+
+    - name: Resolve pnpm store directory
+      id: pnpm-store
+      shell: bash
+      run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+    - name: Cache pnpm store
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4, SHA-pinned
+      with:
+        path: ${{ steps.pnpm-store.outputs.path }}
+        key: ${{ runner.os }}-pnpm-${{ hashFiles('**/pnpm-lock.yaml') }}
+        restore-keys: |
+          ${{ runner.os }}-pnpm-
+
+    # Must stay after the cache restore, and must stay frozen: an install that
+    # may resolve fresh versions would let a PR pull in a dependency the G1.4
+    # lockfile gate never sees.
+    - name: Install dependencies (make setup-ci)
+      shell: bash
+      run: make setup-ci

@@ -1,0 +1,30 @@
+# CODEOWNERS — review routing for sensitive paths. See operator docs in
+# the private core repo.
+#
+# WHAT THIS ACTUALLY ENFORCES. @forge-cold is a hardware-2FA "cold" account
+# held by the SAME person as @verastd. Listing both owners on a path is
+# TWO-CREDENTIAL FRICTION, not two-person control: GitHub's code-owner
+# requirement is satisfied when ANY ONE listed owner approves. Because GitHub
+# does not count a PR author's own approval, a @verastd-authored change to these
+# paths does force a sign-in to the cold account and its hardware key — real
+# cost for a stolen hot-account session or token. It is not independent
+# review, and it does not constrain a compromised or mistaken operator.
+# Nothing here should be described as "two-person control" or "two-key".
+#
+# Upgrade path (Phase 1+, before sensitive-path changes become routine):
+#   1. Add a second HUMAN maintainer — or a team with >= 2 human members — as
+#      co-owner of the paths below.
+#   2. Set required_approving_review_count to 2 in
+#      .github/rulesets/main-protection.json.
+#   3. Keep require_last_push_approval and dismiss_stale_reviews_on_push true
+#      (already set) so an approval cannot survive a later push.
+# Only with all three does "two independent approvals" become accurate.
+
+*                                               @verastd
+
+/.github/                                      @verastd @forge-cold
+/CODEOWNERS                                    @verastd @forge-cold
+/contracts/                                    @verastd @forge-cold
+/apps/api/src/forge_api/routers/auth*          @verastd @forge-cold
+/apps/api/src/forge_api/routers/pay*           @verastd @forge-cold
+/packages/contracts-client/                    @verastd @forge-cold

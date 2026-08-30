@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+# forge — convenience CLI wrapper around the GitHub CLI for the FORGE task
+# board (PRD §4 Stage 2-3). Every subcommand is a thin wrapper over `gh`;
+# Foreman (the GitHub App) remains the actual source of truth for claims,
+# leases, and tiers. This script never talks to Foreman directly.
+
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+usage: forge <command> [args]
+
+commands:
+  tasks          List open, agent-ready tasks (agent-ready + status:open).
+  claim <n>      Claim issue <n> by posting the /claim command.
+  status         Show your GitHub identity and where to check tier/claims.
+
+forge is a thin wrapper around the GitHub CLI (`gh`). Install it from
+https://cli.github.com/ and run `gh auth login` before using this.
+EOF
+}
+
+require_gh() {
+  if ! command -v gh >/dev/null 2>&1; then
+    echo "forge: the GitHub CLI ('gh') is not installed." >&2
+    echo "       install it from https://cli.github.com/ and re-run." >&2
+    exit 1
+  fi
+
+  if ! gh auth status >/dev/null 2>&1; then
+    echo "forge: 'gh' is installed but not authenticated." >&2
+    echo "       run 'gh auth login' and re-run." >&2
+    exit 1
+  fi
+}
+
+cmd_tasks() {
+  require_gh
+  gh issue list \
+    --label agent-ready \
+    --label status:open \
+    --state open \
+    --limit 100
+}
+
+cmd_claim() {
+  local issue="${1:-}"
+  if [[ -z "${issue}" ]]; then
+    echo "forge: usage: forge claim <issue-number>" >&2
+    exit 1
+  fi
+  if ! [[ "${issue}" =~ ^[0-9]+$ ]]; then
+    echo "forge: '${issue}' is not a valid issue number." >&2
+    exit 1
+  fi
+
+  require_gh
+  echo "forge: posting /claim on issue #${issue}..."
+  gh issue comment "${issue}" --body "/claim"
+  echo "forge: done. Foreman will comment with your lease terms (or a rejection reason) shortly."
+}
+
+cmd_status() {
+  require_gh
+  echo "forge: your GitHub identity:"
+  gh api user --jq '{login, name, id}' 2>/dev/null || gh api user
+  echo
+  echo "forge: this command only shows your GitHub identity — tier, active"
+  echo "claims, strikes, and pending rewards are tracked by Foreman, not gh."
+  echo "Comment '/forge status' on any issue to get your full FORGE status."
+}
+
+main() {
+  local command="${1:-}"
+  case "${command}" in
+    tasks)
+      shift
+      cmd_tasks "$@"
+      ;;
+    claim)
+      shift
+      cmd_claim "$@"
+      ;;
+    status)
+      shift
+      cmd_status "$@"
+      ;;
+    -h|--help|help|"")
+      usage
+      ;;
+    *)
+      echo "forge: unknown command '${command}'" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+}
+
+main "$@"

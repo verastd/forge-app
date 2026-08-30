@@ -1,0 +1,19 @@
+node_modules/
+.next/
+.next-e2e-*/
+dist/
+.venv/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+*.tsbuildinfo
+.env*
+coverage/
+dist.tar
+playwright-report/
+test-results/
+*.db
+
+# Python coverage artifacts (make test-coverage)
+apps/api/.coverage
+apps/api/coverage.xml

@@ -1,0 +1,82 @@
+name: Task Spec
+description: Agent-ready unit of work (core team / T3 stewards)
+labels: ["task", "status:draft"]
+body:
+  - type: input
+    id: goal
+    attributes:
+      label: Goal
+      description: One sentence, outcome-phrased. What is true after this ships?
+    validations:
+      required: true
+  - type: input
+    id: civilian_summary
+    attributes:
+      label: Civilian summary
+      description: One jargon-free sentence for the in-app Bridge task card ("Make the history page load faster on your phone"). Required for any task open to T0/T1.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Numbered, mechanically checkable. Each maps to a test.
+      placeholder: |
+        1. GET /api/export returns text/csv with columns [ts, type, amount]
+        2. Export button visible on /history for logged-in users (flag: csv_export)
+        3. 10k-row export completes < 3s in CI fixture data
+    validations:
+      required: true
+  - type: textarea
+    id: tests
+    attributes:
+      label: Acceptance tests
+      description: Path(s) under tests/acceptance/issue-<N>/ (committed by spec author, may be failing) + what the private suite will additionally probe (named, not shown).
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: >-
+        The boundary Foreman enforces at G0. Keep the `forge-scope` block and replace the
+        globs with this task's real paths — the grammar is exact (only `in:` / `out:`
+        sections and `- <glob>` items, one per line) and a missing or unparseable block
+        FAILS CLOSED: task PRs are auto-closed and the task is labelled `spec:invalid`
+        until it is repaired. Prose after the block is for humans; only the block binds.
+      value: |
+        ```forge-scope
+        in:
+        - path/to/dir/**
+        - path/to/file.ts
+        out:
+        - contracts/**
+        ```
+
+        DEPS: none new.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context pack
+      description: Repo-relative pointers (modules, ADRs, prior PRs) an agent should read first.
+  - type: dropdown
+    id: size
+    attributes:
+      label: Size class
+      options: ["XS", "S", "M"] # L is never open-claimed; decompose instead
+    validations:
+      required: true
+  - type: dropdown
+    id: tier_floor
+    attributes:
+      label: Tier floor
+      options: ["T0", "T1", "T2"]
+      default: 0
+  - type: dropdown
+    id: reward
+    attributes:
+      label: Reward class
+      options: ["none", "R1", "R2", "R3", "R4"]
+      default: 0

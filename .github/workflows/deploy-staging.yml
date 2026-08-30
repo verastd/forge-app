@@ -1,0 +1,38 @@
+# deploy-staging.yml — every merge to main auto-deploys to staging (no
+# required reviewers on this environment; PRD Appendix C.4 / §4 Stage 7.1).
+#
+# This is a placeholder deploy step. Wiring a real deploy target (Vercel /
+# container platform / etc.), plus the `beta` environment (1 required
+# reviewer) and the `production` environment (both core-team reviewers,
+# 5-min wait timer, cold-account second approval for contracts/chain-
+# touching changes), is tracked in the operator runbook (private core
+# repo).
+
+name: deploy-staging
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4, SHA-pinned
+
+      - uses: ./.github/actions/setup
+
+      - name: Build
+        run: make build
+
+      - name: Deploy (placeholder)
+        run: |
+          echo "deploy placeholder — wire a real staging deploy here."
+          echo "See the operator runbook (private core repo) for: the staging"
+          echo "deploy target, the 'beta' environment (1 required reviewer), and the"
+          echo "'production' environment (both core-team reviewers + 5-min"
+          echo "wait timer, cold-account approval for contracts/chain changes)."

@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "testGlobs": [
+    "tests/**",
+    "apps/api/tests/**",
+    "packages/*/src/**/*.test.ts",
+    "apps/web/**/*.test.*",
+    "apps/web/playwright.config.ts",
+    "**/vitest.config.*",
+    "apps/api/pyproject.toml"
+  ],
+  "protectedPaths": [".github/", "CODEOWNERS", "AGENTS.md"]
+}

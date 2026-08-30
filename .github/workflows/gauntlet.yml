@@ -1,0 +1,197 @@
+# gauntlet.yml — the Gauntlet's unprivileged layer (PRD Appendix D.1).
+#
+# Runs on every fork PR via `pull_request` — NEVER `pull_request_target`,
+# which would hand a privileged context (secrets, write tokens) to
+# untrusted PR code — and on `merge_group`, because GitHub's merge queue
+# re-runs the required checks against the queued merge commit: a check that
+# never reports on a merge_group event stalls the queue forever.
+#
+# Top-level permissions are explicitly empty; every job re-declares the
+# minimum it needs. No secrets are available anywhere in this file.
+#
+# The job ids below (hygiene, tests, security, e2e) are a contract with
+# .github/rulesets/main-protection.json — Actions check runs are named by
+# bare job id (NOT "gauntlet / <job id>"; that form is only the PR tab's
+# display grouping), and the ruleset's required contexts use the bare ids.
+# Renaming either end silently un-protects the branch, so change them
+# together or not at all (the operator runbook in the private core repo
+# carries the verification step).
+#
+# Every action below is pinned to a full commit SHA with its tag in a
+# trailing comment (PRD requirement; semgrep's mutable-action-tag rule
+# enforces it). Dependabot's github-actions ecosystem keeps the SHAs
+# current — update the trailing tag comment with the SHA.
+
+name: gauntlet
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  # Inert on this repo: merge queues are an organization feature and this repo
+  # lives under a personal account, so no merge_group event is ever delivered.
+  # Kept (with every merge_group conditional below) so that moving the repo to
+  # an org is a ruleset-only change — turn the queue on and this file already
+  # reports on it correctly.
+  merge_group:
+    types: [checks_requested]
+
+permissions: {}
+
+concurrency:
+  # merge_group events carry no pull_request.number, so the group falls
+  # through to the queued head sha. Only PR runs are cancellable: cancelling a
+  # merge-group run reports a failed required check and ejects the PR from the
+  # queue.
+  group: gauntlet-${{ github.event.pull_request.number || github.event.merge_group.head_sha || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  hygiene:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read # gitleaks-action lists PR commits to scan (GitHub: x-accepted-github-permissions confirms this is the only scope that call needs)
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7, SHA-pinned (semgrep: mutable-action-tag) — safe: unprivileged context, merge/queue ref
+        with:
+          fetch-depth: 0 # the diff-based gates below need real base history
+      - uses: ./.github/actions/setup # toolchains + frozen-lockfile installs
+
+      # setup-ci already builds packages/*, so lint's cross-package type
+      # resolution (@forge/shared -> packages/shared/dist) is satisfied before
+      # this point and Lint may precede Build.
+      - name: Lint
+        run: make lint
+
+      - name: Build
+        run: make build
+
+      - name: No-new-deps gate (lockfile diff)
+        # PR-only: DEP_APPROVED is derived from a PR label, and merge_group
+        # carries no label context. The gate already ran on the PR that entered
+        # the queue, against identical content.
+        if: github.event_name == 'pull_request'
+        env:
+          # The `deps-approved` label is the machine-readable form of the
+          # issue's DEPS pre-approval; only core-team members can apply it.
+          DEP_APPROVED: ${{ contains(github.event.pull_request.labels.*.name, 'deps-approved') && '1' || '0' }}
+          # Through env + "$VAR", never interpolated straight into the script
+          # (semgrep: run-shell-injection — github.* context values must never
+          # be spliced directly into a run: body).
+          BASE_REF: ${{ github.base_ref }}
+        run: tools/forge/check-lockfile-diff.sh "origin/$BASE_REF"
+
+      - name: Secret scan
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2, SHA-pinned
+        env:
+          # gitleaks-action now hard-requires this even for read-only scanning
+          # (its own breaking-change announcement); contents:read above is
+          # still the only permission it gets — no pull-requests:write, so it
+          # cannot comment on the PR even if it wants to.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  tests:
+    runs-on: ubuntu-latest
+    needs: hygiene
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7, SHA-pinned (semgrep: mutable-action-tag)
+        with:
+          fetch-depth: 0 # coverage + test-mod gates diff against the base
+      - uses: ./.github/actions/setup
+
+      - name: Public suite + acceptance tests (with coverage)
+        run: make test-coverage # includes tests/acceptance/issue-*/
+
+      - name: Coverage gate (changed lines)
+        env:
+          # pull_request diffs against the PR's base branch; merge_group has no
+          # base_ref, only the sha the queue is merging onto.
+          COVERAGE_BASE: ${{ github.event_name == 'merge_group' && github.event.merge_group.base_sha || format('origin/{0}', github.base_ref) }}
+        run: tools/forge/coverage-gate.sh --changed-lines 80 --base "$COVERAGE_BASE"
+
+      - name: Tests-modified alarm (neutral flag — never blocks)
+        # PR-only: the flag is applied to the PR, and by merge-queue time it
+        # has already been raised and reviewed.
+        if: github.event_name == 'pull_request'
+        id: test_mod
+        continue-on-error: true
+        env:
+          # Through env + "$VAR" (semgrep: run-shell-injection) — same
+          # reasoning as the lockfile-diff step above.
+          BASE_REF: ${{ github.base_ref }}
+        run: tools/forge/test-mod-detector.sh "origin/$BASE_REF" # exits 78 -> neutral+flag
+
+      - name: Annotate tests-modified flag
+        if: steps.test_mod.outcome == 'failure'
+        run: |
+          echo "::warning::gauntlet: FLAG G2.4 — existing tests were modified or deleted in this PR, OR the alarm could not be evaluated (exit 78 = tests modified; exit 2 = broken/missing .github/forge-protocol.json manifest — the 'Tests-modified alarm' step log says which). This does not block the Gauntlet, but routes the PR to mandatory extra human scrutiny (flag:test-change)."
+
+      - name: Build artifact for G5/G6
+        id: build_artifact
+        run: |
+          make package
+          echo "sha=$(sha256sum dist.tar | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4, SHA-pinned (semgrep: mutable-action-tag)
+        with:
+          # Artifact names must be unique per run; merge_group has no PR number.
+          name: pr-${{ github.event.pull_request.number || github.event.merge_group.head_sha || github.sha }}-dist
+          path: dist.tar
+
+  security:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read # codeql-action/analyze reads run metadata for status reporting
+      security-events: write # codeql-action/analyze uploads SARIF to the Security tab
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7, SHA-pinned (semgrep: mutable-action-tag)
+
+      - uses: github/codeql-action/init@6f5948dfacef28e207b48d0905cf90c03365536d # v3, SHA-pinned
+        with:
+          languages: javascript-typescript,python
+
+      # Public repo — results upload to the Security tab (code scanning is free
+      # on public repos). If this repo ever goes private without GitHub
+      # Advanced Security, flip back to `upload: never` plus an artifact of the
+      # SARIF: see the private core repo's gauntlet history for that shape.
+      - uses: github/codeql-action/analyze@6f5948dfacef28e207b48d0905cf90c03365536d # v3, SHA-pinned
+        with:
+          upload: always
+
+      - name: Semgrep CI
+        run: pipx run semgrep ci --config auto
+        continue-on-error: false
+        env:
+          SEMGREP_RULES: auto # default ruleset, no custom override
+
+      # Dependency review runs free on public repos. The PR-only guard stays:
+      # a merge_group event has no base/head pair to diff, and this action
+      # errors out there.
+      - uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4 (a BRANCH upstream, not a tag), SHA-pinned
+        if: github.event_name == 'pull_request'
+        with:
+          fail-on-severity: moderate
+
+  e2e:
+    # Browser E2E is part of the advertised full suite (AGENTS.md `make e2e`),
+    # so it is a Gauntlet job rather than a local-only convenience. It needs no
+    # build: playwright.config.ts starts `next dev` per project, with the API
+    # deliberately down — the chromium-demo project asserts the offline demo
+    # path (NEXT_PUBLIC_FORGE_DEMO=1), and chromium-live asserts that live
+    # mode fails closed (no fixture data, no fictional write success).
+    runs-on: ubuntu-latest
+    needs: hygiene # fail fast — don't pay for a browser download on a broken PR
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7, SHA-pinned (semgrep: mutable-action-tag)
+      - uses: ./.github/actions/setup
+
+      - name: Install Playwright chromium
+        run: cd apps/web && pnpm exec playwright install --with-deps chromium
+
+      - name: Browser E2E
+        run: make e2e

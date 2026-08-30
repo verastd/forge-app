@@ -1,0 +1,6 @@
+# apps/web and packages/* are the only JS/TS surfaces in this repo, so they
+# are the whole workspace. apps/api is a Python project managed by uv (see
+# Makefile), which is why it is not listed here.
+packages:
+  - "apps/web"
+  - "packages/*"

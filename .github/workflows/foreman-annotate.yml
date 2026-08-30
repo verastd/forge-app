@@ -1,0 +1,48 @@
+# foreman-annotate.yml — privileged side of the Gauntlet (PRD Appendix D.2).
+#
+# ─────────────────────────────────────────────────────────────────────────
+# INVARIANT: never checkout fork code here. This workflow runs with
+# `pull-requests: write` / `issues: write` and MUST NOT execute anything
+# from the contributor's fork. It only reads workflow_run metadata +
+# artifacts (data, not code) from the already-completed, unprivileged
+# `gauntlet` run, and checks out OUR OWN base-repo default branch to source
+# the decision-brief script.
+# ─────────────────────────────────────────────────────────────────────────
+#
+# PRD requires pinning third-party actions by SHA before production — see
+# the operator runbook (private core repo).
+
+name: foreman-annotate
+
+on:
+  workflow_run:
+    workflows: [gauntlet]
+    types: [completed]
+
+permissions:
+  pull-requests: write # labels + the decision brief comment
+  issues: write
+
+jobs:
+  annotate:
+    runs-on: ubuntu-latest
+    steps:
+      # ── INVARIANT: no actions/checkout of PR head here. Ever. ──
+      - name: "Checkout base repo (main only — safe: base repo, not fork)"
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4, SHA-pinned
+        with:
+          ref: main
+
+      - name: Download gauntlet verdicts (data, not code)
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4, SHA-pinned
+        with:
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: gauntlet-artifacts
+
+      - name: Post/update Gauntlet Decision Brief
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7, SHA-pinned
+        with:
+          script: |
+            const brief = require('./.github/scripts/brief.js'); // from BASE repo checkout above
+            await brief({ github, context, core });

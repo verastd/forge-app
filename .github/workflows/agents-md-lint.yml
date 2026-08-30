@@ -1,0 +1,70 @@
+# agents-md-lint.yml — keeps AGENTS.md's `make <target>` references honest.
+#
+# The PRD calls a stale AGENTS.md a P1: every contributor's agent reads it
+# as ground truth, so a wrong build command silently degrades the entire
+# swarm at once (PRD Appendix A.2 maintenance rule). This job extracts
+# every `make <target>` mention from AGENTS.md, confirms the target exists
+# in the Makefile, and dry-runs it (`make -n`) to catch targets that exist
+# but are broken or renamed.
+
+name: agents-md-lint
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" # weekly, Monday 06:00 UTC
+  pull_request:
+    paths:
+      - "AGENTS.md"
+      - "Makefile"
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4, SHA-pinned
+
+      - name: Verify make targets referenced in AGENTS.md exist and run
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ ! -f AGENTS.md ]; then
+            echo "::warning::AGENTS.md not found yet — skipping drift check (expected pre-launch; a later pass adds it)."
+            exit 0
+          fi
+
+          if [ ! -f Makefile ]; then
+            echo "::error::Makefile not found — cannot verify AGENTS.md against it."
+            exit 1
+          fi
+
+          mapfile -t targets < <(grep -oE '`make [a-zA-Z0-9_-]+`' AGENTS.md | tr -d '`' | awk '{print $2}' | sort -u)
+
+          if [ "${#targets[@]}" -eq 0 ]; then
+            echo "No \`make <target>\` references found in AGENTS.md — nothing to verify."
+            exit 0
+          fi
+
+          fail=0
+          for target in "${targets[@]}"; do
+            echo "── checking target: ${target} ──"
+            if ! grep -qE "^${target}:" Makefile; then
+              echo "::error::AGENTS.md references \`make ${target}\`, but Makefile has no \`${target}:\` rule."
+              fail=1
+              continue
+            fi
+            if ! make -n "${target}" > /dev/null; then
+              echo "::error::\`make -n ${target}\` failed — target exists but is broken."
+              fail=1
+            fi
+          done
+
+          if [ "${fail}" -ne 0 ]; then
+            echo "::error::AGENTS.md has drifted from the Makefile. See errors above (PRD: stale AGENTS.md is P1)."
+            exit 1
+          fi
+
+          echo "AGENTS.md make-target references are all valid."

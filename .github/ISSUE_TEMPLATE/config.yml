@@ -1,0 +1,14 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Feature Ideas
+    url: https://github.com/verastd/forge-app/discussions/categories/feature-ideas
+    about: Suggest a new feature or improvement. Triaged weekly into the backlog.
+  - name: Bug Reports (discussion)
+    url: https://github.com/verastd/forge-app/discussions/categories/bug-reports
+    about: Not sure it's a confirmed bug, or don't have full repro steps yet? Start here instead of the bug form.
+  - name: Polish
+    url: https://github.com/verastd/forge-app/discussions/categories/polish
+    about: Small rough edges, wording, UX nits — anything that isn't broken but could be better.
+  - name: Report a security vulnerability
+    url: https://github.com/verastd/forge-app/security/advisories/new
+    about: Please use private vulnerability reporting — never a public issue.

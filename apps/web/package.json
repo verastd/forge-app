@@ -1,0 +1,32 @@
+{
+  "name": "@forge/web",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The beta app plus the Bridge — the in-app Contribute surface for people who will never see GitHub (PRD §4.9, Appendix I).",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@forge/flags": "workspace:*",
+    "@forge/shared": "workspace:*",
+    "next": "^15",
+    "react": "^19",
+    "react-dom": "^19"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9",
+    "@playwright/test": "~1.56.0",
+    "@types/node": "^22",
+    "@types/react": "^19",
+    "eslint": "^9",
+    "typescript": "~5.6",
+    "typescript-eslint": "^8"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

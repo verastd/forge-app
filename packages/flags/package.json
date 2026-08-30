@@ -1,0 +1,55 @@
+{
+  "name": "@forge/flags",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Feature-flag client for FORGE — server-safe core + optional React hooks (PRD Appendix A.1, H.2).",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./react": {
+      "types": "./dist/react.d.ts",
+      "import": "./dist/react.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint src",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@forge/shared": "workspace:*"
+  },
+  "peerDependencies": {
+    "react": "^19"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@eslint/js": "^9",
+    "@types/node": "^22",
+    "@types/react": "^19",
+    "@vitest/coverage-v8": "^2.1",
+    "eslint": "^9",
+    "react": "~19",
+    "typescript": "~5.6",
+    "typescript-eslint": "^8",
+    "vitest": "^2.1"
+  }
+}
