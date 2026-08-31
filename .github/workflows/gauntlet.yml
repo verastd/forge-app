@@ -82,7 +82,7 @@ jobs:
         run: tools/forge/check-lockfile-diff.sh "origin/$BASE_REF"
 
       - name: Secret scan
-        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2, SHA-pinned
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v2, SHA-pinned
         env:
           # gitleaks-action now hard-requires this even for read-only scanning
           # (its own breaking-change announcement); contents:read above is
