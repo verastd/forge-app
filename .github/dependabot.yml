@@ -1,16 +1,37 @@
+# Dependabot: ALERTS AND SECURITY UPDATES ONLY — version-update PRs are off.
+#
+# `open-pull-requests-limit: 0` disables version-update PRs for an ecosystem
+# while keeping it configured, so re-enabling later is a one-line change.
+# This is deliberate, twice over (operator decision, after two unprompted
+# PR floods):
+#   - Version bumps here are operator-initiated events: raise a limit, or
+#     run Insights -> Dependency graph -> Dependabot -> "Check for updates"
+#     when YOU want bumps — they land as normal PRs through the Gauntlet.
+#   - A version-bump PR cannot merge anyway without a core-applied
+#     `deps-approved` label (the G1.4 lockfile gate), so unsolicited bumps
+#     are pure noise: they sit red until a human does the judgment the
+#     label represents.
+# Dependabot ALERTS and SECURITY UPDATES are repo settings, not governed by
+# these limits: security-update PRs (real CVEs only) still open if that
+# setting is on. That narrow channel is the compensating control the
+# security posture leans on — leave it on unless the operator says
+# otherwise.
 version: 2
 updates:
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 0
 
   - package-ecosystem: "npm"
     directory: "/"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 0
 
   - package-ecosystem: "pip"
     directory: "/apps/api"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 0
