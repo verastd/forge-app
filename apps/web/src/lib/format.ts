@@ -45,6 +45,18 @@ export function formatTime(iso: string): string {
   });
 }
 
+/** Upland chain timestamps arrive without a timezone suffix but are UTC. */
+export function formatChainTimestamp(ts: string): string {
+  return formatTimestamp(/[Zz]$|[+-]\d\d:\d\d$/.test(ts) ? ts : `${ts}Z`);
+}
+
+const UPX_FORMAT = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 });
+
+/** "15,000 UPX" — whole numbers; Upland prices don't carry meaningful cents. */
+export function formatUpx(amount: number): string {
+  return `${UPX_FORMAT.format(amount)} UPX`;
+}
+
 const AMOUNT_FORMAT = new Intl.NumberFormat(undefined, {
   minimumFractionDigits: 2,
   maximumFractionDigits: 2,

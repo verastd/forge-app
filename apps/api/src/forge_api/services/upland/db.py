@@ -37,7 +37,10 @@ SCHEMA_STATEMENTS: list[str] = [
     "CREATE INDEX IF NOT EXISTS idx_actions_action ON actions(action_name)",
     "CREATE INDEX IF NOT EXISTS idx_actions_category ON actions(category)",
     "CREATE INDEX IF NOT EXISTS idx_actions_property ON actions(property_id)",
-    "CREATE INDEX IF NOT EXISTS idx_actions_actor ON actions(actor)",
+    # Covering index: active_accounts group-by reads (actor, price_upx) only,
+    # and a plain actor index sent it back to the table for every one of
+    # millions of rows (128s at 2M actions; ~0.5s covered).
+    "CREATE INDEX IF NOT EXISTS idx_actions_actor_price ON actions(actor, price_upx)",
     """CREATE TABLE IF NOT EXISTS scrape_progress (
     key TEXT PRIMARY KEY,
     start_block INTEGER,

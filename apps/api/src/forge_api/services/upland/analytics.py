@@ -25,7 +25,13 @@ from forge_api.models import (
     UplandStatsOverview,
 )
 from forge_api.services.errors import ApiError
-from forge_api.services.upland.action_codes import ACTION_MAP, SALE_ACTIONS, VOLUME_ACTIONS
+from forge_api.services.upland.action_codes import (
+    ACTION_MAP,
+    CONTRACT_PLAYUPLAND,
+    CONTRACT_UPX_TOKEN,
+    SALE_ACTIONS,
+    VOLUME_ACTIONS,
+)
 from forge_api.services.upland.db import _db
 from forge_api.services.upland.hyperion import BLOCKS_PER_DAY, HyperionClient
 from forge_api.services.upland.storage import gcs_configured
@@ -274,12 +280,15 @@ async def top_properties(limit: int = 50, sort: PropertySort = "sales") -> Uplan
 
 
 async def active_accounts(limit: int = 50) -> list[ActiveAccount]:
+    """Most active player accounts. The contract accounts themselves are excluded:
+    playuplandme authors the majority of all actions (fees, yields, config), so
+    counting it would bury every real player under the machine."""
     async with _db() as db:
         cursor = await db.execute(
             "SELECT actor, COUNT(*) AS tx_count, COALESCE(SUM(price_upx), 0) AS volume "
-            "FROM actions WHERE actor IS NOT NULL GROUP BY actor "
+            "FROM actions WHERE actor IS NOT NULL AND actor NOT IN (?, ?) GROUP BY actor "
             "ORDER BY tx_count DESC, actor LIMIT ?",
-            (max(0, min(limit, MAX_PAGE)),),
+            (CONTRACT_PLAYUPLAND, CONTRACT_UPX_TOKEN, max(0, min(limit, MAX_PAGE))),
         )
         rows = await cursor.fetchall()
         await cursor.close()
@@ -349,7 +358,14 @@ async def list_properties(limit: int = 100, offset: int = 0) -> UplandPropertyLi
 
 def action_codes() -> dict[str, dict[str, str | float]]:
     """The obfuscated-code -> meaning table."""
-    return {code: dict(info) for code, info in ACTION_MAP.items()}
+    return {
+        code: {
+            "meaning": info["meaning"],
+            "confidence": info["confidence"],
+            "category": info["category"],
+        }
+        for code, info in ACTION_MAP.items()
+    }
 
 
 async def chain_info(client: HyperionClient) -> ChainInfo:
@@ -388,7 +404,8 @@ async def estimate(client: HyperionClient, days: int = 90) -> UplandEstimate:
 
 async def iter_export_csv(kind: ExportType) -> AsyncIterator[str]:
     """Stream the actions table (or just its priced sales) as CSV, oldest first."""
-    where, params = "", ()
+    where = ""
+    params: tuple[str, ...] = ()
     if kind == "sales":
         where = f"WHERE action_name IN ({_marks(SALE_ACTIONS)}) AND price_upx IS NOT NULL"
         params = SALE_ACTIONS
