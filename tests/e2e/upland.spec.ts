@@ -19,9 +19,9 @@ async function serve(page: Page, pattern: string, body: unknown): Promise<void> 
 const OVERVIEW = {
   totalActions: 1400000,
   dateRange: { min: '2026-06-21T00:00:00.000', max: '2026-09-18T12:34:56.000' },
-  byCategory: { market: 800000, mint: 100000 },
+  byCategory: { trade: 800000, mint: 100000 },
   byType: [
-    { actionName: 'n5', actionMeaning: 'buy_property_secondary', category: 'market', count: 500000 },
+    { actionName: 'n5', actionMeaning: 'buy_property_secondary', category: 'trade', count: 500000 },
   ],
   totalProperties: 250000,
 };
@@ -34,7 +34,7 @@ const SALE_ACTION = {
   contract: 'playuplandme',
   actionName: 'n5',
   actionMeaning: 'buy_property_secondary',
-  category: 'market',
+  category: 'trade',
   actor: 'upland-alice',
   propertyId: '1234567890123',
   priceUpx: 15000,
@@ -73,7 +73,7 @@ test.describe('the Upland data app', () => {
 
     await expect(page.getByText('1,400,000')).toBeVisible();
     await expect(page.getByText('250,000')).toBeVisible();
-    await expect(page.getByRole('cell', { name: 'market' })).toBeVisible();
+    await expect(page.getByRole('cell', { name: 'trade' })).toBeVisible();
   });
 
   test('the actions explorer renders served rows and their filters', async ({ page }) => {
@@ -92,7 +92,7 @@ test.describe('the Upland data app', () => {
     // Category chips come from the served overview, plus the fixed "All".
     const filters = page.getByRole('group', { name: 'Filter by category' });
     await expect(filters.getByRole('button', { name: 'All' })).toBeVisible();
-    await expect(filters.getByRole('button', { name: 'market' })).toBeVisible();
+    await expect(filters.getByRole('button', { name: 'trade' })).toBeVisible();
     await expect(filters.getByRole('button', { name: 'mint' })).toBeVisible();
   });
 

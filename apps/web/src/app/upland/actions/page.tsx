@@ -20,9 +20,11 @@ import type { UplandAction } from '../../../lib/upland-api';
 
 const PAGE_SIZE = 50;
 
-/** Category → chip tone; anything unmapped reads neutral. */
+/** Category → chip tone (the real vocabulary of action_codes.py's ACTION_MAP:
+ * trade, mint, earnings, spark, fee, user, config, unknown). Value wears the
+ * gold; anything unmapped reads neutral. */
 const CATEGORY_TONE: Record<string, ChipTone> = {
-  market: 'accent',
+  trade: 'accent',
   mint: 'ok',
   earnings: 'info',
   spark: 'info',
