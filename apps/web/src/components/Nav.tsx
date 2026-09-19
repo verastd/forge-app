@@ -12,20 +12,40 @@ const LINKS: ReadonlyArray<{ href: string; label: string }> = [
   { href: '/contribute/profile', label: 'Profile' },
 ];
 
+/** The mark: one parcel on the map, with a lot being built on it. */
+function ParcelMark() {
+  return (
+    <svg className="wordmark-mark" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+      <path d="M16 3 29 10.5 16 18 3 10.5Z" fill="#ffc23d" />
+      <path d="M3 10.5 16 18v11L3 21.5Z" fill="#c98f12" />
+      <path d="M29 10.5 16 18v11l13-7.5Z" fill="#8a600a" />
+      <path d="M16 7.4 21.6 10.6 16 13.8 10.4 10.6Z" fill="#060a12" />
+    </svg>
+  );
+}
+
 export function Nav() {
   const pathname = usePathname();
   const degraded = useDegraded();
 
-  const isCurrent = (href: string): boolean =>
-    href === '/contribute/profile'
-      ? pathname === href
-      : pathname === href || pathname.startsWith(`${href}/`);
+  // Profile lives under /contribute, so the Contribute tab stands down there:
+  // exactly one tab is ever current.
+  const isCurrent = (href: string): boolean => {
+    if (href === '/contribute/profile') {
+      return pathname === href;
+    }
+    if (href === '/contribute' && pathname === '/contribute/profile') {
+      return false;
+    }
+    return pathname === href || pathname.startsWith(`${href}/`);
+  };
 
   return (
     <header className="nav">
       <div className="nav-inner">
-        <Link href="/" className="wordmark">
-          FORGE
+        <Link href="/" className="wordmark" aria-label="FORGE home">
+          <ParcelMark />
+          <span className="wordmark-text">FORGE</span>
         </Link>
         <nav aria-label="Main">
           <ul className="nav-links">

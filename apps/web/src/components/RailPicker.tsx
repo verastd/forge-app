@@ -33,6 +33,7 @@ export function RailPicker({
               type="button"
               className="rail"
               disabled={disabled || busyRail !== null}
+              aria-busy={busy || undefined}
               onClick={() => {
                 onPick(rail);
               }}
@@ -43,7 +44,16 @@ export function RailPicker({
                   {'★'.repeat(info.stars)}
                 </span>
               </span>
-              <span className="rail-grade">{busy ? 'Handing it over…' : info.grade}</span>
+              <span className="rail-grade">
+                {busy ? (
+                  <>
+                    <span className="spinner" aria-hidden="true" />
+                    Handing it over…
+                  </>
+                ) : (
+                  info.grade
+                )}
+              </span>
               <span className="rail-note">{info.note}</span>
             </button>
           </li>

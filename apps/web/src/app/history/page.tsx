@@ -7,7 +7,7 @@
  * Fetches on mount so `next build` never needs the API up.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 // Client components import the `/react` subpath only: `@forge/flags` itself is
 // the server entry (it owns `loadFlags`, and with it node's filesystem APIs).
 import { useFlag } from '@forge/flags/react';
@@ -70,6 +70,29 @@ export default function HistoryPage() {
   // the export exactly as a switched-off flag would.
   const csvExport = useFlag('csv_export', demoFlagFallback());
 
+  // The export is a plain download link by design (PRD H.2), so the browser
+  // owns the transfer. What we can say truthfully is that the click landed and
+  // the file was handed to the browser; the button says exactly that.
+  const [exportSent, setExportSent] = useState(false);
+  const exportTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (exportTimer.current !== null) {
+        clearTimeout(exportTimer.current);
+      }
+    },
+    [],
+  );
+  const onExportClick = useCallback(() => {
+    setExportSent(true);
+    if (exportTimer.current !== null) {
+      clearTimeout(exportTimer.current);
+    }
+    exportTimer.current = setTimeout(() => {
+      setExportSent(false);
+    }, 3500);
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -123,11 +146,17 @@ export default function HistoryPage() {
               href={exportUrl}
               download
               title={`Columns: ${EXPORT_COLUMNS.join(', ')}`}
+              onClick={onExportClick}
             >
               Export CSV
             </a>
           )}
         </div>
+        {exportSent && (
+          <p className="faint note-ok" role="status" style={{ marginTop: 10 }}>
+            ✓ Sent to your browser. Check your downloads for the CSV.
+          </p>
+        )}
         {degraded && (
           <p className="faint" style={{ marginTop: 10 }}>
             Showing a local demo copy — we could not reach the FORGE service.
@@ -136,8 +165,21 @@ export default function HistoryPage() {
       </div>
 
       {loading ? (
-        <div className="table-wrap">
-          <div className="empty">Loading your history…</div>
+        <div className="table-wrap" aria-busy="true">
+          <div className="skeleton-row">
+            <p className="loading-line">
+              <span className="spinner" aria-hidden="true" />
+              Loading your history…
+            </p>
+          </div>
+          {[62, 48, 70, 54, 66].map((width) => (
+            <div key={width} className="skeleton-row">
+              <div className="skeleton" style={{ width: '18%' }} />
+              <div className="skeleton" style={{ width: '10%' }} />
+              <div className="skeleton" style={{ width: '12%' }} />
+              <div className="skeleton" style={{ width: `${width - 30}%` }} />
+            </div>
+          ))}
         </div>
       ) : failed ? (
         <div className="card stack" role="alert">

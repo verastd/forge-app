@@ -29,7 +29,7 @@ export function StatusStepper({ status }: { status: BridgeStatus }) {
               aria-current={index === currentIndex ? 'step' : undefined}
             >
               <span className="step-dot" aria-hidden="true">
-                {index < currentIndex ? '✓' : ''}
+                {index < currentIndex ? <span>✓</span> : null}
               </span>
               <span className="step-label">{STAGE_LABEL[stage]}</span>
               {index < BRIDGE_STAGES.length - 1 && <span className="step-bar" aria-hidden="true" />}

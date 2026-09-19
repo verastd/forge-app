@@ -233,7 +233,11 @@ export default function TaskDetailPage() {
   if (loading) {
     return (
       <main className="page">
-        <div className="card stack">
+        <div className="card stack" aria-busy="true">
+          <p className="loading-line">
+            <span className="spinner" aria-hidden="true" />
+            Opening the task…
+          </p>
           <div className="skeleton" style={{ width: '55%' }} />
           <div className="skeleton" style={{ width: '80%' }} />
           <div className="skeleton" style={{ width: '35%' }} />
@@ -344,7 +348,9 @@ export default function TaskDetailPage() {
                 className="btn btn-primary btn-lg"
                 onClick={onClaim}
                 disabled={claiming || claimedByOther}
+                aria-busy={claiming || undefined}
               >
+                {claiming && <span className="spinner" aria-hidden="true" />}
                 {claiming ? 'Claiming…' : 'Claim this'}
               </button>
               {claimedByOther && (
@@ -421,7 +427,10 @@ export default function TaskDetailPage() {
                 back in a few minutes.
               </p>
             ) : (
-              <p className="muted">Checking…</p>
+              <p className="loading-line">
+                <span className="spinner" aria-hidden="true" />
+                Checking where it is…
+              </p>
             )
           ) : (
             <>
@@ -440,7 +449,9 @@ export default function TaskDetailPage() {
               className="btn"
               onClick={onRelayFeedback}
               disabled={relaying}
+              aria-busy={relaying || undefined}
             >
+              {relaying && <span className="spinner" aria-hidden="true" />}
               {relaying ? 'Fetching the notes…' : 'Send the notes back to your agent'}
             </button>
             <span className="faint">

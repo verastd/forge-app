@@ -45,8 +45,12 @@ export function CopyBox({ label, text }: { label: string; text: string }) {
       <div className="copybox-head">
         <span className="copybox-label">{label}</span>
         <span className="spacer" />
-        <button type="button" className="btn btn-sm" onClick={copy}>
-          {copied ? 'Copied' : 'Copy'}
+        <button
+          type="button"
+          className={copied ? 'btn btn-sm copybox-copied' : 'btn btn-sm'}
+          onClick={copy}
+        >
+          {copied ? '✓ Copied' : 'Copy'}
         </button>
       </div>
       <pre>{text}</pre>

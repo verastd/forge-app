@@ -7,7 +7,7 @@ from forge_api.main import DEFAULT_CORS_ORIGINS, allowed_origins
 def test_health_reports_ok_and_version(client: TestClient) -> None:
     response = client.get("/api/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok", "version": "0.1.0"}
+    assert response.json() == {"status": "ok", "version": "0.2.0"}
 
 
 @pytest.mark.parametrize("origin", ["http://localhost:3000", "http://localhost:3100"])

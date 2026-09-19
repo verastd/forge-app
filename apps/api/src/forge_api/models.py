@@ -55,6 +55,7 @@ class FlagConfig(BaseModel):
 
     csv_export: bool
     contribute_bridge: bool
+    upland_data: bool
 
 
 class TaskCard(BaseModel):
@@ -148,3 +149,157 @@ class ContributorProfile(BaseModel):
 class HealthResponse(BaseModel):
     status: Literal["ok"]
     version: str
+
+
+# ---------------------------------------------------------------------------
+# Upland data app (ledger.upland.me) — gated by the `upland_data` flag
+# ---------------------------------------------------------------------------
+
+
+class UplandAction(BaseModel):
+    """One decoded `playuplandme` chain action."""
+
+    globalSequence: int
+    ts: str  # ISO 8601 timestamp
+    blockNum: int
+    trxId: str
+    contract: str
+    actionName: str
+    actionMeaning: str | None = None
+    category: str | None = None
+    actor: str | None = None
+    propertyId: str | None = None
+    priceUpx: float | None = None
+    fromAccount: str | None = None
+    toAccount: str | None = None
+
+
+class UplandActionList(BaseModel):
+    items: list[UplandAction]
+    total: int
+    hasMore: bool
+
+
+class UplandProperty(BaseModel):
+    propertyId: str
+    address: str | None = None
+    city: str | None = None
+    firstSeenBlock: int | None = None
+    firstSeenTs: str | None = None
+    mintPriceUpx: float | None = None
+    lastSalePriceUpx: float | None = None
+    lastSaleTs: str | None = None
+    totalSales: int = 0
+    totalListings: int = 0
+
+
+class UplandPropertyList(BaseModel):
+    items: list[UplandProperty]
+    total: int
+
+
+class SalesVolumeDay(BaseModel):
+    date: str  # YYYY-MM-DD
+    count: int
+    volumeUpx: float
+    avgPrice: float
+    minPrice: float
+    maxPrice: float
+
+
+class TimeSeriesPoint(BaseModel):
+    bucket: str
+    count: int
+    volume: float
+
+
+class PriceDistributionBucket(BaseModel):
+    range: str
+    count: int
+    avgPrice: float
+
+
+class ActionDistributionEntry(BaseModel):
+    actionName: str
+    actionMeaning: str | None = None
+    category: str | None = None
+    count: int
+
+
+class ActiveAccount(BaseModel):
+    actor: str
+    txCount: int
+    volumeUpx: float
+
+
+class ChainInfo(BaseModel):
+    headBlockNum: int
+    headBlockTime: str
+    chainId: str
+    blocksPerDay: int
+
+
+class UplandDateRange(BaseModel):
+    min: str | None = None
+    max: str | None = None
+
+
+class UplandStatsOverview(BaseModel):
+    totalActions: int
+    dateRange: UplandDateRange
+    byCategory: dict[str, int]
+    byType: list[ActionDistributionEntry]
+    totalProperties: int
+
+
+class UplandHealth(BaseModel):
+    """Scraper DB health and row counts."""
+
+    status: Literal["ok"]
+    actions: int
+    properties: int
+    latestBlock: int | None = None
+    gcsConfigured: bool
+
+
+class UplandEstimate(BaseModel):
+    """Estimated action count for a timeframe; `relation` "gte" means the true count is higher."""
+
+    estimatedActions: int
+    relation: Literal["eq", "gte"]
+    startBlock: int
+    endBlock: int
+    days: int
+
+
+class ScrapeRequest(BaseModel):
+    """Either `days` or both `startBlock` and `endBlock` (validated by the scraper service)."""
+
+    days: int | None = Field(default=None, ge=1, le=365)
+    startBlock: int | None = Field(default=None, ge=1)
+    endBlock: int | None = Field(default=None, ge=1)
+    chunkBlocks: int = Field(default=100_000, ge=1)
+
+
+class ScrapeStatus(BaseModel):
+    running: bool
+    phase: str  # idle | starting | scraping | complete | cancelled | error
+    currentBlock: int | None = None
+    fetched: int = 0
+    totalActions: int = 0
+    startBlock: int | None = None
+    endBlock: int | None = None
+    error: str | None = None
+    lastResult: dict[str, int] | None = None
+
+
+class GcsSyncResult(BaseModel):
+    synced: bool
+    uploadedFiles: list[str]
+    errors: list[str]
+
+
+class GcsStatus(BaseModel):
+    configured: bool
+    running: bool
+    lastResult: GcsSyncResult | None = None

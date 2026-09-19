@@ -42,7 +42,11 @@ ENV_PATH = "FORGE_FLAGS_PATH"
 CONFIG_RELATIVE_PATH = Path("config") / "flags.json"
 
 #: Every flag OFF — see the module docstring for why.
-DEFAULT_FLAGS: dict[str, bool] = {"csv_export": False, "contribute_bridge": False}
+DEFAULT_FLAGS: dict[str, bool] = {
+    "csv_export": False,
+    "contribute_bridge": False,
+    "upland_data": False,
+}
 
 logger = logging.getLogger(__name__)
 

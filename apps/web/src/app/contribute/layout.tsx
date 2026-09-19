@@ -27,7 +27,11 @@ export default function ContributeLayout({ children }: { children: ReactNode }) 
   if (loading && !demo) {
     return (
       <main className="page">
-        <div className="card stack">
+        <div className="card stack" aria-busy="true">
+          <p className="loading-line">
+            <span className="spinner" aria-hidden="true" />
+            Opening the Bridge…
+          </p>
           <div className="skeleton" style={{ width: '45%' }} />
           <div className="skeleton" style={{ width: '70%' }} />
         </div>

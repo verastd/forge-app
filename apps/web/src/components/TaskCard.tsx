@@ -18,6 +18,14 @@ export function TaskCard({ task }: { task: TaskCardType }) {
       className={`card card-link ${claimed ? 'task-card-claimed' : ''}`}
     >
       <article className="task-card">
+        <p className="deed-head">
+          <span className="deed-id">Deed · #{String(task.id).padStart(4, '0')}</span>
+          {claimed ? (
+            <span className="deed-held">Held</span>
+          ) : (
+            <span className="deed-open">Open</span>
+          )}
+        </p>
         <div>
           <h3 className="task-summary">{task.civilianSummary}</h3>
           <p className="task-title">{task.title}</p>

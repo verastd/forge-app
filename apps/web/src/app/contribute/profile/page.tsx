@@ -98,7 +98,11 @@ export default function ProfilePage() {
   if (loading || profile === null) {
     return (
       <main className="page">
-        <div className="card stack">
+        <div className="card stack" aria-busy="true">
+          <p className="loading-line">
+            <span className="spinner" aria-hidden="true" />
+            Loading your record…
+          </p>
           <div className="skeleton" style={{ width: '35%' }} />
           <div className="skeleton" style={{ width: '60%' }} />
         </div>

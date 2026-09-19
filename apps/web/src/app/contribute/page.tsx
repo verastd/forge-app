@@ -97,8 +97,12 @@ export default function ContributePage() {
       </div>
 
       {loading ? (
-        <div className="card">
+        <div className="card" aria-busy="true">
           <div className="stack">
+            <p className="loading-line">
+              <span className="spinner" aria-hidden="true" />
+              Loading the task board…
+            </p>
             <div className="skeleton" style={{ width: '40%' }} />
             <div className="skeleton" style={{ width: '70%' }} />
             <div className="skeleton" style={{ width: '55%' }} />

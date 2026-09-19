@@ -1,4 +1,5 @@
 {
   "csv_export": true,
-  "contribute_bridge": true
+  "contribute_bridge": true,
+  "upland_data": true
 }
