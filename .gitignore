@@ -13,6 +13,11 @@ dist.tar
 playwright-report/
 test-results/
 *.db
+*.db-wal
+*.db-shm
+
+# Scraped Upland chain data (multi-GB SQLite; never committed)
+apps/api/data/
 
 # Python coverage artifacts (make test-coverage)
 apps/api/.coverage
