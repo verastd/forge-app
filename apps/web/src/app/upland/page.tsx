@@ -1,18 +1,17 @@
 'use client';
 
 /**
- * Upland Data — Private Beta. A stub: one summary of what the scraped data set
- * holds (total actions, date range, categories), fetched on mount so
- * `next build` never needs the API up.
+ * Upland Data — Private Beta, the overview tab: one summary of what the scraped
+ * data set holds (total actions, date range, categories), fetched on mount so
+ * `next build` never needs the API up. The `upland_data` gate lives in
+ * `./layout.tsx`; by the time this renders, the flag is on.
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { useFlag } from '@forge/flags/react';
 
 import { Chip } from '../../components/Chip';
 import { DataTable } from '../../components/DataTable';
 import type { Column } from '../../components/DataTable';
-import { demoFlagFallback } from '../../lib/flags';
 import { formatDate } from '../../lib/format';
 import { fetchStatsOverview, uplandExportUrl } from '../../lib/upland-api';
 import type { UplandStatsOverview } from '../../lib/upland-api';
@@ -45,12 +44,7 @@ export default function UplandPage() {
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
 
-  const enabled = useFlag('upland_data', demoFlagFallback());
-
   useEffect(() => {
-    if (!enabled) {
-      return;
-    }
     let cancelled = false;
     setLoading(true);
     setFailed(false);
@@ -73,7 +67,7 @@ export default function UplandPage() {
     return () => {
       cancelled = true;
     };
-  }, [enabled, attempt]);
+  }, [attempt]);
 
   const retry = useCallback(() => {
     setAttempt((current) => current + 1);
@@ -90,19 +84,12 @@ export default function UplandPage() {
           <h1 className="page-title">Upland Data — Private Beta</h1>
           <p className="lede">What the Upland blockchain data set holds right now.</p>
         </div>
-        {enabled && (
-          <a className="btn btn-primary" href={uplandExportUrl('actions')} download>
-            Export CSV
-          </a>
-        )}
+        <a className="btn btn-primary" href={uplandExportUrl('actions')} download>
+          Export CSV
+        </a>
       </div>
 
-      {!enabled ? (
-        <div className="card stack">
-          <h2 className="section-title">Not switched on</h2>
-          <p className="muted">Upland Data is in private beta and is not enabled for you yet.</p>
-        </div>
-      ) : loading ? (
+      {loading ? (
         <div className="table-wrap">
           <div className="empty">Loading the data summary…</div>
         </div>

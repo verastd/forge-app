@@ -8,6 +8,7 @@ import { useDegraded } from '../lib/degraded';
 
 const LINKS: ReadonlyArray<{ href: string; label: string }> = [
   { href: '/history', label: 'History' },
+  { href: '/upland', label: 'Upland' },
   { href: '/contribute', label: 'Contribute' },
   { href: '/contribute/profile', label: 'Profile' },
 ];

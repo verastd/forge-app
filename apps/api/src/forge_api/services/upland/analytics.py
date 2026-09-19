@@ -349,7 +349,14 @@ async def list_properties(limit: int = 100, offset: int = 0) -> UplandPropertyLi
 
 def action_codes() -> dict[str, dict[str, str | float]]:
     """The obfuscated-code -> meaning table."""
-    return {code: dict(info) for code, info in ACTION_MAP.items()}
+    return {
+        code: {
+            "meaning": info["meaning"],
+            "confidence": info["confidence"],
+            "category": info["category"],
+        }
+        for code, info in ACTION_MAP.items()
+    }
 
 
 async def chain_info(client: HyperionClient) -> ChainInfo:
@@ -388,7 +395,8 @@ async def estimate(client: HyperionClient, days: int = 90) -> UplandEstimate:
 
 async def iter_export_csv(kind: ExportType) -> AsyncIterator[str]:
     """Stream the actions table (or just its priced sales) as CSV, oldest first."""
-    where, params = "", ()
+    where = ""
+    params: tuple[str, ...] = ()
     if kind == "sales":
         where = f"WHERE action_name IN ({_marks(SALE_ACTIONS)}) AND price_upx IS NOT NULL"
         params = SALE_ACTIONS

@@ -73,7 +73,9 @@ class BlobStore(Protocol):
 
 class GcsStore:
     def __init__(self) -> None:
-        from google.cloud import storage
+        # google-cloud-storage ships no py.typed marker, so mypy --strict
+        # cannot analyze it; the Protocol above is the typed boundary.
+        from google.cloud import storage  # type: ignore[import-untyped]
 
         self._client = storage.Client()
 
