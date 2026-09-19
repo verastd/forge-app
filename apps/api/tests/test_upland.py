@@ -293,6 +293,17 @@ def test_action_distribution_and_active_accounts(seeded: None) -> None:
     assert accounts[0].actor == "alice" and accounts[0].txCount >= 5
 
 
+def test_active_accounts_exclude_the_contract_itself(seeded: None) -> None:
+    # playuplandme authors most actions on chain (fees, yields, config); the
+    # "most active accounts" board is about players, not the machine.
+    for seq, name in enumerate(["n31", "n41", "n43"], start=90):
+        run(store_and_update([process_action(raw_action(seq, name, actor="playuplandme"))]))
+    accounts = run(analytics.active_accounts())
+    actors = {a.actor for a in accounts}
+    assert "playuplandme" not in actors
+    assert "alice" in actors
+
+
 def test_top_properties_and_lookup(seeded: None) -> None:
     by_sales = run(analytics.top_properties(10, "sales"))
     assert by_sales.items[0].propertyId == PROPERTY

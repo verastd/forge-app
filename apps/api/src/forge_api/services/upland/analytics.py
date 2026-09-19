@@ -25,7 +25,13 @@ from forge_api.models import (
     UplandStatsOverview,
 )
 from forge_api.services.errors import ApiError
-from forge_api.services.upland.action_codes import ACTION_MAP, SALE_ACTIONS, VOLUME_ACTIONS
+from forge_api.services.upland.action_codes import (
+    ACTION_MAP,
+    CONTRACT_PLAYUPLAND,
+    CONTRACT_UPX_TOKEN,
+    SALE_ACTIONS,
+    VOLUME_ACTIONS,
+)
 from forge_api.services.upland.db import _db
 from forge_api.services.upland.hyperion import BLOCKS_PER_DAY, HyperionClient
 from forge_api.services.upland.storage import gcs_configured
@@ -274,12 +280,15 @@ async def top_properties(limit: int = 50, sort: PropertySort = "sales") -> Uplan
 
 
 async def active_accounts(limit: int = 50) -> list[ActiveAccount]:
+    """Most active player accounts. The contract accounts themselves are excluded:
+    playuplandme authors the majority of all actions (fees, yields, config), so
+    counting it would bury every real player under the machine."""
     async with _db() as db:
         cursor = await db.execute(
             "SELECT actor, COUNT(*) AS tx_count, COALESCE(SUM(price_upx), 0) AS volume "
-            "FROM actions WHERE actor IS NOT NULL GROUP BY actor "
+            "FROM actions WHERE actor IS NOT NULL AND actor NOT IN (?, ?) GROUP BY actor "
             "ORDER BY tx_count DESC, actor LIMIT ?",
-            (max(0, min(limit, MAX_PAGE)),),
+            (CONTRACT_PLAYUPLAND, CONTRACT_UPX_TOKEN, max(0, min(limit, MAX_PAGE))),
         )
         rows = await cursor.fetchall()
         await cursor.close()
