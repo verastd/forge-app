@@ -16,7 +16,25 @@ const nextConfig = {
   // No webpack aliasing is needed for `@forge/flags`: its browser-reachable
   // modules (`./core`, `./react`) import no node built-ins, and `loadFlags`
   // pulls `node:fs/promises`/`node:path` in dynamically from server code only.
-  transpilePackages: ['@forge/shared', '@forge/flags'],
+  // `@forge/auth` imports none at all (its eslint config enforces it), because
+  // Edge middleware imports it.
+  transpilePackages: ['@forge/shared', '@forge/flags', '@forge/auth'],
+
+  // Baseline response headers on every route: no framing (clickjacking on the
+  // sign-in and account pages), no MIME sniffing, and no full URLs (the OAuth
+  // callback's ?code=&state=) leaked to other origins in Referer.
+  async headers() {
+    return [
+      {
+        source: '/:path*',
+        headers: [
+          { key: 'Content-Security-Policy', value: "frame-ancestors 'none'" },
+          { key: 'X-Content-Type-Options', value: 'nosniff' },
+          { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+        ],
+      },
+    ];
+  },
 };
 
 export default nextConfig;

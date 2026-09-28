@@ -130,6 +130,7 @@ describe('FlagConfigSchema', () => {
       csv_export: true,
       contribute_bridge: false,
       upland_data: true,
+      github_signin: false,
     });
     expect(result.success).toBe(true);
   });
@@ -139,17 +140,27 @@ describe('FlagConfigSchema', () => {
     expect(result.success).toBe(false);
   });
 
+  it('requires github_signin: a config written before the flag existed is incomplete', () => {
+    const result = FlagConfigSchema.safeParse({
+      csv_export: true,
+      contribute_bridge: true,
+      upland_data: true,
+    });
+    expect(result.success).toBe(false);
+  });
+
   it('rejects non-boolean values', () => {
     const result = FlagConfigSchema.safeParse({
       csv_export: 'true',
       contribute_bridge: false,
       upland_data: false,
+      github_signin: false,
     });
     expect(result.success).toBe(false);
   });
 
   it('exposes the flag names as a const tuple', () => {
-    expect(FLAG_NAMES).toEqual(['csv_export', 'contribute_bridge', 'upland_data']);
+    expect(FLAG_NAMES).toEqual(['csv_export', 'contribute_bridge', 'upland_data', 'github_signin']);
   });
 });
 

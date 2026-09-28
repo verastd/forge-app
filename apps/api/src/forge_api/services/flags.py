@@ -46,6 +46,7 @@ DEFAULT_FLAGS: dict[str, bool] = {
     "csv_export": False,
     "contribute_bridge": False,
     "upland_data": False,
+    "github_signin": False,
 }
 
 logger = logging.getLogger(__name__)
