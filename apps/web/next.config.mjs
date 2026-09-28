@@ -9,6 +9,13 @@ const nextConfig = {
   // `.next`, so `next build` and plain `pnpm dev` are unaffected.
   distDir: process.env.FORGE_DIST_DIR ?? '.next',
 
+  // Practice sign-in is decided at build time. Next inlines a NEXT_PUBLIC_*
+  // variable only if it is set when compiling; unset, server code (the
+  // middleware included) would read it at runtime, and setting it on a live
+  // deployment would switch practice sign-in on. Listing it here inlines
+  // it always, as '' when unset, so a live build can never become a demo one.
+  env: { NEXT_PUBLIC_FORGE_DEMO: process.env.NEXT_PUBLIC_FORGE_DEMO ?? '' },
+
   // Workspace packages ship pre-built ESM to dist/, but transpiling them here
   // keeps pnpm's symlinked node_modules layout working the same in dev, in
   // `next build`, and under Playwright.

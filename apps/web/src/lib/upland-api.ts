@@ -1,11 +1,17 @@
 'use client';
 
 /**
- * Typed client for `/api/upland/*` (the Upland data app, gated by the `upland_data` flag).
+ * Typed client for the Upland data app (gated by the `upland_data` flag), via
+ * the same-origin BFF: `request('/health')` fetches `/bff/upland/health`, and
+ * that route handler (`app/bff/upland/[...path]/route.ts`) checks the session
+ * cookie, mints a short-lived API assertion and forwards to the API's
+ * `/api/upland/health`. The browser never calls the API for this data itself.
  *
  * Same fetch style as `./api`: one timeout, `cache: 'no-store'`, and a failure is
  * a thrown {@link RequestError} — never substituted data. These endpoints have no
- * demo fixtures; a page that cannot reach them says so.
+ * demo fixtures; a page that cannot reach them says so. Signed out, or signed in
+ * with the practice account, the BFF answers 401: a {@link RequestError} with
+ * `status: 401`, like any other refusal.
  *
  * Every response is validated against the `@forge/shared` zod schemas (the wire
  * contract, mirrored field-for-field by `apps/api/src/forge_api/models.py`). A
@@ -55,7 +61,7 @@ import type {
   UplandStatsOverview,
 } from '@forge/shared';
 
-import { ConflictError, RequestError, apiBase } from './api';
+import { ConflictError, RequestError } from './api';
 
 export type {
   ActionCodes,
@@ -94,6 +100,9 @@ export interface ActionFilters {
   offset?: number;
 }
 
+/** Same origin, so the session cookie goes along and no CORS is involved. */
+const BFF_BASE = '/bff/upland';
+
 const TIMEOUT_MS = 8000;
 /** Chain lookups go to Hyperion behind the API; give them longer. */
 const CHAIN_TIMEOUT_MS = 20000;
@@ -123,6 +132,7 @@ async function request<T>(
   init?: RequestInit,
   timeoutMs = TIMEOUT_MS,
 ): Promise<T> {
+  const url = `${BFF_BASE}${path}`;
   const controller = new AbortController();
   const timer = setTimeout(() => {
     controller.abort();
@@ -130,30 +140,34 @@ async function request<T>(
   try {
     let response: Response;
     try {
-      response = await fetch(`${apiBase}${path}`, {
+      response = await fetch(url, {
         ...init,
         cache: 'no-store',
+        credentials: 'same-origin',
         signal: controller.signal,
       });
     } catch {
-      throw new RequestError(path, 'did not answer');
+      throw new RequestError(url, 'did not answer');
     }
     if (response.status === 409) {
       throw new ConflictError('conflict');
     }
+    if (response.status === 401) {
+      throw new RequestError(url, 'needs you to sign in with GitHub', 401);
+    }
     if (!response.ok) {
-      throw new RequestError(path, `responded with ${response.status}`, response.status);
+      throw new RequestError(url, `responded with ${response.status}`, response.status);
     }
     let payload: unknown;
     try {
       payload = (await response.json()) as unknown;
     } catch {
-      throw new RequestError(path, 'answered with something that is not JSON');
+      throw new RequestError(url, 'answered with something that is not JSON');
     }
     try {
       return parser.parse(payload);
     } catch {
-      throw new RequestError(path, 'answered with a payload the contract rejects');
+      throw new RequestError(url, 'answered with a payload the contract rejects');
     }
   } finally {
     clearTimeout(timer);
@@ -183,14 +197,14 @@ function query(params: Record<string, string | number | undefined>): string {
 /* --- data queries ---------------------------------------------------------- */
 
 export const fetchUplandHealth = (): Promise<UplandHealth> =>
-  request('/api/upland/health', UplandHealthSchema);
+  request('/health', UplandHealthSchema);
 
 export const fetchStatsOverview = (): Promise<UplandStatsOverview> =>
-  request('/api/upland/stats/overview', UplandStatsOverviewSchema);
+  request('/stats/overview', UplandStatsOverviewSchema);
 
 export const fetchActions = (filters: ActionFilters = {}): Promise<UplandActionList> =>
   request(
-    `/api/upland/actions${query({
+    `/actions${query({
       category: filters.category,
       action_name: filters.actionName,
       actor: filters.actor,
@@ -204,68 +218,71 @@ export const fetchActions = (filters: ActionFilters = {}): Promise<UplandActionL
   );
 
 export const fetchRecentSales = (limit?: number): Promise<UplandAction[]> =>
-  request(`/api/upland/actions/sales${query({ limit })}`, arrayOf(UplandActionSchema));
+  request(`/actions/sales${query({ limit })}`, arrayOf(UplandActionSchema));
 
 export const fetchSalesVolume = (days = 90): Promise<SalesVolumeDay[]> =>
-  request(`/api/upland/stats/sales_volume${query({ days })}`, arrayOf(SalesVolumeDaySchema));
+  request(`/stats/sales_volume${query({ days })}`, arrayOf(SalesVolumeDaySchema));
 
 export const fetchActionDistribution = (): Promise<ActionDistributionEntry[]> =>
-  request('/api/upland/stats/action_distribution', arrayOf(ActionDistributionEntrySchema));
+  request('/stats/action_distribution', arrayOf(ActionDistributionEntrySchema));
 
 export const fetchTopProperties = (
   limit = 50,
   sort: PropertySort = 'sales',
 ): Promise<UplandPropertyList> =>
-  request(`/api/upland/stats/top_properties${query({ limit, sort })}`, UplandPropertyListSchema);
+  request(`/stats/top_properties${query({ limit, sort })}`, UplandPropertyListSchema);
 
 export const fetchActiveAccounts = (limit = 50): Promise<ActiveAccount[]> =>
-  request(`/api/upland/stats/active_accounts${query({ limit })}`, arrayOf(ActiveAccountSchema));
+  request(`/stats/active_accounts${query({ limit })}`, arrayOf(ActiveAccountSchema));
 
 export const fetchTimeSeries = (
   interval: TimeSeriesInterval = 'day',
   filter = 'trade',
 ): Promise<TimeSeriesPoint[]> =>
   request(
-    `/api/upland/stats/time_series${query({ interval, filter })}`,
+    `/stats/time_series${query({ interval, filter })}`,
     arrayOf(TimeSeriesPointSchema),
   );
 
 export const fetchPriceDistribution = (): Promise<PriceDistributionBucket[]> =>
-  request('/api/upland/stats/price_distribution', arrayOf(PriceDistributionBucketSchema));
+  request('/stats/price_distribution', arrayOf(PriceDistributionBucketSchema));
 
 export const fetchProperties = (limit?: number, offset?: number): Promise<UplandPropertyList> =>
-  request(`/api/upland/properties${query({ limit, offset })}`, UplandPropertyListSchema);
+  request(`/properties${query({ limit, offset })}`, UplandPropertyListSchema);
 
 export const fetchProperty = (propertyId: string): Promise<UplandProperty> =>
-  request(`/api/upland/properties/${encodeURIComponent(propertyId)}`, UplandPropertySchema);
+  request(`/properties/${encodeURIComponent(propertyId)}`, UplandPropertySchema);
 
 export const fetchActionCodes = (): Promise<ActionCodes> =>
-  request('/api/upland/codes', ActionCodesSchema);
+  request('/codes', ActionCodesSchema);
 
 export const fetchChainInfo = (): Promise<ChainInfo> =>
-  request('/api/upland/chain/info', ChainInfoSchema, undefined, CHAIN_TIMEOUT_MS);
+  request('/chain/info', ChainInfoSchema, undefined, CHAIN_TIMEOUT_MS);
 
 export const fetchEstimate = (days = 90): Promise<UplandEstimate> =>
-  request(`/api/upland/estimate${query({ days })}`, UplandEstimateSchema, undefined, CHAIN_TIMEOUT_MS);
+  request(`/estimate${query({ days })}`, UplandEstimateSchema, undefined, CHAIN_TIMEOUT_MS);
 
-/** Direct browser download, like `exportUrl` in `./api` — a link, not a fetch. */
+/**
+ * Direct browser download, like `exportUrl` in `./api` — a link, not a fetch.
+ * Same-origin, so the session cookie rides along to the BFF.
+ */
 export const uplandExportUrl = (type: ExportType = 'actions'): string =>
-  `${apiBase}/api/upland/export${query({ type })}`;
+  `${BFF_BASE}/export${query({ type })}`;
 
 /* --- scraper and GCS control ---------------------------------------------------- */
 
 /** Throws {@link ConflictError} when a scrape is already running. */
 export const startScrape = (body: ScrapeRequest): Promise<ScrapeStatus> =>
-  post('/api/upland/scrape', ScrapeStatusSchema, body);
+  post('/scrape', ScrapeStatusSchema, body);
 
 export const fetchScrapeStatus = (): Promise<ScrapeStatus> =>
-  request('/api/upland/scrape/status', ScrapeStatusSchema);
+  request('/scrape/status', ScrapeStatusSchema);
 
 export const cancelScrape = (): Promise<ScrapeStatus> =>
-  post('/api/upland/scrape/cancel', ScrapeStatusSchema);
+  post('/scrape/cancel', ScrapeStatusSchema);
 
 export const syncGcs = (): Promise<GcsSyncResult> =>
-  post('/api/upland/gcs/sync', GcsSyncResultSchema);
+  post('/gcs/sync', GcsSyncResultSchema);
 
 export const fetchGcsStatus = (): Promise<GcsStatus> =>
-  request('/api/upland/gcs/status', GcsStatusSchema);
+  request('/gcs/status', GcsStatusSchema);

@@ -42,6 +42,36 @@ FORGE is in **beta**. There is no older supported version line; report
 against `main` / whatever is currently deployed to staging or beta. Nothing
 is in production yet (see `README.md` "Current status").
 
+### Sign-in and session code is security-critical, and explicitly in scope
+
+The GitHub sign-in flow and everything that seals, opens or trusts a
+session are a priority target for review, precisely because a flaw there
+can impersonate any visitor rather than misbehave for one. This is the
+hand-written code ADR-003 describes (`docs/adr/ADR-003-github-app-signin.md`):
+
+- `packages/auth/` — PKCE, session/transaction sealing and opening, the
+  API assertion.
+- `apps/web/src/app/auth/` — the `/auth/signin`, `/auth/callback`,
+  `/auth/signout` and `/auth/demo` routes.
+- `apps/web/src/app/bff/` — the same-origin proxy that mints the API
+  assertion for `/upland`'s data.
+- `apps/web/src/middleware.ts` — the `/me` and `/upland` sign-in gate.
+- `apps/web/src/lib/session.ts` and `apps/web/src/lib/auth/` — the session
+  helpers, the Origin check, and where every secret is read from the
+  environment.
+- `apps/web/src/lib/mode.ts` and `apps/web/next.config.mjs` — whether the
+  build offers the practice account at all (fixed at build time), and the
+  security headers.
+- `apps/api/src/forge_api/services/identity.py` — where the API verifies
+  that assertion, and the `FORGE_ADMIN_IDS` operator check.
+
+These same paths are cold-account-owned in `CODEOWNERS` and listed in
+`.github/forge-protocol.json`'s `protectedPaths`, so a PR touching them
+needs a sign-in to the hardware-2FA cold account to merge (see
+`CODEOWNERS`'s own header for exactly what that does and doesn't buy). A
+report against any of them gets priority triage within the response SLO
+above.
+
 ## What is actually enforced today
 
 So a reporter does not spend time on a control we already know is
@@ -49,8 +79,9 @@ missing, the headlines:
 
 - **Sensitive-path review is cold-account approval, not two-person
   control.** `CODEOWNERS` lists `@verastd` and `@forge-cold` on `.github/`,
-  `contracts/`, `packages/contracts-client/`, and the `auth*`/`pay*`
-  routers, but GitHub accepts an approval from any one listed owner and
+  `contracts/`, `packages/contracts-client/`, the `auth*`/`pay*` routers,
+  and the sign-in/session paths listed above, but GitHub accepts an
+  approval from any one listed owner and
   both accounts belong to the same person. What it buys is a forced
   sign-in to a hardware-2FA account — friction against a stolen session.
   It is not independent review, and it does not constrain a compromised or

@@ -14,6 +14,9 @@ export default defineConfig({
       include: ["src/**/*.ts"],
       exclude: ["src/**/*.test.ts", "dist/**"],
       reportsDirectory: "coverage",
+      // Sign-in is security code: a floor here, on top of the changed-line
+      // gate, so coverage can't erode one small PR at a time.
+      thresholds: { statements: 95, branches: 90, functions: 95, lines: 95 },
     },
   },
 });

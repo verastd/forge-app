@@ -23,6 +23,7 @@ from forge_api.models import (
 )
 from forge_api.services import flags as flags_service
 from forge_api.services.errors import ApiError
+from forge_api.services.identity import require_identity
 from forge_api.services.upland import analytics
 from forge_api.services.upland.action_codes import CATEGORIES
 from forge_api.services.upland.hyperion import HyperionClient
@@ -51,7 +52,10 @@ async def get_hyperion() -> AsyncIterator[HyperionClient]:
 Hyperion = Annotated[HyperionClient, Depends(get_hyperion)]
 
 router = APIRouter(
-    prefix="/api/upland", tags=["upland"], dependencies=[Depends(require_upland_enabled)]
+    prefix="/api/upland",
+    tags=["upland"],
+    # In this order: 404 while `upland_data` is off, then 401 without a valid assertion.
+    dependencies=[Depends(require_upland_enabled), Depends(require_identity)],
 )
 
 

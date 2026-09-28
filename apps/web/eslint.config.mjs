@@ -3,7 +3,8 @@ import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  { ignores: ['.next/**', '.next-e2e-*/**', 'next-env.d.ts', 'node_modules/**'] },
+  // Every Next build dir (.next, the e2e ones, any local FORGE_DIST_DIR) is output, not source.
+  { ignores: ['.next*/**', 'next-env.d.ts', 'node_modules/**'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
