@@ -1,14 +1,28 @@
 import { expect, test } from '@playwright/test';
 import type { Page, Route } from '@playwright/test';
 
+import { demoSignIn } from './helpers/session';
+
 /**
  * The Upland data app (project `chromium-demo`, API deliberately down).
  *
  * Upland pages have no demo fixtures on purpose: the data set is the product,
  * so a page that cannot reach it says so instead of inventing one. The happy
  * path is exercised by serving contract-exact payloads through page.route —
- * the same wire shapes `@forge/shared` validates.
+ * the same wire shapes `@forge/shared` validates, now requested same-origin
+ * through `/bff/upland/*` rather than the API's own origin.
+ *
+ * `/upland/*` is behind sign-in (1F), so every test here signs in with the
+ * practice account first. The practice account still can't reach the API —
+ * the BFF 401s a demo session before it ever forwards — but that's invisible
+ * here: every fetch below is intercepted by page.route before it leaves the
+ * browser, so what the real BFF would do with a demo session never matters.
  */
+
+test.beforeEach(async ({ page }) => {
+  await page.goto('/signin');
+  await demoSignIn(page);
+});
 
 async function serve(page: Page, pattern: string, body: unknown): Promise<void> {
   await page.route(pattern, (route: Route) =>
@@ -55,9 +69,9 @@ test.describe('the Upland data app', () => {
   });
 
   test('shows the summary as broken rather than inventing one', async ({ page }) => {
-    // No fixtures behind /api/upland/* even in the demo app: the summary must
+    // No fixtures behind /bff/upland/* even in the demo app: the summary must
     // fail honestly when the service is down.
-    await page.route('**/api/upland/**', (route) => route.abort());
+    await page.route('**/bff/upland/**', (route) => route.abort());
     await page.goto('/upland');
 
     const broken = page
@@ -68,17 +82,23 @@ test.describe('the Upland data app', () => {
   });
 
   test('renders a served summary on the overview', async ({ page }) => {
-    await serve(page, '**/api/upland/stats/overview', OVERVIEW);
+    await serve(page, '**/bff/upland/stats/overview', OVERVIEW);
     await page.goto('/upland');
 
     await expect(page.getByText('1,400,000')).toBeVisible();
     await expect(page.getByText('250,000')).toBeVisible();
     await expect(page.getByRole('cell', { name: 'trade' })).toBeVisible();
+
+    // The data now goes through the same-origin BFF, never the API's own origin.
+    await expect(page.getByRole('link', { name: 'Export CSV' })).toHaveAttribute(
+      'href',
+      '/bff/upland/export?type=actions',
+    );
   });
 
   test('the actions explorer renders served rows and their filters', async ({ page }) => {
-    await serve(page, '**/api/upland/stats/overview', OVERVIEW);
-    await serve(page, '**/api/upland/actions**', {
+    await serve(page, '**/bff/upland/stats/overview', OVERVIEW);
+    await serve(page, '**/bff/upland/actions**', {
       items: [SALE_ACTION],
       total: 1,
       hasMore: false,
@@ -97,8 +117,8 @@ test.describe('the Upland data app', () => {
   });
 
   test('the sales tab renders served sales and daily volume', async ({ page }) => {
-    await serve(page, '**/api/upland/actions/sales**', [SALE_ACTION]);
-    await serve(page, '**/api/upland/stats/sales_volume**', [
+    await serve(page, '**/bff/upland/actions/sales**', [SALE_ACTION]);
+    await serve(page, '**/bff/upland/stats/sales_volume**', [
       {
         date: '2026-09-18',
         count: 120,
@@ -113,5 +133,9 @@ test.describe('the Upland data app', () => {
     await expect(page.getByRole('cell', { name: 'seller-bob' })).toBeVisible();
     await expect(page.getByRole('cell', { name: '2026-09-18' })).toBeVisible();
     await expect(page.getByRole('cell', { name: '1,500,000 UPX' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Export sales CSV' })).toHaveAttribute(
+      'href',
+      '/bff/upland/export?type=sales',
+    );
   });
 });

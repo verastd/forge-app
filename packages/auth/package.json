@@ -1,0 +1,41 @@
+{
+  "name": "@forge/auth",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Sign in with GitHub for FORGE — Edge-safe (Web Crypto + jose only, no node: imports), so Next middleware can import it.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint src",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "jose": "^6.2.12"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9",
+    "@types/node": "^22",
+    "@vitest/coverage-v8": "^2.1",
+    "eslint": "^9",
+    "typescript": "~5.6",
+    "typescript-eslint": "^8",
+    "vitest": "^2.1"
+  }
+}

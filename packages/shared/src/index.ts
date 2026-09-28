@@ -32,13 +32,19 @@ export const EXPORT_COLUMNS = ['ts', 'type', 'amount'] as const;
 // Feature flags
 // ---------------------------------------------------------------------------
 
-export const FLAG_NAMES = ['csv_export', 'contribute_bridge', 'upland_data'] as const;
+export const FLAG_NAMES = [
+  'csv_export',
+  'contribute_bridge',
+  'upland_data',
+  'github_signin',
+] as const;
 export type FlagName = (typeof FLAG_NAMES)[number];
 
 export const FlagConfigSchema = z.object({
   csv_export: z.boolean(),
   contribute_bridge: z.boolean(),
   upland_data: z.boolean(),
+  github_signin: z.boolean(),
 });
 export type FlagConfig = z.infer<typeof FlagConfigSchema>;
 

@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
+import { AccountMenu } from './AccountMenu';
 import { Chip } from './Chip';
 import { useDegraded } from '../lib/degraded';
 
@@ -69,6 +70,7 @@ export function Nav() {
             offline demo data
           </Chip>
         )}
+        <AccountMenu />
       </div>
     </header>
   );

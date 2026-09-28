@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends
 
 from forge_api.models import GcsStatus, GcsSyncResult, ScrapeRequest, ScrapeStatus
 from forge_api.routers.upland import require_upland_enabled
+from forge_api.services.identity import require_admin, require_identity
 from forge_api.services.upland.scraper import ScrapeManager, get_scrape_manager
 from forge_api.services.upland.storage import GcsSyncManager, get_sync_manager
 
@@ -13,7 +14,14 @@ Scraper = Annotated[ScrapeManager, Depends(get_scrape_manager)]
 Sync = Annotated[GcsSyncManager, Depends(get_sync_manager)]
 
 router = APIRouter(
-    prefix="/api/upland", tags=["upland-scrape"], dependencies=[Depends(require_upland_enabled)]
+    prefix="/api/upland",
+    tags=["upland-scrape"],
+    # routers/upland.py's chain, then operator-only: 404 -> 401 -> 403.
+    dependencies=[
+        Depends(require_upland_enabled),
+        Depends(require_identity),
+        Depends(require_admin),
+    ],
 )
 
 
