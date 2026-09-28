@@ -64,6 +64,8 @@ hand-written code ADR-003 describes (`docs/adr/ADR-003-github-app-signin.md`):
   security headers.
 - `apps/api/src/forge_api/services/identity.py` — where the API verifies
   that assertion, and the `FORGE_ADMIN_IDS` operator check.
+- `.gitleaksignore` — fingerprints the secret scan skips (known false
+  positives only). Core-owned, so no PR can suppress a finding about itself.
 
 These same paths are cold-account-owned in `CODEOWNERS` and listed in
 `.github/forge-protocol.json`'s `protectedPaths`, so a PR touching them

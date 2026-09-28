@@ -41,3 +41,5 @@
 # Whether practice sessions count at all: decided at build time by these two.
 /apps/web/src/lib/mode.ts                      @verastd @forge-cold
 /apps/web/next.config.mjs                      @verastd @forge-cold
+# Secret-scan suppressions: a contributor PR must never silence the scan for itself.
+/.gitleaksignore                               @verastd @forge-cold
