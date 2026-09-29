@@ -1,7 +1,8 @@
 """Upland data app: action processing, models, flag gating, analytics and the HTTP surface.
 
 No network: the database is a temp SQLite file (`UPLAND_DB_PATH`) and Hyperion is a fake
-injected through the router's `get_hyperion` dependency.
+injected through the router's `get_hyperion` dependency. HTTP calls carry a minted API
+assertion; the identity gate itself is covered in test_identity.py.
 """
 
 import asyncio
@@ -80,8 +81,17 @@ def upland_db(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def http() -> Iterator[TestClient]:
-    with TestClient(app) as test_client:
+def http(user_headers: dict[str, str]) -> Iterator[TestClient]:
+    """A signed-in contributor: enough for every read route."""
+    with TestClient(app, headers=user_headers) as test_client:
+        yield test_client
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def admin_http(admin_headers: dict[str, str]) -> Iterator[TestClient]:
+    """A signed-in operator: the scrape and GCS controls are admin-only."""
+    with TestClient(app, headers=admin_headers) as test_client:
         yield test_client
     app.dependency_overrides.clear()
 
@@ -420,14 +430,14 @@ def test_chain_unavailable_is_a_502(http: TestClient) -> None:
 # --- scrape control (Hyperion never touched) -------------------------------------------------
 
 
-def test_scrape_start_validation_and_status(http: TestClient) -> None:
+def test_scrape_start_validation_and_status(admin_http: TestClient) -> None:
     manager = ScrapeManager()
     app.dependency_overrides[get_scrape_manager] = lambda: manager
-    assert http.get("/api/upland/scrape/status").json()["phase"] == "idle"
-    assert http.post("/api/upland/scrape", json={}).status_code == 400
-    bad_range = http.post("/api/upland/scrape", json={"startBlock": 10, "endBlock": 5})
+    assert admin_http.get("/api/upland/scrape/status").json()["phase"] == "idle"
+    assert admin_http.post("/api/upland/scrape", json={}).status_code == 400
+    bad_range = admin_http.post("/api/upland/scrape", json={"startBlock": 10, "endBlock": 5})
     assert bad_range.status_code == 400
-    assert http.post("/api/upland/scrape/cancel").json()["running"] is False
+    assert admin_http.post("/api/upland/scrape/cancel").json()["running"] is False
 
 
 def test_scrape_runs_days_job_with_mocked_scraper(

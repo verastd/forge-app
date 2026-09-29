@@ -28,3 +28,18 @@
 /apps/api/src/forge_api/routers/auth*          @verastd @forge-cold
 /apps/api/src/forge_api/routers/pay*           @verastd @forge-cold
 /packages/contracts-client/                    @verastd @forge-cold
+
+# Sign-in with GitHub (FORGE v0.2 Phase 1, ADR-003): session sealing, the
+# OAuth state/PKCE flow, and the BFF's Origin check and assertion minting.
+/packages/auth/                                @verastd @forge-cold
+/apps/web/src/app/auth/                        @verastd @forge-cold
+/apps/web/src/app/bff/                         @verastd @forge-cold
+/apps/web/src/middleware.ts                    @verastd @forge-cold
+/apps/web/src/lib/session.ts                   @verastd @forge-cold
+/apps/api/src/forge_api/services/identity.py   @verastd @forge-cold
+/apps/web/src/lib/auth/                        @verastd @forge-cold
+# Whether practice sessions count at all: decided at build time by these two.
+/apps/web/src/lib/mode.ts                      @verastd @forge-cold
+/apps/web/next.config.mjs                      @verastd @forge-cold
+# Secret-scan suppressions: a contributor PR must never silence the scan for itself.
+/.gitleaksignore                               @verastd @forge-cold

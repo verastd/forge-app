@@ -27,10 +27,13 @@ describe('client safety', () => {
 
 describe('parseFlags', () => {
   it('accepts a fully valid config unchanged', () => {
-    expect(parseFlags({ csv_export: false, contribute_bridge: true, upland_data: true })).toEqual({
+    expect(
+      parseFlags({ csv_export: false, contribute_bridge: true, upland_data: true, github_signin: true }),
+    ).toEqual({
       csv_export: false,
       contribute_bridge: true,
       upland_data: true,
+      github_signin: true,
     });
   });
 
@@ -39,6 +42,7 @@ describe('parseFlags', () => {
       csv_export: false,
       contribute_bridge: DEFAULT_FLAGS.contribute_bridge,
       upland_data: DEFAULT_FLAGS.upland_data,
+      github_signin: DEFAULT_FLAGS.github_signin,
     });
   });
 
@@ -51,13 +55,25 @@ describe('parseFlags', () => {
       csv_export: false,
       contribute_bridge: false,
       upland_data: false,
+      github_signin: false,
     });
   });
 
   it('ignores unknown extra keys', () => {
     expect(
-      parseFlags({ csv_export: true, contribute_bridge: true, upland_data: false, unknown_flag: true }),
-    ).toEqual({ csv_export: true, contribute_bridge: true, upland_data: false });
+      parseFlags({
+        csv_export: true,
+        contribute_bridge: true,
+        upland_data: false,
+        github_signin: true,
+        unknown_flag: true,
+      }),
+    ).toEqual({
+      csv_export: true,
+      contribute_bridge: true,
+      upland_data: false,
+      github_signin: true,
+    });
   });
 
   it('never throws and falls back to defaults for non-object input', () => {
@@ -72,10 +88,16 @@ describe('parseFlags', () => {
 
 describe('isEnabled', () => {
   it('reads the named flag out of a resolved config', () => {
-    const flags = { csv_export: true, contribute_bridge: false, upland_data: true };
+    const flags = {
+      csv_export: true,
+      contribute_bridge: false,
+      upland_data: true,
+      github_signin: true,
+    };
     expect(isEnabled(flags, 'csv_export')).toBe(true);
     expect(isEnabled(flags, 'contribute_bridge')).toBe(false);
     expect(isEnabled(flags, 'upland_data')).toBe(true);
+    expect(isEnabled(flags, 'github_signin')).toBe(true);
   });
 });
 
@@ -101,7 +123,12 @@ describe('loadFlags precedence', () => {
 
       const result = await loadFlags({ configPath: filePath, env: {} });
 
-      expect(result).toEqual({ csv_export: false, contribute_bridge: true, upland_data: false });
+      expect(result).toEqual({
+        csv_export: false,
+        contribute_bridge: true,
+        upland_data: false,
+        github_signin: false,
+      });
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -119,6 +146,7 @@ describe('loadFlags precedence', () => {
         csv_export: true,
         contribute_bridge: DEFAULT_FLAGS.contribute_bridge,
         upland_data: DEFAULT_FLAGS.upland_data,
+        github_signin: DEFAULT_FLAGS.github_signin,
       });
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -134,9 +162,14 @@ describe('loadFlags precedence', () => {
       const result = await loadFlags({ env: { FORGE_FLAGS_PATH: filePath } });
 
       // cwd is not mocked here, so the walk-up finds the real repo
-      // config/flags.json as layer 1; upland_data (untouched by the path
-      // layer) survives from it as true.
-      expect(result).toEqual({ csv_export: false, contribute_bridge: true, upland_data: true });
+      // config/flags.json as layer 1; upland_data and github_signin
+      // (untouched by the path layer) survive from it as true.
+      expect(result).toEqual({
+        csv_export: false,
+        contribute_bridge: true,
+        upland_data: true,
+        github_signin: true,
+      });
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -157,7 +190,12 @@ describe('loadFlags precedence', () => {
 
       const result = await loadFlags({ env: {} });
 
-      expect(result).toEqual({ csv_export: false, contribute_bridge: false, upland_data: false });
+      expect(result).toEqual({
+        csv_export: false,
+        contribute_bridge: false,
+        upland_data: false,
+        github_signin: false,
+      });
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -169,7 +207,12 @@ describe('loadFlags precedence', () => {
     // that owns config/flags.json. config/flags.json — not DEFAULT_FLAGS —
     // is what keeps local/demo behavior enabled (see core.ts).
     const result = await loadFlags({ env: {} });
-    expect(result).toEqual({ csv_export: true, contribute_bridge: true, upland_data: true });
+    expect(result).toEqual({
+      csv_export: true,
+      contribute_bridge: true,
+      upland_data: true,
+      github_signin: true,
+    });
   });
 
   it('falls back to all-false defaults when no source is found anywhere above cwd', async () => {
@@ -178,7 +221,12 @@ describe('loadFlags precedence', () => {
       const result = await loadFlags({ env: {} });
 
       expect(result).toEqual(DEFAULT_FLAGS);
-      expect(result).toEqual({ csv_export: false, contribute_bridge: false, upland_data: false });
+      expect(result).toEqual({
+        csv_export: false,
+        contribute_bridge: false,
+        upland_data: false,
+        github_signin: false,
+      });
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -208,8 +256,14 @@ describe('loadFlags precedence', () => {
 
       // csv_export: true (layer 1) -> false (layer 2) -> true (layer 3): the last layer wins.
       // contribute_bridge: never touched after layer 1, so it survives unchanged.
-      // upland_data: no layer ever mentions it, so it stays at its all-false default.
-      expect(result).toEqual({ csv_export: true, contribute_bridge: true, upland_data: false });
+      // upland_data, github_signin: no layer ever mentions them, so they stay at
+      // their all-false default.
+      expect(result).toEqual({
+        csv_export: true,
+        contribute_bridge: true,
+        upland_data: false,
+        github_signin: false,
+      });
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -230,6 +284,7 @@ describe('loadFlags precedence', () => {
         csv_export: true,
         contribute_bridge: DEFAULT_FLAGS.contribute_bridge,
         upland_data: DEFAULT_FLAGS.upland_data,
+        github_signin: DEFAULT_FLAGS.github_signin,
       });
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -249,7 +304,12 @@ describe('loadFlags precedence', () => {
 
         const result = await loadFlags({ env: { FORGE_FLAGS_JSON: '{not valid json' } });
 
-        expect(result).toEqual({ csv_export: false, contribute_bridge: false, upland_data: false });
+        expect(result).toEqual({
+          csv_export: false,
+          contribute_bridge: false,
+          upland_data: false,
+          github_signin: false,
+        });
       } finally {
         await rm(dir, { recursive: true, force: true });
       }
@@ -264,7 +324,12 @@ describe('loadFlags precedence', () => {
 
         const result = await loadFlags({ env: {} });
 
-        expect(result).toEqual({ csv_export: false, contribute_bridge: false, upland_data: false });
+        expect(result).toEqual({
+          csv_export: false,
+          contribute_bridge: false,
+          upland_data: false,
+          github_signin: false,
+        });
       } finally {
         await rm(dir, { recursive: true, force: true });
       }
@@ -280,6 +345,7 @@ describe('loadFlags precedence', () => {
           csv_export: false,
           contribute_bridge: false,
           upland_data: false,
+          github_signin: false,
         });
       } finally {
         await rm(dir, { recursive: true, force: true });
@@ -293,7 +359,12 @@ describe('loadFlags precedence', () => {
 
         const result = await loadFlags({ configPath: missingPath, env: {} });
 
-        expect(result).toEqual({ csv_export: false, contribute_bridge: false, upland_data: false });
+        expect(result).toEqual({
+          csv_export: false,
+          contribute_bridge: false,
+          upland_data: false,
+          github_signin: false,
+        });
       } finally {
         await rm(dir, { recursive: true, force: true });
       }
@@ -313,7 +384,12 @@ describe('loadFlags precedence', () => {
           env: { FORGE_FLAGS_JSON: JSON.stringify({ csv_export: 'nope', contribute_bridge: true }) },
         });
 
-        expect(result).toEqual({ csv_export: false, contribute_bridge: false, upland_data: false });
+        expect(result).toEqual({
+          csv_export: false,
+          contribute_bridge: false,
+          upland_data: false,
+          github_signin: false,
+        });
       } finally {
         await rm(dir, { recursive: true, force: true });
       }
@@ -324,7 +400,12 @@ describe('loadFlags precedence', () => {
       try {
         const result = await loadFlags({ env: { FORGE_FLAGS_JSON: JSON.stringify([1, 2, 3]) } });
 
-        expect(result).toEqual({ csv_export: false, contribute_bridge: false, upland_data: false });
+        expect(result).toEqual({
+          csv_export: false,
+          contribute_bridge: false,
+          upland_data: false,
+          github_signin: false,
+        });
       } finally {
         await rm(dir, { recursive: true, force: true });
       }
@@ -338,7 +419,12 @@ describe('loadFlags precedence', () => {
 
         const result = await loadFlags({ configPath: filePath, env: {} });
 
-        expect(result).toEqual({ csv_export: false, contribute_bridge: false, upland_data: false });
+        expect(result).toEqual({
+          csv_export: false,
+          contribute_bridge: false,
+          upland_data: false,
+          github_signin: false,
+        });
       } finally {
         await rm(dir, { recursive: true, force: true });
       }

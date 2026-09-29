@@ -78,6 +78,31 @@ the app falls back to local fixtures and labels itself as practice data.
 Both builds, and the difference between them, are covered in
 [`docs/architecture.md`](docs/architecture.md).
 
+### Sign-in
+
+The demo build (`NEXT_PUBLIC_FORGE_DEMO=1`) offers a practice account
+instead of GitHub — `/signin` shows a "Continue with the practice account"
+button, no GitHub App needed. Which build you get is fixed when the app is
+compiled; a live build refuses practice sessions, whatever its environment
+says at runtime. `next dev` also falls back to a hard-coded, obviously-named
+dev-only session secret when `FORGE_SESSION_SECRET` is unset, so a fresh
+checkout of the demo build can sign in and poke around `/me` and `/upland`
+without any setup. That secret is public, so it only ever signs in the
+practice account, and the Data app never calls the API under it (the BFF
+answers `503 not_configured`). A `FORGE_SESSION_SECRET` that is set but
+shorter than 32 characters turns sign-in off instead, with a warning in the
+server log.
+
+Real GitHub sign-in — the live build, or `next dev` with a full config —
+needs a registered GitHub App and several environment variables
+(`GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `FORGE_PUBLIC_ORIGIN`,
+`FORGE_SESSION_SECRET`, `FORGE_API_ASSERTION_SECRET`; on the API side,
+`FORGE_API_ASSERTION_SECRET` again and `FORGE_ADMIN_IDS`, the numeric GitHub
+user ids of the operators). See
+[`docs/architecture.md`](docs/architecture.md#identity) for the full flow,
+the complete env var table, and how to rotate a secret without signing
+everyone out.
+
 ## Repo map
 
 | Path | What's there |

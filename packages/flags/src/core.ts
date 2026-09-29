@@ -23,6 +23,7 @@ export const DEFAULT_FLAGS: FlagConfig = {
   csv_export: false,
   contribute_bridge: false,
   upland_data: false,
+  github_signin: false,
 };
 
 /**

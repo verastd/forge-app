@@ -1,0 +1,8 @@
+# Secret-scan suppressions. Core-owned (CODEOWNERS, protectedPaths): a
+# contributor PR must never be able to silence the scan for itself.
+# One fingerprint per line, <commit>:<path>:<rule>:<line>, each with the reason.
+#
+# A test-only HS256 key literal in the @forge/auth unit tests (never a real
+# credential). The test now builds its key at runtime, so this entry only
+# covers the commit that introduced the literal.
+588826f782d860664b09b7499b857683e28babd6:packages/auth/src/assertion.test.ts:generic-api-key:7

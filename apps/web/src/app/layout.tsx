@@ -2,7 +2,9 @@ import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
 
 import { Nav } from '../components/Nav';
+import { SessionProvider } from '../components/SessionProvider';
 import { ToastProvider } from '../components/Toast';
+import { getPublicSession, signInAvailability } from '../lib/session';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -24,7 +26,6 @@ export const viewport: Viewport = {
  */
 const FONTS_HREF =
   'https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Manrope:wght@400;500;600;700;800&family=Unbounded:wght@500;600;700;800&display=swap';
-
 /*
  * Runs before the first paint, which is the whole point: `<html>` ships with
  * data-splash="on", and anyone who is not getting an intro gets it flipped to
@@ -46,7 +47,9 @@ if(off)h.dataset.splash='off'})();`;
 /* Without JS nothing can dismiss the splash, so without JS there isn't one. */
 const SPLASH_NOSCRIPT = `.splash{display:none}html[data-splash='on'],html[data-splash='on'] body{overflow:auto}`;
 
-export default function RootLayout({ children }: { children: ReactNode }) {
+export default async function RootLayout({ children }: { children: ReactNode }) {
+  const [session, availability] = await Promise.all([getPublicSession(), signInAvailability()]);
+
   return (
     <html lang="en" data-splash="on" suppressHydrationWarning>
       <head>
@@ -59,11 +62,13 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         </noscript>
       </head>
       <body>
-        <ToastProvider>
-          <Nav />
-          {children}
-          <footer className="footer">beta · testnet</footer>
-        </ToastProvider>
+        <SessionProvider session={session} availability={availability}>
+          <ToastProvider>
+            <Nav />
+            {children}
+            <footer className="footer">beta · testnet</footer>
+          </ToastProvider>
+        </SessionProvider>
       </body>
     </html>
   );

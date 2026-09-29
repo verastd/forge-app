@@ -56,6 +56,7 @@ class FlagConfig(BaseModel):
     csv_export: bool
     contribute_bridge: bool
     upland_data: bool
+    github_signin: bool
 
 
 class TaskCard(BaseModel):

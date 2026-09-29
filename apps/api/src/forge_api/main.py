@@ -53,7 +53,7 @@ app.add_middleware(
 @app.exception_handler(ApiError)
 async def api_error_handler(request: Request, exc: ApiError) -> JSONResponse:
     """Render service errors flat ({"error": ...}), not nested under "detail"."""
-    return JSONResponse(status_code=exc.status_code, content=exc.payload)
+    return JSONResponse(status_code=exc.status_code, content=exc.payload, headers=exc.headers)
 
 
 app.include_router(health.router)
