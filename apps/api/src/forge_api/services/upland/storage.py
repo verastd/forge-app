@@ -184,6 +184,9 @@ async def _daily_stats(day: str) -> dict[str, Any]:
 
 async def _load_properties() -> list[dict[str, Any]]:
     async with _db() as db:
+        # Interpolates only constants (UPLAND_PROPERTY's SQL and placeholders); every value
+        # is bound, so this is not the injection the rule looks for.
+        # nosemgrep: sqlalchemy-execute-raw-query
         cursor = await db.execute(
             f"SELECT {', '.join(PROPERTY_COLUMNS)} FROM properties WHERE {UPLAND_PROPERTY}",
             UPLAND_PROPERTY_PARAMS,

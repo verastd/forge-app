@@ -377,6 +377,9 @@ async def price_distribution() -> list[PriceDistributionBucket]:
 
 async def get_property(property_id: str) -> UplandProperty:
     async with _db() as db:
+        # Interpolates only constants (UPLAND_PROPERTY's SQL and placeholders); every value
+        # is bound, so this is not the injection the rule looks for.
+        # nosemgrep: sqlalchemy-execute-raw-query
         cursor = await db.execute(
             f"SELECT * FROM properties WHERE property_id = ? AND {UPLAND_PROPERTY}",
             (property_id, *UPLAND_PROPERTY_PARAMS),
