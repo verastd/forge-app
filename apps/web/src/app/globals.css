@@ -1758,6 +1758,132 @@ details.disclosure[open] > summary::before {
   border: 0;
 }
 
+/* --- splash: the intro ------------------------------------------------------ */
+
+/*
+ * The FORGE clip, played once per session and dissolved into the live hero.
+ * See src/components/Splash.tsx — it solves the two layer boxes; this file
+ * paints the ground and masks each layer down to its one feature.
+ *
+ * `data-splash` on <html> is the single switch:
+ *
+ *   on      — playing; the page underneath is locked
+ *   leaving — dissolving; scroll is already back
+ *   off     — this session is done with it (also set pre-paint by layout.tsx
+ *             for a returning visitor, anyone who asked for less motion, and
+ *             every route but the home page, which is the only one with a hero
+ *             for the clip to hand off to)
+ */
+
+html[data-splash='on'],
+html[data-splash='on'] body {
+  overflow: hidden;
+}
+
+html[data-splash='off'] .splash {
+  display: none;
+}
+
+.splash {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  overflow: hidden;
+  cursor: pointer;
+  /* The page's own ground, exactly — so the dissolve reveals the grid, the nav
+     and the copy, and never a change of backdrop underneath them. */
+  background: var(--bg);
+  opacity: 1;
+  transition: opacity 900ms var(--ease);
+}
+
+.splash-leaving {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/*
+ * A layer is the whole clip, positioned and sized by Splash.tsx so that one
+ * feature lands on its hero counterpart, then feathered to nothing around that
+ * feature. The mask is what keeps the clip's own background off the screen:
+ * the percentages are fractions of the layer box, which is a fraction of the
+ * frame, so they track the feature at every scale.
+ */
+.splash-layer {
+  position: absolute;
+  object-fit: fill;
+  pointer-events: none;
+}
+
+/*
+ * Wordmark: ink centred at 33.28% / 50.09%, half-extent 13.65% / 4.35%. Solid
+ * to 14.04% / 7.8%, gone by 18% / 10%. Tight vertically so the clip's
+ * reflection under the letters never shows; the far edge lands at 51.28%,
+ * short of the plate's own left corner at 52.1%, so this layer cannot leak a
+ * second plate at the wrong scale.
+ */
+.splash-layer-mark {
+  -webkit-mask-image: radial-gradient(
+    ellipse 18% 10% at 33.28% 50.09%,
+    #000 0,
+    #000 78%,
+    transparent 100%
+  );
+  mask-image: radial-gradient(ellipse 18% 10% at 33.28% 50.09%, #000 0, #000 78%, transparent 100%);
+}
+
+/*
+ * Parcel plate: lots centred at 67.53% / 52.18%. Solid to 15.58% / 16.4%,
+ * which takes in the slab and its glow, and gone by 19% / 20%. The near edge
+ * lands at 48.53%, clear of this layer's own copy of the wordmark, which ends
+ * at 46.93% — the mirror of the rule above.
+ */
+.splash-layer-plate {
+  -webkit-mask-image: radial-gradient(
+    ellipse 19% 20% at 67.53% 52.18%,
+    #000 0,
+    #000 82%,
+    transparent 100%
+  );
+  mask-image: radial-gradient(ellipse 19% 20% at 67.53% 52.18%, #000 0, #000 82%, transparent 100%);
+}
+
+.splash-skip {
+  position: absolute;
+  right: 20px;
+  bottom: 20px;
+  padding: 7px 15px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  background: rgba(12, 19, 34, 0.72);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition:
+    color 140ms var(--ease),
+    border-color 140ms var(--ease);
+}
+
+.splash-skip:hover {
+  color: var(--text);
+  border-color: var(--accent-line);
+}
+
+.splash-skip:focus-visible {
+  outline: 2px solid var(--spark);
+  outline-offset: 3px;
+}
+
+@media (max-width: 640px) {
+  .splash-skip {
+    right: 14px;
+    bottom: 14px;
+  }
+}
+
 @media (max-width: 860px) {
   .hero {
     grid-template-columns: 1fr;
