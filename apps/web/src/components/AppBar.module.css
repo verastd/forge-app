@@ -1,0 +1,61 @@
+/*
+ * The chrome for a standalone app under /apps/<slug> — SiteChrome's "app"
+ * mode. Same sticky, blurred bar as the site nav (.nav / .nav-inner in
+ * globals.css), so swapping one for the other reads as the same chrome,
+ * not a different app.
+ */
+
+.bar {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  background: rgba(6, 10, 18, 0.78);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  backdrop-filter: blur(14px) saturate(140%);
+  border-bottom: 1px solid var(--border);
+}
+
+.inner {
+  max-width: var(--maxw);
+  margin: 0 auto;
+  padding: 0 24px;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.back {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 12px;
+  margin-left: -12px;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  font-weight: 600;
+  white-space: nowrap;
+  transition:
+    color 140ms var(--ease),
+    background 140ms var(--ease);
+}
+
+.back:hover {
+  color: var(--text);
+  background: var(--bg-elev);
+}
+
+.title {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 0.95rem;
+  letter-spacing: 0.02em;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.spacer {
+  flex: 1;
+}

@@ -1,8 +1,8 @@
 import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
 
-import { Nav } from '../components/Nav';
 import { SessionProvider } from '../components/SessionProvider';
+import { SiteChrome } from '../components/SiteChrome';
 import { ToastProvider } from '../components/Toast';
 import { getPublicSession, signInAvailability } from '../lib/session';
 import './globals.css';
@@ -40,9 +40,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
       <body>
         <SessionProvider session={session} availability={availability}>
           <ToastProvider>
-            <Nav />
-            {children}
-            <footer className="footer">beta · testnet</footer>
+            <SiteChrome>{children}</SiteChrome>
           </ToastProvider>
         </SessionProvider>
       </body>

@@ -10,6 +10,9 @@ Layout::
 GCS is optional. Without credentials `GcsSyncManager.sync` reports "not configured"
 and leaves the data in local SQLite — it never raises. Setting `UPLAND_LOCAL_STORE`
 mirrors the same layout into a local directory instead (dev and tests).
+
+Like every read of the data set, the sync carries playuplandme's own actions only
+(`contract = ?`), and properties by the same filter as the API's (UPLAND_PROPERTY).
 """
 
 import asyncio
@@ -22,8 +25,9 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from forge_api.models import GcsStatus, GcsSyncResult
-from forge_api.services.upland.action_codes import SALE_ACTIONS
+from forge_api.services.upland.action_codes import CONTRACT_PLAYUPLAND, SALE_ACTIONS
 from forge_api.services.upland.db import _db
+from forge_api.services.upland.scraper import UPLAND_PROPERTY, UPLAND_PROPERTY_PARAMS
 
 logger = logging.getLogger(__name__)
 
@@ -139,8 +143,9 @@ async def _export_day(day: str, target: Path) -> int:
     count = 0
     async with _db() as db:
         cursor = await db.execute(
-            "SELECT raw_json FROM actions WHERE DATE(timestamp) = ? ORDER BY global_sequence",
-            (day,),
+            "SELECT raw_json FROM actions WHERE DATE(timestamp) = ? AND contract = ? "
+            "ORDER BY global_sequence",
+            (day, CONTRACT_PLAYUPLAND),
         )
         with target.open("w", encoding="utf-8") as handle:
             async for row in cursor:
@@ -155,15 +160,16 @@ async def _daily_stats(day: str) -> dict[str, Any]:
     async with _db() as db:
         cursor = await db.execute(
             "SELECT category, COUNT(*) AS c FROM actions WHERE DATE(timestamp) = ? "
-            "GROUP BY category",
-            (day,),
+            "AND contract = ? GROUP BY category",
+            (day, CONTRACT_PLAYUPLAND),
         )
         by_category = {row["category"]: row["c"] for row in await cursor.fetchall()}
         await cursor.close()
         cursor = await db.execute(
             f"SELECT COUNT(*) AS c, COALESCE(SUM(price_upx), 0) AS v FROM actions "
-            f"WHERE DATE(timestamp) = ? AND action_name IN ({marks}) AND price_upx IS NOT NULL",
-            (day, *SALE_ACTIONS),
+            f"WHERE DATE(timestamp) = ? AND contract = ? AND action_name IN ({marks}) "
+            "AND price_upx IS NOT NULL",
+            (day, CONTRACT_PLAYUPLAND, *SALE_ACTIONS),
         )
         sales = await cursor.fetchone()
         await cursor.close()
@@ -178,7 +184,10 @@ async def _daily_stats(day: str) -> dict[str, Any]:
 
 async def _load_properties() -> list[dict[str, Any]]:
     async with _db() as db:
-        cursor = await db.execute(f"SELECT {', '.join(PROPERTY_COLUMNS)} FROM properties")
+        cursor = await db.execute(
+            f"SELECT {', '.join(PROPERTY_COLUMNS)} FROM properties WHERE {UPLAND_PROPERTY}",
+            UPLAND_PROPERTY_PARAMS,
+        )
         rows = [dict(row) for row in await cursor.fetchall()]
         await cursor.close()
     return rows
@@ -223,8 +232,13 @@ async def sync_to_store(store: BlobStore) -> GcsSyncResult:
     synced_days: dict[str, int] = dict(state["days"])
 
     async with _db() as db:
+        # Scoped like the export itself, so a day's count here is the row count _export_day
+        # checkpoints for it. A day a database from before synced with another contract's
+        # rows in it now counts fewer, so it is uploaded once more, clean, then skipped.
         cursor = await db.execute(
-            "SELECT DATE(timestamp) AS day, COUNT(*) AS c FROM actions GROUP BY day ORDER BY day"
+            "SELECT DATE(timestamp) AS day, COUNT(*) AS c FROM actions WHERE contract = ? "
+            "GROUP BY day ORDER BY day",
+            (CONTRACT_PLAYUPLAND,),
         )
         days = [(row["day"], row["c"]) for row in await cursor.fetchall()]
         await cursor.close()

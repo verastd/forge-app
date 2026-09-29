@@ -12,11 +12,6 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-# Columns of the CSV export, in order. The header row is exactly ",".join(EXPORT_COLUMNS)
-# (Task Spec issue #1, acceptance criterion 1).
-EXPORT_COLUMNS: list[str] = ["ts", "type", "amount"]
-
-HistoryType = Literal["earn", "spend", "transfer"]
 Size = Literal["XS", "S", "M"]
 RewardClass = Literal["none", "R1", "R2", "R3", "R4"]
 TierFloor = Literal["T0", "T1", "T2"]
@@ -33,21 +28,6 @@ BridgeStage = Literal[
     "shipping",
     "shipped",
 ]
-
-
-class HistoryItem(BaseModel):
-    """One row of the token activity feed."""
-
-    id: str
-    ts: str  # ISO 8601 timestamp
-    type: HistoryType
-    amount: float
-    memo: str | None = None
-
-
-class HistoryList(BaseModel):
-    items: list[HistoryItem]
-    total: int
 
 
 class FlagConfig(BaseModel):

@@ -28,32 +28,21 @@ import {
   ClaimResponseSchema,
   ContributorProfileSchema,
   DispatchResultSchema,
-  HistoryListSchema,
   TaskCardSchema,
   type BridgeStatus,
   type ClaimResponse,
   type ContributorProfile,
   type DispatchResult,
-  type HistoryList,
   type Rail,
   type TaskCard,
 } from '@forge/shared';
 
-import {
-  HISTORY_FIXTURES,
-  findTaskFixture,
-  profileFixture,
-  taskCardFixtures,
-  type TaskFixture,
-} from './fixtures';
+import { findTaskFixture, profileFixture, taskCardFixtures, type TaskFixture } from './fixtures';
 import { markDegraded } from './degraded';
 import { isDemoMode } from './mode';
 import { localClaim, localDispatch, localFeedbackPrompt, localStatus } from './offline';
 
 export const apiBase = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
-
-/** Direct browser download — the CSV story is a link, not a fetch (PRD H.2). */
-export const exportUrl = `${apiBase}/api/export`;
 
 const TIMEOUT_MS = 8000;
 
@@ -188,17 +177,6 @@ async function send<T>(
     }
     return degradedResult(fallback());
   }
-}
-
-/* --- history --------------------------------------------------------------- */
-
-export const HISTORY_PAGE_SIZE = 50;
-
-export async function fetchHistory(limit: number, offset: number): Promise<Loaded<HistoryList>> {
-  return load(`/api/history?limit=${limit}&offset=${offset}`, HistoryListSchema, () => ({
-    items: HISTORY_FIXTURES.slice(offset, offset + limit).map((item) => ({ ...item })),
-    total: HISTORY_FIXTURES.length,
-  }));
 }
 
 /* --- bridge ---------------------------------------------------------------- */

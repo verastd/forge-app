@@ -72,6 +72,21 @@ HANDOFF_RAILS: dict[Rail, tuple[str, str]] = {
     "claude-code": ("Claude Code", "https://claude.ai/code"),
     "codex": ("OpenAI Codex", "https://chatgpt.com/codex"),
 }
+#: The first two handoff steps per rail. The web opens Claude Code with the task already
+#: typed in (a prefilled link); Codex still takes a copy and a paste.
+_HANDOFF_STEPS: dict[Rail, tuple[str, str]] = {
+    "claude-code": (
+        "Tap Open Claude Code. It opens with the whole task already typed in, "
+        "so there is nothing to copy.",
+        "If Claude Code asks which project to work on, pick your own copy of the app, "
+        "then press send. It runs on your own plan.",
+    ),
+    "codex": (
+        "Tap Copy to put the whole task on your clipboard.",
+        "Tap Open OpenAI Codex, pick your own copy of the app, paste the task and send it. "
+        "It runs on your own plan.",
+    ),
+}
 
 _API_RAIL_NOTES: dict[Rail, str] = {
     "copilot": (
@@ -334,13 +349,18 @@ def _api_instructions(rail: Rail, task: TaskFixture) -> list[str]:
 
 
 def _handoff_instructions(rail: Rail, task: TaskFixture) -> list[str]:
-    """Civilian voice only — the instructions are about the agent app, not about git (PRD I.2)."""
-    label, deep_link = HANDOFF_RAILS[rail]
+    """Civilian voice only — the instructions are about the agent app, not about git (PRD I.2).
+
+    Byte-identical to `handoffInstructions` in apps/web/src/lib/offline.ts; both sides are
+    held to tests/fixtures/handoff-golden.json.
+    """
+    label, _ = HANDOFF_RAILS[rail]
+    first, second = _HANDOFF_STEPS[rail]
     return [
-        "Tap Copy to put the whole task prompt on your clipboard.",
-        f"Tap Open {label} — it opens {deep_link} and already has access to your copy of the app.",
-        f"Paste the prompt and send it. {label} does the work and sends your contribution in "
-        "for checks automatically; come back here to watch how it goes.",
+        first,
+        second,
+        f"{label} does the work, but sending it in for checks is not automatic yet. "
+        "Come back here when it is finished to see where it stands.",
     ]
 
 

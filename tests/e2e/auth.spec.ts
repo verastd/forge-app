@@ -16,10 +16,10 @@ import { demoSignIn, signInAs } from './helpers/session';
  * safety, the BFF's own checks, and sign-out — using accessible names and
  * response bodies from notes-1D-1E.md, not implementation details.
  *
- * The account panel's own "@<login>" and "Profile" are ambiguous on their
- * own: the panel is always in the DOM (just `hidden`, which a role query
- * respects but a text locator does not), and the nav has its own unrelated
- * "Profile" link to /contribute/profile. Assertions below scope past both.
+ * The account panel's own "@<login>" is ambiguous on its own: the panel is
+ * always in the DOM (just `hidden`, which a role query respects but a text
+ * locator does not), so `/me`'s own "@<login>" and the panel's are both
+ * matches. Assertions below scope past that with `page.getByRole('main')`.
  */
 
 /**
@@ -50,9 +50,9 @@ test.describe('signed out', () => {
     await expect(page).toHaveURL(/\/signin\?next=%2Fme$/);
   });
 
-  test('/upland sends you to /signin too', async ({ page }) => {
-    await page.goto('/upland');
-    await expect(page).toHaveURL(/\/signin\?next=%2Fupland$/);
+  test('/apps/data sends you to /signin too', async ({ page }) => {
+    await page.goto('/apps/data');
+    await expect(page).toHaveURL(/\/signin\?next=%2Fapps%2Fdata$/);
   });
 });
 
@@ -130,9 +130,9 @@ test.describe('the account menu', () => {
 
   test('the Profile and Settings links work', async ({ page }) => {
     const trigger = page.getByRole('button', { name: 'Account: you' });
-    // The nav has its own, unrelated "Profile" link (to /contribute/profile);
-    // href disambiguates the account panel's own link (to /me).
-    const panelProfileLink = page.getByRole('link', { name: 'Profile' }).and(page.locator('[href="/me"]'));
+    // Nav has no "Profile" link of its own any more (Contribute/Propose/Apps
+    // only), so the account panel's is unambiguous.
+    const panelProfileLink = page.getByRole('link', { name: 'Profile' });
 
     await clickAndExpectExpanded(trigger, true);
     await panelProfileLink.click();

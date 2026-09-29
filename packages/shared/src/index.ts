@@ -8,27 +8,6 @@
 import { z } from 'zod';
 
 // ---------------------------------------------------------------------------
-// History
-// ---------------------------------------------------------------------------
-
-export const HistoryItemSchema = z.object({
-  id: z.string(),
-  ts: z.string().datetime(),
-  type: z.enum(['earn', 'spend', 'transfer']),
-  amount: z.number(),
-  memo: z.string().optional(),
-});
-export type HistoryItem = z.infer<typeof HistoryItemSchema>;
-
-export const HistoryListSchema = z.object({
-  items: z.array(HistoryItemSchema),
-  total: z.number().int(),
-});
-export type HistoryList = z.infer<typeof HistoryListSchema>;
-
-export const EXPORT_COLUMNS = ['ts', 'type', 'amount'] as const;
-
-// ---------------------------------------------------------------------------
 // Feature flags
 // ---------------------------------------------------------------------------
 

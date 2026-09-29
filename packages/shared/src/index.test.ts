@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import * as shared from './index.js';
 import {
   ActionCodesSchema,
   ActionDistributionEntrySchema,
@@ -10,13 +11,10 @@ import {
   ContributorProfileSchema,
   DispatchRequestSchema,
   DispatchResultSchema,
-  EXPORT_COLUMNS,
   FLAG_NAMES,
   FlagConfigSchema,
   GcsStatusSchema,
   GcsSyncResultSchema,
-  HistoryItemSchema,
-  HistoryListSchema,
   PriceDistributionBucketSchema,
   RAILS,
   RailSchema,
@@ -40,87 +38,12 @@ import {
   UplandStatsOverviewSchema,
 } from './index.js';
 
-describe('HistoryItemSchema', () => {
-  it('accepts a valid history item', () => {
-    const result = HistoryItemSchema.safeParse({
-      id: 'h_1',
-      ts: '2026-01-01T00:00:00.000Z',
-      type: 'earn',
-      amount: 12.5,
-      memo: 'first contribution',
-    });
-    expect(result.success).toBe(true);
-  });
-
-  it('accepts a valid item without the optional memo', () => {
-    const result = HistoryItemSchema.safeParse({
-      id: 'h_2',
-      ts: '2026-01-01T00:00:00Z',
-      type: 'spend',
-      amount: -3,
-    });
-    expect(result.success).toBe(true);
-  });
-
-  it('rejects a type outside the earn/spend/transfer enum', () => {
-    const result = HistoryItemSchema.safeParse({
-      id: 'h_3',
-      ts: '2026-01-01T00:00:00Z',
-      type: 'bonus',
-      amount: 1,
-    });
-    expect(result.success).toBe(false);
-  });
-
-  it('rejects a non-ISO datetime string', () => {
-    const result = HistoryItemSchema.safeParse({
-      id: 'h_4',
-      ts: 'not-a-date',
-      type: 'earn',
-      amount: 1,
-    });
-    expect(result.success).toBe(false);
-  });
-
-  it('rejects a date-only string (no time component)', () => {
-    const result = HistoryItemSchema.safeParse({
-      id: 'h_5',
-      ts: '2026-01-01',
-      type: 'earn',
-      amount: 1,
-    });
-    expect(result.success).toBe(false);
-  });
-
-  it('rejects a datetime with a non-Z timezone offset', () => {
-    const result = HistoryItemSchema.safeParse({
-      id: 'h_6',
-      ts: '2026-01-01T00:00:00+05:00',
-      type: 'earn',
-      amount: 1,
-    });
-    expect(result.success).toBe(false);
-  });
-});
-
-describe('HistoryListSchema', () => {
-  it('accepts a valid list with an integer total', () => {
-    const result = HistoryListSchema.safeParse({
-      items: [{ id: 'h_1', ts: '2026-01-01T00:00:00Z', type: 'earn', amount: 1 }],
-      total: 1,
-    });
-    expect(result.success).toBe(true);
-  });
-
-  it('rejects a non-integer total', () => {
-    const result = HistoryListSchema.safeParse({ items: [], total: 1.5 });
-    expect(result.success).toBe(false);
-  });
-});
-
-describe('EXPORT_COLUMNS', () => {
-  it('is the frozen ts/type/amount tuple', () => {
-    expect(EXPORT_COLUMNS).toEqual(['ts', 'type', 'amount']);
+describe('History (removed in v0.2)', () => {
+  it('is gone from the contract, as it is from apps/api/src/forge_api/models.py', () => {
+    const leftovers = Object.keys(shared).filter(
+      (name) => name.startsWith('History') || name === 'EXPORT_COLUMNS',
+    );
+    expect(leftovers).toEqual([]);
   });
 });
 

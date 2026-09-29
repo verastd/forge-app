@@ -2,7 +2,8 @@
 
 `packages/shared` declares every optional field with zod `.optional()`, which accepts
 a missing key and *rejects* an explicit null. So no response body may contain a JSON
-null anywhere — otherwise `Schema.parse(await res.json())` throws in apps/web.
+null anywhere — otherwise `Schema.parse(await res.json())` throws in apps/web. (The
+Upland schemas are the documented exception: their wire uses explicit nulls.)
 """
 
 from typing import Any
@@ -24,10 +25,10 @@ def test_no_response_body_contains_a_json_null(client: TestClient) -> None:
     client.post("/api/bridge/claim", json={"taskId": 1})
     payloads = [
         client.get("/api/health").json(),
-        client.get("/api/history?limit=200").json(),
         client.get("/api/flags").json(),
         client.get("/api/bridge/tasks").json(),
         client.post("/api/bridge/dispatch", json={"taskId": 1, "rail": "copilot"}).json(),
+        client.post("/api/bridge/dispatch", json={"taskId": 1, "rail": "claude-code"}).json(),
         client.post("/api/bridge/dispatch", json={"taskId": 1, "rail": "codex"}).json(),
         client.get("/api/bridge/status/1").json(),
         client.post("/api/bridge/feedback/1").json(),
@@ -50,5 +51,16 @@ def test_required_fields_are_always_present(client: TestClient) -> None:
         "url",
         "labels",
     }
-    item = client.get("/api/history?limit=1").json()["items"][0]
-    assert set(item) >= {"id", "ts", "type", "amount"}
+    client.post("/api/bridge/claim", json={"taskId": 1})
+    dispatched = client.post("/api/bridge/dispatch", json={"taskId": 1, "rail": "codex"}).json()
+    assert set(dispatched) >= {"mode", "compiledPrompt", "instructions"}
+
+
+def test_history_is_gone_from_the_contract(client: TestClient) -> None:
+    """v0.2 removed History: no route serves it, and no History model is left in the schema
+    (its zod mirror left packages/shared in the same change)."""
+    assert client.get("/api/history").status_code == 404
+    assert client.get("/api/export").status_code == 404
+    schema = client.get("/openapi.json").json()
+    assert not {"/api/history", "/api/export"} & set(schema["paths"])
+    assert not [name for name in schema["components"]["schemas"] if name.startswith("History")]

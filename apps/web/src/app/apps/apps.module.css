@@ -1,0 +1,21 @@
+/*
+ * /apps is SiteChrome's "lobby" chrome mode (see SiteChrome.tsx): the site
+ * nav stays, but there's no footer, and the main here is full-bleed — no
+ * --maxw cap — so Phase 3's real 3D lobby can fill the width below the nav
+ * in the same slot. This placeholder list keeps its own content narrow
+ * instead of stretching to fit.
+ */
+
+.lobby {
+  width: 100%;
+  padding: 40px 24px 80px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: minmax(0, 320px);
+  gap: 16px;
+}

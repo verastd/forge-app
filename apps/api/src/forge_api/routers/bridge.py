@@ -24,9 +24,10 @@ FLAG = "contribute_bridge"
 
 def _require_bridge_enabled() -> None:
     """Router-wide gate: every /api/bridge/* route 404s while the Bridge kill
-    switch is off, instead of quietly continuing to serve it (mirrors
-    routers/export.py's csv_export gate, applied once for the whole router
-    rather than per-route since every route here is Bridge-only)."""
+    switch is off, instead of quietly continuing to serve it (mirrors the
+    csv_export gate on routers/upland.py's export route, applied once for
+    the whole router rather than per-route since every route here is
+    Bridge-only)."""
     if not flags_service.is_enabled(FLAG):
         raise ApiError(404, {"error": "bridge-disabled"})
 

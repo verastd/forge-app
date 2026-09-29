@@ -42,6 +42,18 @@ const nextConfig = {
       },
     ];
   },
+
+  // Phase 2 restructure: History is gone and Upland moved under /apps/data,
+  // so old links (bookmarks, issues, external references) get a permanent
+  // redirect instead of a 404.
+  async redirects() {
+    return [
+      { source: '/history', destination: '/apps/data', permanent: true },
+      { source: '/upland', destination: '/apps/data', permanent: true },
+      { source: '/upland/:path*', destination: '/apps/data/:path*', permanent: true },
+      { source: '/contribute/profile', destination: '/me', permanent: true },
+    ];
+  },
 };
 
 export default nextConfig;

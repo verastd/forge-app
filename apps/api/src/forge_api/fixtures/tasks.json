@@ -1,8 +1,8 @@
 [
   {
     "id": 1,
-    "title": "Polish the CSV export on the history page",
-    "civilianSummary": "Let people download their activity history as a spreadsheet file.",
+    "title": "Polish the CSV export in the Data app",
+    "civilianSummary": "Let people download the Upland data they are looking at as a spreadsheet file.",
     "size": "S",
     "rewardClass": "none",
     "rewardUsd": null,
@@ -10,8 +10,8 @@
     "url": "https://github.com/verastd/forge-app/issues/1",
     "labels": ["agent-ready", "status:open", "size:S"],
     "acceptanceCriteria": [
-      "GET /api/export returns text/csv with columns [ts, type, amount]",
-      "Export button visible on /history for logged-in users (flag: csv_export)",
+      "GET /api/upland/export returns text/csv whose first line is the 13-column action header",
+      "Export CSV button visible on /apps/data for signed-in users (flag: csv_export)",
       "10k-row export completes < 3s in CI fixture data"
     ]
   },

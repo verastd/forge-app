@@ -13,8 +13,8 @@ import type { NextRequest } from 'next/server';
 import { visitorSession } from './lib/auth/visitor';
 
 export const config = {
-  // Phase 2 swaps /upland for /apps/data.
-  matcher: ['/me/:path*', '/upland/:path*'],
+  // Phase 2 swapped /upland for /apps/data.
+  matcher: ['/me/:path*', '/apps/data/:path*'],
 };
 
 export async function middleware(request: NextRequest): Promise<NextResponse> {

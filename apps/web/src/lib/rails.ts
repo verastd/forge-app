@@ -70,7 +70,8 @@ export const RAIL_INFO: Record<Rail, RailInfo> = {
     label: 'Claude Code',
     mode: 'handoff',
     stars: 3,
-    grade: 'Guided handoff, 3 taps + paste',
+    // Pick the rail, tap Open: Claude Code opens with the task typed in, so the last step is send.
+    grade: 'Guided handoff, 2 taps + send',
     note: 'Nothing to connect. We hand you the wording and open Claude Code for you.',
     deepLink: 'https://claude.ai/code',
   },
@@ -87,4 +88,29 @@ export const RAIL_INFO: Record<Rail, RailInfo> = {
 
 export function railLabel(rail: Rail): string {
   return RAIL_INFO[rail].label;
+}
+
+/**
+ * A Claude Code URL with the compiled prompt already filled in (v0.2 PRD
+ * addendum), so the contributor has nothing to copy: opening it is the whole
+ * handoff. `login` is the signed-in GitHub login for a real (non-demo)
+ * session; pass null for a demo session or a signed-out visitor, and the
+ * link omits the `repositories` hint since there is no real fork to point
+ * Claude Code at.
+ *
+ * Returns null when the URL would exceed 7,000 characters — a prompt that
+ * long doesn't fit reliably in a URL bar / server request line, so the
+ * caller falls back to the plain deep link plus copy/paste instead.
+ *
+ * Pure and tiny on purpose: this is the one piece of the handoff worth
+ * testing on its own, so it stays simple enough to check by hand.
+ */
+const CLAUDE_CODE_PREFILL_MAX_LENGTH = 7000;
+
+export function claudeCodePrefillUrl(prompt: string, login: string | null): string | null {
+  let url = `https://claude.ai/code?prompt=${encodeURIComponent(prompt)}`;
+  if (login !== null) {
+    url += `&repositories=${encodeURIComponent(`${login}/forge-app`)}`;
+  }
+  return url.length > CLAUDE_CODE_PREFILL_MAX_LENGTH ? null : url;
 }

@@ -34,6 +34,7 @@ from forge_api.services.upland.action_codes import (
 )
 from forge_api.services.upland.db import _db
 from forge_api.services.upland.hyperion import BLOCKS_PER_DAY, HyperionClient
+from forge_api.services.upland.scraper import UPLAND_PROPERTY, UPLAND_PROPERTY_PARAMS
 from forge_api.services.upland.storage import gcs_configured
 
 MAX_PAGE = 1000
@@ -58,6 +59,8 @@ _PRICE_BUCKETS = (
     ("50K-100K", 100_000),
     ("100K-500K", 500_000),
 )
+#: Rows per chunk of the CSV export (see `iter_export_csv`).
+EXPORT_BATCH_ROWS = 1_000
 EXPORT_HEADER = [
     "global_sequence",
     "timestamp",
@@ -73,10 +76,31 @@ EXPORT_HEADER = [
     "from_account",
     "to_account",
 ]
+#: Leads a spreadsheet reads as a formula, or skips on the way to one (CSV injection).
+_FORMULA_LEADS = ("=", "+", "-", "@", "\t", "\r")
 
 
 def _marks(values: tuple[str, ...]) -> str:
     return ",".join("?" for _ in values)
+
+
+#: Every read here is scoped to playuplandme's own actions (`contract = ?`). The scraper
+#: stores nothing else, but a database it filled before it dropped other contracts' actions
+#: can still hold rows another contract wrote by notifying playuplandme, in its own words.
+#: Reads of `properties` apply UPLAND_PROPERTY instead (scraper.py).
+_UPLAND = (CONTRACT_PLAYUPLAND,)
+
+
+def _safe_cell(value: Any) -> Any:
+    """A text cell a spreadsheet would run as a formula, prefixed with `'` so it opens as text.
+
+    Decoded fields hold whatever the action carried, and nothing checks them on the way in, so
+    every text cell is treated as untrusted. Numbers, ISO timestamps and hex ids never start
+    with a lead, so they pass through untouched.
+    """
+    if isinstance(value, str) and value.startswith(_FORMULA_LEADS):
+        return "'" + value
+    return value
 
 
 def _to_action(row: aiosqlite.Row) -> UplandAction:
@@ -119,11 +143,20 @@ async def _scalar(db: aiosqlite.Connection, sql: str, params: tuple[Any, ...] = 
     return row[0] if row else None
 
 
+async def _count_actions(db: aiosqlite.Connection) -> int:
+    return int(await _scalar(db, "SELECT COUNT(*) FROM actions WHERE contract = ?", _UPLAND) or 0)
+
+
+async def _count_properties(db: aiosqlite.Connection) -> int:
+    sql = f"SELECT COUNT(*) FROM properties WHERE {UPLAND_PROPERTY}"
+    return int(await _scalar(db, sql, UPLAND_PROPERTY_PARAMS) or 0)
+
+
 async def health() -> UplandHealth:
     async with _db() as db:
-        actions = int(await _scalar(db, "SELECT COUNT(*) FROM actions") or 0)
-        properties = int(await _scalar(db, "SELECT COUNT(*) FROM properties") or 0)
-        latest = await _scalar(db, "SELECT MAX(block_num) FROM actions")
+        actions = await _count_actions(db)
+        properties = await _count_properties(db)
+        latest = await _scalar(db, "SELECT MAX(block_num) FROM actions WHERE contract = ?", _UPLAND)
     return UplandHealth(
         status="ok",
         actions=actions,
@@ -135,27 +168,28 @@ async def health() -> UplandHealth:
 
 async def stats_overview() -> UplandStatsOverview:
     async with _db() as db:
-        total = int(await _scalar(db, "SELECT COUNT(*) FROM actions") or 0)
-        cursor = await db.execute("SELECT MIN(timestamp) AS lo, MAX(timestamp) AS hi FROM actions")
-        span = await cursor.fetchone()
-        await cursor.close()
+        total = await _count_actions(db)
+        # Apart, each is one step down the timestamp index; together they scan all of it.
+        first = await _scalar(db, "SELECT MIN(timestamp) FROM actions WHERE contract = ?", _UPLAND)
+        last = await _scalar(db, "SELECT MAX(timestamp) FROM actions WHERE contract = ?", _UPLAND)
         cursor = await db.execute(
-            "SELECT category, COUNT(*) AS c FROM actions GROUP BY category ORDER BY c DESC"
+            "SELECT category, COUNT(*) AS c FROM actions WHERE contract = ? "
+            "GROUP BY category ORDER BY c DESC",
+            _UPLAND,
         )
         by_category = {row["category"]: row["c"] for row in await cursor.fetchall()}
         await cursor.close()
         cursor = await db.execute(
             "SELECT action_name, action_meaning, category, COUNT(*) AS c FROM actions "
-            "GROUP BY action_name ORDER BY c DESC LIMIT 15"
+            "WHERE contract = ? GROUP BY action_name ORDER BY c DESC LIMIT 15",
+            _UPLAND,
         )
         by_type = [_distribution_entry(row) for row in await cursor.fetchall()]
         await cursor.close()
-        properties = int(await _scalar(db, "SELECT COUNT(*) FROM properties") or 0)
+        properties = await _count_properties(db)
     return UplandStatsOverview(
         totalActions=total,
-        dateRange=UplandDateRange(
-            min=span["lo"] if span else None, max=span["hi"] if span else None
-        ),
+        dateRange=UplandDateRange(min=first, max=last),
         byCategory=by_category,
         byType=by_type,
         totalProperties=properties,
@@ -183,8 +217,8 @@ async def list_actions(
     offset: int = 0,
 ) -> UplandActionList:
     """Newest-first page of actions. `start`/`end` are ISO timestamps (inclusive)."""
-    clauses: list[str] = []
-    params: list[Any] = []
+    clauses: list[str] = ["contract = ?"]
+    params: list[Any] = [CONTRACT_PLAYUPLAND]
     for column, value in (
         ("category", category),
         ("action_name", action_name),
@@ -200,7 +234,7 @@ async def list_actions(
     if end is not None:
         clauses.append("timestamp <= ?")
         params.append(end)
-    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    where = f"WHERE {' AND '.join(clauses)}"
     limit = max(0, min(limit, MAX_PAGE))
 
     async with _db() as db:
@@ -218,10 +252,10 @@ async def list_actions(
 async def recent_sales(limit: int = 100) -> list[UplandAction]:
     async with _db() as db:
         cursor = await db.execute(
-            f"SELECT {_ACTION_COLUMNS} FROM actions "
-            f"WHERE action_name IN ({_marks(SALE_ACTIONS)}) AND price_upx IS NOT NULL "
+            f"SELECT {_ACTION_COLUMNS} FROM actions WHERE contract = ? "
+            f"AND action_name IN ({_marks(SALE_ACTIONS)}) AND price_upx IS NOT NULL "
             "ORDER BY timestamp DESC, global_sequence DESC LIMIT ?",
-            (*SALE_ACTIONS, max(0, min(limit, MAX_PAGE))),
+            (*_UPLAND, *SALE_ACTIONS, max(0, min(limit, MAX_PAGE))),
         )
         items = [_to_action(row) for row in await cursor.fetchall()]
         await cursor.close()
@@ -235,10 +269,10 @@ async def sales_volume(days: int = 90) -> list[SalesVolumeDay]:
         cursor = await db.execute(
             "SELECT DATE(timestamp) AS date, COUNT(*) AS count, SUM(price_upx) AS volume, "
             "AVG(price_upx) AS avg_price, MIN(price_upx) AS min_price, MAX(price_upx) AS max_price "
-            f"FROM actions WHERE action_name IN ({_marks(VOLUME_ACTIONS)}) "
+            f"FROM actions WHERE contract = ? AND action_name IN ({_marks(VOLUME_ACTIONS)}) "
             "AND price_upx IS NOT NULL AND timestamp >= ? "
             "GROUP BY DATE(timestamp) ORDER BY date DESC",
-            (*VOLUME_ACTIONS, cutoff),
+            (*_UPLAND, *VOLUME_ACTIONS, cutoff),
         )
         rows = await cursor.fetchall()
         await cursor.close()
@@ -259,7 +293,8 @@ async def action_distribution() -> list[ActionDistributionEntry]:
     async with _db() as db:
         cursor = await db.execute(
             "SELECT action_name, action_meaning, category, COUNT(*) AS c FROM actions "
-            "GROUP BY action_name ORDER BY c DESC"
+            "WHERE contract = ? GROUP BY action_name ORDER BY c DESC",
+            _UPLAND,
         )
         entries = [_distribution_entry(row) for row in await cursor.fetchall()]
         await cursor.close()
@@ -270,9 +305,10 @@ async def top_properties(limit: int = 50, sort: PropertySort = "sales") -> Uplan
     order = "total_sales" if sort == "sales" else "last_sale_price_upx"
     async with _db() as db:
         cursor = await db.execute(
-            "SELECT * FROM properties WHERE total_sales > 0 OR last_sale_price_upx IS NOT NULL "
+            "SELECT * FROM properties "
+            f"WHERE (total_sales > 0 OR last_sale_price_upx IS NOT NULL) AND {UPLAND_PROPERTY} "
             f"ORDER BY {order} DESC, property_id LIMIT ?",
-            (max(0, min(limit, MAX_PAGE)),),
+            (*UPLAND_PROPERTY_PARAMS, max(0, min(limit, MAX_PAGE))),
         )
         items = [_to_property(row) for row in await cursor.fetchall()]
         await cursor.close()
@@ -286,9 +322,9 @@ async def active_accounts(limit: int = 50) -> list[ActiveAccount]:
     async with _db() as db:
         cursor = await db.execute(
             "SELECT actor, COUNT(*) AS tx_count, COALESCE(SUM(price_upx), 0) AS volume "
-            "FROM actions WHERE actor IS NOT NULL AND actor NOT IN (?, ?) GROUP BY actor "
-            "ORDER BY tx_count DESC, actor LIMIT ?",
-            (CONTRACT_PLAYUPLAND, CONTRACT_UPX_TOKEN, max(0, min(limit, MAX_PAGE))),
+            "FROM actions WHERE contract = ? AND actor IS NOT NULL AND actor NOT IN (?, ?) "
+            "GROUP BY actor ORDER BY tx_count DESC, actor LIMIT ?",
+            (*_UPLAND, CONTRACT_PLAYUPLAND, CONTRACT_UPX_TOKEN, max(0, min(limit, MAX_PAGE))),
         )
         rows = await cursor.fetchall()
         await cursor.close()
@@ -300,7 +336,11 @@ async def active_accounts(limit: int = 50) -> list[ActiveAccount]:
 
 async def time_series(interval: Interval = "day", category: str = "trade") -> list[TimeSeriesPoint]:
     """Counts and UPX volume per bucket. `category` is an action category or "all"."""
-    where, params = ("", ()) if category == "all" else ("WHERE category = ?", (category,))
+    where, params = (
+        ("WHERE contract = ?", _UPLAND)
+        if category == "all"
+        else ("WHERE contract = ? AND category = ?", (*_UPLAND, category))
+    )
     async with _db() as db:
         cursor = await db.execute(
             f"SELECT strftime('{_BUCKET_FORMATS[interval]}', timestamp) AS bucket, "
@@ -323,8 +363,9 @@ async def price_distribution() -> list[PriceDistributionBucket]:
         cursor = await db.execute(
             f"SELECT CASE {cases} ELSE '500K+' END AS range, COUNT(*) AS count, "
             "AVG(price_upx) AS avg_price, MIN(price_upx) AS lo FROM actions "
-            "WHERE action_name IN ('n5', 'n111') AND price_upx IS NOT NULL "
-            "GROUP BY range ORDER BY lo"
+            "WHERE contract = ? AND action_name IN ('n5', 'n111') AND price_upx IS NOT NULL "
+            "GROUP BY range ORDER BY lo",
+            _UPLAND,
         )
         rows = await cursor.fetchall()
         await cursor.close()
@@ -336,7 +377,10 @@ async def price_distribution() -> list[PriceDistributionBucket]:
 
 async def get_property(property_id: str) -> UplandProperty:
     async with _db() as db:
-        cursor = await db.execute("SELECT * FROM properties WHERE property_id = ?", (property_id,))
+        cursor = await db.execute(
+            f"SELECT * FROM properties WHERE property_id = ? AND {UPLAND_PROPERTY}",
+            (property_id, *UPLAND_PROPERTY_PARAMS),
+        )
         row = await cursor.fetchone()
         await cursor.close()
     if row is None:
@@ -346,10 +390,11 @@ async def get_property(property_id: str) -> UplandProperty:
 
 async def list_properties(limit: int = 100, offset: int = 0) -> UplandPropertyList:
     async with _db() as db:
-        total = int(await _scalar(db, "SELECT COUNT(*) FROM properties") or 0)
+        total = await _count_properties(db)
         cursor = await db.execute(
-            "SELECT * FROM properties ORDER BY first_seen_block, property_id LIMIT ? OFFSET ?",
-            (max(0, min(limit, MAX_PAGE)), offset),
+            f"SELECT * FROM properties WHERE {UPLAND_PROPERTY} "
+            "ORDER BY first_seen_block, property_id LIMIT ? OFFSET ?",
+            (*UPLAND_PROPERTY_PARAMS, max(0, min(limit, MAX_PAGE)), offset),
         )
         items = [_to_property(row) for row in await cursor.fetchall()]
         await cursor.close()
@@ -403,23 +448,37 @@ async def estimate(client: HyperionClient, days: int = 90) -> UplandEstimate:
 
 
 async def iter_export_csv(kind: ExportType) -> AsyncIterator[str]:
-    """Stream the actions table (or just its priced sales) as CSV, oldest first."""
-    where = ""
-    params: tuple[str, ...] = ()
+    """Stream playuplandme's actions (or just its priced sales) as CSV, oldest first.
+
+    The header goes out before the query runs. After it, every chunk is one `fetchmany` of
+    EXPORT_BATCH_ROWS rows, so memory holds one batch however big the table grows, and a
+    10k-row export is 11 writes rather than 10,001.
+    """
+    # Both kinds are scoped to Upland's own contract: another contract can name an action `n5`.
+    where = "WHERE contract = ?"
+    params: tuple[str, ...] = _UPLAND
     if kind == "sales":
-        where = f"WHERE action_name IN ({_marks(SALE_ACTIONS)}) AND price_upx IS NOT NULL"
-        params = SALE_ACTIONS
+        where += f" AND action_name IN ({_marks(SALE_ACTIONS)}) AND price_upx IS NOT NULL"
+        params = (*params, *SALE_ACTIONS)
 
-    def render(values: list[Any]) -> str:
-        buffer = io.StringIO()
-        csv.writer(buffer).writerow(values)
-        return buffer.getvalue()
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
 
-    yield render(EXPORT_HEADER)
+    def take() -> str:
+        chunk = buffer.getvalue()
+        buffer.seek(0)
+        buffer.truncate(0)
+        return chunk
+
+    writer.writerow(EXPORT_HEADER)
+    yield take()
     async with _db() as db:
         cursor = await db.execute(
             f"SELECT {_ACTION_COLUMNS} FROM actions {where} ORDER BY global_sequence", params
         )
-        async for row in cursor:
-            yield render([row[name] for name in EXPORT_HEADER])
-        await cursor.close()
+        try:
+            while rows := list(await cursor.fetchmany(EXPORT_BATCH_ROWS)):
+                writer.writerows([_safe_cell(row[name]) for name in EXPORT_HEADER] for row in rows)
+                yield take()
+        finally:
+            await cursor.close()

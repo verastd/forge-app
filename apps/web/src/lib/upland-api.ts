@@ -263,8 +263,8 @@ export const fetchEstimate = (days = 90): Promise<UplandEstimate> =>
   request(`/estimate${query({ days })}`, UplandEstimateSchema, undefined, CHAIN_TIMEOUT_MS);
 
 /**
- * Direct browser download, like `exportUrl` in `./api` — a link, not a fetch.
- * Same-origin, so the session cookie rides along to the BFF.
+ * Direct browser download: a link, not a fetch. Same-origin, so the session
+ * cookie rides along to the BFF.
  */
 export const uplandExportUrl = (type: ExportType = 'actions'): string =>
   `${BFF_BASE}/export${query({ type })}`;

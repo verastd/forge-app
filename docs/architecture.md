@@ -24,7 +24,7 @@ incomplete), `experimental` (scaffold/stub only).
 | Path | Purpose | Owners | Stability | Tier-floor notes |
 |---|---|---|---|---|
 | `apps/web` | Next.js 15 App Router, TypeScript strict. The app itself, including the Bridge's `/contribute` surface and GitHub sign-in (`src/app/auth/`, `src/app/bff/`) | `@verastd`; `src/app/auth/`, `src/app/bff/`, `src/middleware.ts`, `src/lib/session.ts`, `src/lib/auth/`, `src/lib/mode.ts` and `next.config.mjs` need cold-account approval | beta — live and demo builds both work end to end; no unit-test runner yet, so it's exempt from the changed-line coverage gate | Open to all tiers per task; the cold-account sub-paths above are effectively T2+ in practice |
-| `apps/api` | FastAPI (Python 3.12, `uv`), package `forge_api`. App backend + the Bridge's server-side service | `@verastd`; `routers/auth*`, `routers/pay*` and `services/identity.py` need cold-account approval | beta — `health`, `history`, `export`, `flags`, `bridge`, and `upland`/`upland_scrape` routers are live, each with pytest coverage; `auth*`/`pay*` don't exist yet (identity verification lives in `services/identity.py`, consumed by the `upland` routers' dependencies, not a dedicated router) | `auth*`/`pay*`/`services/identity.py` paths: cold-account approval, effectively T2+ in practice |
+| `apps/api` | FastAPI (Python 3.12, `uv`), package `forge_api`. App backend + the Bridge's server-side service | `@verastd`; `routers/auth*`, `routers/pay*` and `services/identity.py` need cold-account approval | beta — `health`, `flags`, `bridge`, and `upland`/`upland_scrape` routers are live, each with pytest coverage; `auth*`/`pay*` don't exist yet (identity verification lives in `services/identity.py`, consumed by the `upland` routers' dependencies, not a dedicated router) | `auth*`/`pay*`/`services/identity.py` paths: cold-account approval, effectively T2+ in practice |
 | `packages/shared` | zod schemas — reference copy of the web/API contract, hand-mirrored and test-locked against `apps/api`'s Pydantic models | `@verastd` | stable — schemas populated, mirrored field-for-field by `models.py`, locked by contract tests | Open |
 | `packages/auth` | Sign-in with GitHub: PKCE, sealed session/transaction cookies, the API assertion. Built on `jose` and Web Crypto only (no `node:` imports), so Next's Edge middleware can import it — see [ADR-003](adr/ADR-003-github-app-signin.md) | `@verastd` `@forge-cold` (cold-account approval) | stable — 100% coverage enforced in `vitest.config.ts`, includes the RFC 7636 PKCE test vector | **Tier floor T2** |
 | `packages/flags` | Feature-flag client; layered load, fail-closed. `config/flags.json` -> `FORGE_FLAGS_PATH` -> `FORGE_FLAGS_JSON` | `@verastd` | stable — `csv_export`, `contribute_bridge`, `upland_data` and `github_signin`, all real gates | Open |
@@ -80,7 +80,7 @@ browser holds, sealed and opened by `packages/auth`.
    `enc: A256GCM`; claims: GitHub id, login, display name, avatar URL,
    `demo: false`) and set with a 7-day absolute lifetime. The transaction
    cookie is cleared on every path out of the callback, success or failure.
-   `middleware.ts` gates `/me/:path*` and `/upland/:path*` on a valid session,
+   `middleware.ts` gates `/me/:path*` and `/apps/data/:path*` on a valid session,
    redirecting to `/signin?next=<path>` otherwise.
 
 No database, no server-side session store, and no way to revoke one session
@@ -97,7 +97,9 @@ on the FastAPI side verifies that assertion through `require_identity` (and
 minted on every BFF call, never cached or reused. Each router's dependency
 order is fixed and produces a specific status in this order: the
 `upland_data` flag first (404 `upland-disabled` if it's off), then identity
-(401 `unauthenticated`), then admin (403 `admin_only`) where it applies. A
+(401 `unauthenticated`), then admin (403 `admin_only`) where it applies, and
+on the CSV export its own `csv_export` flag (403 `flag_disabled`, with no
+`WWW-Authenticate` challenge: signing in again can't change it). A
 demo session never reaches this path: the BFF 401s it before minting
 anything, because a practice account is nobody on GitHub for the API to
 serve. What comes back to the browser is upstream's status and body with
@@ -110,9 +112,11 @@ and `Cache-Control: private, no-store`.
 `POST /auth/demo` (404 in every other build) instead of GitHub: it seals
 `{sub: 'demo', login: 'you', name: 'Practice account', demo: true}` under the
 same session mechanism. A demo session passes the middleware gate — the
-practice account can look at `/me` and `/upland`'s pages — but, as above,
-can never mint an API assertion, so `/upland`'s data always reads as
-unreachable under a demo session, same as a signed-out visitor.
+practice account can look at `/me` and `/apps/data`'s pages — but, as above,
+can never mint an API assertion, so under a demo session every `/apps/data`
+page shows the sign-in card in place of data: the practice account can't open
+the Data app because it isn't tied to a real GitHub account, and the card
+offers no button, since no sign-in on this build changes that.
 
 Practice sign-in is decided when the app is built, never at runtime.
 Next only inlines a `NEXT_PUBLIC_*` variable that is set at compile time,
@@ -154,7 +158,7 @@ The rules are one pure function, `resolveSessionKeys` in
 | `FORGE_PUBLIC_ORIGIN` | web — `publicOrigin()` (the OAuth `redirect_uri`, the callback's final redirect) and `isTrustedOrigin()` (the Origin check on `POST /auth/signout`, `POST /auth/demo`, and `POST /bff/upland/*`) | Required outside `next dev`; optional in `next dev` only, where an unset value falls back to the request's own origin | An `http(s)` URL with no path, query, fragment or credentials, e.g. `https://forge.example` (not `.../` ) — a set-but-invalid value refuses every state-changing request rather than guessing |
 | `FORGE_SESSION_SECRET` | web — seals and (with `_PREVIOUS`) opens session and transaction cookies | Required outside `next dev` | >= 32 characters, ASCII (`MIN_SECRET_LENGTH` in `@forge/auth`). Unset or empty under `next dev` only: the public dev secret, for practice sessions only, and the BFF never mints (see The development secret, above). Set but shorter than 32 characters: sign-in is disabled in every mode, with one logged warning |
 | `FORGE_SESSION_SECRET_PREVIOUS` | web, same | Optional | Same constraints; set only while rotating (see Operations) |
-| `FORGE_API_ASSERTION_SECRET` | web — mints the BFF's assertion; API — `verify_assertion` checks it | Required for `/upland` to work end to end; its absence (or weakness) on the web side answers `503 not_configured` rather than pretending the Data app is merely down | >= 32 characters, ASCII, used exactly as stored (not trimmed); must be byte-for-byte identical on web and API |
+| `FORGE_API_ASSERTION_SECRET` | web — mints the BFF's assertion; API — `verify_assertion` checks it | Required for `/apps/data` to work end to end; its absence (or weakness) on the web side answers `503 not_configured` rather than pretending the Data app is merely down | >= 32 characters, ASCII, used exactly as stored (not trimmed); must be byte-for-byte identical on web and API |
 | `FORGE_API_URL` | web — `apiUrl()`, where the BFF forwards `/bff/upland/*` | Optional | Defaults to `http://localhost:8000` |
 | `NEXT_PUBLIC_FORGE_DEMO` | web — `lib/mode.ts`'s `isDemoMode()`, read at build time only | Optional | `1` when building makes the demo build (practice sign-in, fixtures); anything else, or unset, a live build. Inlined by `next.config.mjs`'s `env`, so the value at runtime is ignored |
 | `FORGE_ADMIN_IDS` | API — the admin check behind `require_admin` | Optional | Comma-separated numeric GitHub user ids (not logins), each matching `^[1-9][0-9]{0,19}$`; entries trimmed, blanks ignored; unset means nobody is admin. One invalid entry makes nobody admin, with one logged warning |
@@ -205,8 +209,10 @@ goes through.
 **Components:**
 
 - [`apps/web`'s `/contribute`](../apps/web/src/app/contribute) — built.
-  Task board, task detail with a rail picker and guided handoff, an in-app
-  profile, a status stepper. Every screen hangs off
+  Task board, task detail with a rail picker and guided handoff, and a
+  status stepper. The contributor's own record (ledger and ladder) is on
+  [`/me`](../apps/web/src/app/me), behind sign-in; the old
+  `/contribute/profile` redirects there. Every `/contribute` screen hangs off
   [`apps/web/src/app/contribute/layout.tsx`](../apps/web/src/app/contribute/layout.tsx),
   the `contribute_bridge` kill switch: flag off (or unreachable — flags
   fail closed) and the whole surface is replaced by a plain-language
@@ -259,7 +265,7 @@ prompt and a deep link instead:
 | Cursor | API dispatch | A connected dashboard API key |
 | Devin | API dispatch | A connected API key |
 | OpenHands Cloud | API dispatch | A connected API key |
-| Claude Code | Guided handoff | Copy the prompt, open claude.ai/code, paste it in |
+| Claude Code | Guided handoff | Open claude.ai/code with the prompt already typed in, then send (copy and paste when it's too long for a link) |
 | OpenAI Codex | Guided handoff | Copy the prompt, open chatgpt.com/codex, paste it in |
 
 **No rail dispatches for real today** — the API rails return a stub
@@ -286,10 +292,10 @@ Issues and PRs, and is expected to expose its own state (tiers, claims,
 settlements) through a public read API (`/ledger`) that the Bridge can
 read for in-app profile/tier/reward views — not built yet.
 
-Endpoints this app defines for itself today: `/api/history`,
-`/api/export` (CSV, gated by `csv_export`), `/api/flags`, and
-`/api/bridge/*` (gated by `contribute_bridge`; fixture data and an
-in-memory lease store, per the Bridge section above).
+Endpoints this app defines for itself today: `/api/flags`, `/api/upland/*`
+(gated by `upland_data`; its `/export` route additionally requires
+`csv_export`), and `/api/bridge/*` (gated by `contribute_bridge`; fixture
+data and an in-memory lease store, per the Bridge section above).
 
 ## Flags flow
 
@@ -316,8 +322,9 @@ Both flags are real gates, not decoration:
 - `contribute_bridge` — `apps/web/src/app/contribute/layout.tsx` closes
   the entire Bridge UI, and a router-level FastAPI dependency 404s every
   `/api/bridge/*` route with `{"error": "bridge-disabled"}`.
-- `csv_export` — gates `/api/export`; in live mode the web client follows
-  the flag client's fail-closed default and shows no export affordance.
+- `csv_export` — gates `/api/upland/export` (`routers/upland.py`); in live
+  mode the web client follows the flag client's fail-closed default and
+  shows no export affordance.
 
 Flag flips are runtime config, not code — this is what lets features ship
 dark-launched and get killed instantly on revert. The out-of-band kill
@@ -339,10 +346,10 @@ What a PR actually passes through, in order:
    (does the diff stay inside the task's declared `forge-scope` globs —
    closing on anything unreadable rather than guessing?), **protected
    paths** (everything in `.github/forge-protocol.json`'s
-   `protectedPaths` — `.github/`, `CODEOWNERS`, `AGENTS.md`, and the
-   sign-in/session paths from [Identity](#identity) above — needs T3
-   trust to touch), and raises — never blocks on — a **tests-modified
-   flag** for PRs that touch an existing test.
+   `protectedPaths` — `.github/`, `CODEOWNERS`, `AGENTS.md`, `CLAUDE.md`,
+   `.gemini/`, and the sign-in/session paths from [Identity](#identity)
+   above — needs T3 trust to touch), and raises — never blocks on — a
+   **tests-modified flag** for PRs that touch an existing test.
 2. **The Gauntlet**, this repo's own CI
    ([`.github/workflows/gauntlet.yml`](../.github/workflows/gauntlet.yml)):
    `hygiene` (lint, build, the no-new-deps check, a secret scan), `tests`

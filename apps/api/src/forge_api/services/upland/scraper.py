@@ -3,8 +3,8 @@
 Ported from the upland-scraper `scraper.py`. Two halves:
 
 * pure helpers (`process_action`, `extract_*`) that turn a raw Hyperion action into
-  a flat row, and `store_and_update`, which writes actions AND the property
-  roll-ups through a single connection;
+  a flat row, and `store_and_update`, which writes playuplandme's own actions (no
+  other contract's) AND the property roll-ups through a single connection;
 * `ScrapeManager`, the single in-process job runner the control router drives.
 """
 
@@ -29,6 +29,20 @@ PROPERTY_ID_FIELDS = ("a45", "a54", "p55", "p24", "p14")
 PRICE_FIELDS = ("p24", "p12", "p55", "p54", "p45")
 #: Categories that feed the per-property roll-up.
 PROPERTY_CATEGORIES = frozenset({"trade", "mint"})
+_ROLLUP_CATEGORIES = tuple(sorted(PROPERTY_CATEGORIES))
+#: The filter every read of `properties` applies (the API's and the GCS sync's), with its
+#: parameters. `properties` has no contract column, and before store_and_update dropped
+#: other contracts' actions it rolled their trade and mint actions into the row of the
+#: property they named. So a read leaves out every property such an action names: a real
+#: one too, since its counters then carry the foreign sale. A database built since holds
+#: none. `contract < ? OR contract > ?` rather than `!=` makes each half an index range
+#: scan: one step per foreign action, however many real ones there are.
+UPLAND_PROPERTY = (
+    "property_id NOT IN (SELECT property_id FROM actions "
+    f"WHERE category IN ({','.join('?' for _ in _ROLLUP_CATEGORIES)}) "
+    "AND (contract < ? OR contract > ?) AND property_id IS NOT NULL)"
+)
+UPLAND_PROPERTY_PARAMS = (*_ROLLUP_CATEGORIES, CONTRACT_PLAYUPLAND, CONTRACT_PLAYUPLAND)
 
 Row = dict[str, Any]
 #: (current_block, end_block, fetched) after each stored chunk.
@@ -162,14 +176,23 @@ INSERT_ACTION_SQL = (
 async def store_and_update(processed: list[Row]) -> int:
     """Store processed actions AND update the property roll-ups in one connection.
 
+    Only playuplandme's own actions are kept. Hyperion's `account=playuplandme` query
+    also returns every action another contract ran with `require_recipient(playuplandme)`,
+    named and shaped by that contract's ABI, so its `n5` is no Upland sale: it is dropped
+    here, before it reaches `actions` or a property roll-up. Only the count is logged,
+    since every string in such an action is the other contract's.
+
     Property counters only move for actions not already stored, so re-scraping an
-    overlapping range never double-counts a sale or listing.
+    overlapping range never double-counts a sale or listing. Returns the rows stored.
     """
-    if not processed:
+    upland = [p for p in processed if p["contract"] == CONTRACT_PLAYUPLAND]
+    if dropped := len(processed) - len(upland):
+        logger.debug("dropped %d actions other contracts sent to %s", dropped, CONTRACT_PLAYUPLAND)
+    if not upland:
         return 0
     async with _db() as db:
-        low = min(p["global_sequence"] for p in processed)
-        high = max(p["global_sequence"] for p in processed)
+        low = min(p["global_sequence"] for p in upland)
+        high = max(p["global_sequence"] for p in upland)
         cursor = await db.execute(
             "SELECT global_sequence FROM actions WHERE global_sequence BETWEEN ? AND ?",
             (low, high),
@@ -178,10 +201,10 @@ async def store_and_update(processed: list[Row]) -> int:
         await cursor.close()
 
         await db.executemany(
-            INSERT_ACTION_SQL, [tuple(p[column] for column in ACTION_COLUMNS) for p in processed]
+            INSERT_ACTION_SQL, [tuple(p[column] for column in ACTION_COLUMNS) for p in upland]
         )
 
-        for p in processed:
+        for p in upland:
             if (
                 p["global_sequence"] in known
                 or not p["property_id"]
@@ -190,7 +213,7 @@ async def store_and_update(processed: list[Row]) -> int:
                 continue
             await _update_property(db, p)
         await db.commit()
-    return len(processed)
+    return len(upland)
 
 
 async def _update_property(db: Any, p: Row) -> None:
@@ -328,8 +351,12 @@ async def scrape_timeframe(
 
 
 async def count_actions() -> int:
+    """playuplandme's actions on record; a database from before the scraper dropped other
+    contracts' actions may still hold some, and they are not counted."""
     async with _db() as db:
-        cursor = await db.execute("SELECT COUNT(*) AS c FROM actions")
+        cursor = await db.execute(
+            "SELECT COUNT(*) AS c FROM actions WHERE contract = ?", (CONTRACT_PLAYUPLAND,)
+        )
         row = await cursor.fetchone()
         await cursor.close()
     return int(row["c"]) if row else 0

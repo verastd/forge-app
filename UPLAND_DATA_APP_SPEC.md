@@ -124,13 +124,13 @@ Add to `apps/api/pyproject.toml`:
 
 ### 8. Frontend stub (minimal, just data hooks)
 - `apps/web/src/lib/upland-api.ts` — typed API client for all upland endpoints
-- `apps/web/src/app/upland/page.tsx` — stub page showing "Upland Data — Private Beta" with data availability summary
+- `apps/web/src/app/apps/data/page.tsx` — stub page showing "Data — Private Beta" with data availability summary (moved under `/apps/data` in FORGE v0.2 Phase 2)
 
 ## Critical implementation notes
 1. SQLite must use WAL mode + busy_timeout=30000 (the existing scraper pattern works)
 2. The `_db()` helper MUST be an `@asynccontextmanager`, NOT `async def` returning a connection
 3. Use `async with _db() as db:` (no await) — the old pattern double-starts aiosqlite thread
-4. Store actions AND update properties in a single connection (store_and_update pattern)
+4. Store actions AND update properties in a single connection (store_and_update pattern). Only `playuplandme`'s own actions are kept: the `account=playuplandme` query also returns actions other contracts notified it of (`require_recipient`), and those are dropped before anything is stored or rolled up.
 5. Hyperion client needs browser-like User-Agent header or gets 403
 6. Use recursive block-range chunking: start at 100K blocks, halve if >10K actions
 7. GCS storage is optional — if no credentials, fall back to local SQLite only (don't crash)
