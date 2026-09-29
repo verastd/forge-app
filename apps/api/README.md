@@ -17,7 +17,7 @@ Layout — routers stay thin, all logic lives in `services/` (AGENTS.md):
 src/forge_api/
   main.py            app factory: title/version, CORS, routers, error handler
   models.py          pydantic mirrors of packages/shared zod schemas
-  routers/           HTTP surface only (health, history, export, flags, bridge)
-  services/          history generator, flags resolution, bridge lease/dispatch
+  routers/           HTTP surface only (health, flags, bridge, upland, upland_scrape)
+  services/          flags resolution, bridge lease/dispatch, identity verification, upland scraper/analytics
   fixtures/tasks.json  8 agent-ready starter tasks (PRD H.3)
 ```

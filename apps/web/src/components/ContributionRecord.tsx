@@ -6,9 +6,9 @@
  * Rewards pay on *merge plus survival*, never on submission — so the pending
  * list is a countdown, not a balance (PRD §7.3).
  *
- * Shared by `/contribute/profile` and `/me`: same fetch, same loading/failed/
- * retry states, same tables. The page around it owns the `<h1>`; this only
- * ever renders an `<h2>` or lower.
+ * `/me` only now (`/contribute/profile` redirects there): same fetch, same
+ * loading/failed/retry states, same tables. The page around it owns the
+ * `<h1>`; this only ever renders an `<h2>` or lower.
  */
 
 import { useCallback, useEffect, useState } from 'react';

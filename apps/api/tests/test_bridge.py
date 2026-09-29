@@ -1,22 +1,40 @@
 """The Bridge loop: browse → claim → dispatch → watch → iterate → settle (PRD Appendix I)."""
 
 import json
+from pathlib import Path
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 
 from forge_api.services import flags as flags_service
 from forge_api.services.bridge import (
+    HANDOFF_RAILS,
     SECONDS_PER_STAGE,
     STAGES,
     FixtureTaskSource,
     GitHubTaskSource,
+    branch_name,
 )
 
 from .conftest import FakeClock
 
 CSV_TASK = 1  # size S  -> 48h lease
 FLAGS_ADMIN_TASK = 7  # size M -> 96h lease
+
+#: Sample task #1 in the v0.2 spec's words; apps/web/src/lib/fixtures.ts carries the same.
+CSV_TASK_TITLE = "Polish the CSV export in the Data app"
+CSV_TASK_SUMMARY = "Let people download the Upland data they are looking at as a spreadsheet file."
+CSV_TASK_CRITERIA = [
+    "GET /api/upland/export returns text/csv whose first line is the 13-column action header",
+    "Export CSV button visible on /apps/data for signed-in users (flag: csv_export)",
+    "10k-row export completes < 3s in CI fixture data",
+]
+
+#: The parity lock between the two Bridges: this API, and the demo build's offline copy
+#: (apps/web/src/lib/offline.ts), which a Playwright spec holds to the same file. It is
+#: task 1's compiled prompt and every handoff rail's instruction lines.
+HANDOFF_GOLDEN = Path(__file__).resolve().parents[3] / "tests" / "fixtures" / "handoff-golden.json"
 
 
 def test_task_cards_are_the_eight_starter_tasks(client: TestClient) -> None:
@@ -93,7 +111,7 @@ def test_dispatch_handoff_rails(client: TestClient, rail: str, deep_link: str) -
     assert body["mode"] == "handoff"
     assert body["deepLink"] == deep_link
     assert "sessionRef" not in body
-    assert len(body["instructions"]) == 3  # copy prompt -> open agent -> paste
+    assert len(body["instructions"]) == 3  # open (and copy, for codex) -> send -> come back
 
 
 #: PRD §4.9 / I.2: Bridge copy is written for someone who has never seen GitHub.
@@ -134,12 +152,51 @@ def test_compiled_prompt_is_identical_across_rails(client: TestClient) -> None:
     }
     assert len(prompts) == 1
     prompt = prompts.pop()
-    assert "Polish the CSV export on the history page" in prompt
-    assert "Let people download their activity history as a spreadsheet file." in prompt
-    assert "GET /api/export returns text/csv with columns [ts, type, amount]" in prompt
+    assert prompt.startswith(f"Task #{CSV_TASK}: {CSV_TASK_TITLE}\n\n")
+    assert f"What this means in plain language: {CSV_TASK_SUMMARY}\n\n" in prompt
+    for number, criterion in enumerate(CSV_TASK_CRITERIA, start=1):
+        assert f"\n{number}. {criterion}\n" in prompt
     assert "Read AGENTS.md at repo root first." in prompt
-    assert f"branch task/{CSV_TASK}-polish-the-csv-export" in prompt
+    assert f"branch task/{CSV_TASK}-polish-the-csv-export-in-the-data-app of" in prompt
     assert "Do not modify .github/, acceptance tests, or files outside the task scope." in prompt
+
+
+def test_sample_task_one_is_the_data_app_csv_export() -> None:
+    task = FixtureTaskSource().get_task(CSV_TASK)
+    assert task is not None
+    assert task.title == CSV_TASK_TITLE
+    assert task.civilianSummary == CSV_TASK_SUMMARY
+    assert task.acceptanceCriteria == CSV_TASK_CRITERIA
+    # Everything else about the task is unchanged from v0.1.
+    assert (task.size, task.rewardClass, task.rewardUsd) == ("S", "none", None)
+    assert task.tierFloor == "T0"
+    assert task.url == "https://github.com/verastd/forge-app/issues/1"
+    assert task.labels == ["agent-ready", "status:open", "size:S"]
+    assert branch_name(task.id, task.title) == "task/1-polish-the-csv-export-in-the-data-app"
+
+
+@pytest.fixture
+def golden() -> dict[str, Any]:
+    loaded: dict[str, Any] = json.loads(HANDOFF_GOLDEN.read_text(encoding="utf-8"))
+    return loaded
+
+
+def test_the_handoff_golden_has_the_agreed_shape(golden: dict[str, Any]) -> None:
+    assert set(golden) == {"taskId", "prompt", "instructions"}
+    assert golden["taskId"] == CSV_TASK
+    assert set(golden["instructions"]) == set(HANDOFF_RAILS)  # a new handoff rail joins it
+    assert all(len(lines) == 3 for lines in golden["instructions"].values())
+
+
+@pytest.mark.parametrize("rail", sorted(HANDOFF_RAILS))
+def test_a_handoff_dispatch_matches_the_golden_byte_for_byte(
+    client: TestClient, golden: dict[str, Any], rail: str
+) -> None:
+    task_id = golden["taskId"]
+    client.post("/api/bridge/claim", json={"taskId": task_id})
+    body = client.post("/api/bridge/dispatch", json={"taskId": task_id, "rail": rail}).json()
+    assert body["compiledPrompt"] == golden["prompt"]
+    assert body["instructions"] == golden["instructions"][rail]
 
 
 def test_status_is_404_before_any_claim(client: TestClient) -> None:

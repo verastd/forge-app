@@ -32,15 +32,30 @@ SCHEMA_STATEMENTS: list[str] = [
     from_account TEXT,
     to_account TEXT
     )""",
-    "CREATE INDEX IF NOT EXISTS idx_actions_timestamp ON actions(timestamp)",
     "CREATE INDEX IF NOT EXISTS idx_actions_block ON actions(block_num)",
-    "CREATE INDEX IF NOT EXISTS idx_actions_action ON actions(action_name)",
-    "CREATE INDEX IF NOT EXISTS idx_actions_category ON actions(category)",
     "CREATE INDEX IF NOT EXISTS idx_actions_property ON actions(property_id)",
-    # Covering index: active_accounts group-by reads (actor, price_upx) only,
-    # and a plain actor index sent it back to the table for every one of
+    # Every analytics read is scoped to playuplandme's own actions (`contract = ?`),
+    # so the indexes those reads go through carry `contract`: without it, checking
+    # the contract sends a read back to the table for every row it scans
+    # (action_distribution 0.13s -> 3.1s at 2M actions). `contract` never leads:
+    # nearly every row is playuplandme's, and a planner with no statistics would
+    # take an index led by it for a selective one. `global_sequence` precedes it in
+    # the timestamp index so that index still yields the actions list's order.
+    "CREATE INDEX IF NOT EXISTS idx_actions_timestamp_contract "
+    "ON actions(timestamp, global_sequence, contract)",
+    "CREATE INDEX IF NOT EXISTS idx_actions_action_contract ON actions(action_name, contract)",
+    "CREATE INDEX IF NOT EXISTS idx_actions_category_contract ON actions(category, contract)",
+    # Covering index: active_accounts group-by reads (actor, contract, price_upx)
+    # only, and a plain actor index sent it back to the table for every one of
     # millions of rows (128s at 2M actions; ~0.5s covered).
-    "CREATE INDEX IF NOT EXISTS idx_actions_actor_price ON actions(actor, price_upx)",
+    "CREATE INDEX IF NOT EXISTS idx_actions_actor_contract_price "
+    "ON actions(actor, contract, price_upx)",
+    # The same four without `contract`, superseded by the ones above. On a database
+    # from before, the first connection builds those once (~3s per index at 2M actions).
+    "DROP INDEX IF EXISTS idx_actions_timestamp",
+    "DROP INDEX IF EXISTS idx_actions_action",
+    "DROP INDEX IF EXISTS idx_actions_category",
+    "DROP INDEX IF EXISTS idx_actions_actor_price",
     """CREATE TABLE IF NOT EXISTS scrape_progress (
     key TEXT PRIMARY KEY,
     start_block INTEGER,

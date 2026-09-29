@@ -80,14 +80,30 @@ function apiInstructions(rail: Rail, task: TaskFixture): string[] {
   ];
 }
 
+/** The two opening lines, which differ by rail; the third (shared) line follows below. */
+const HANDOFF_OPENING_LINES: Partial<Record<Rail, readonly [string, string]>> = {
+  'claude-code': [
+    'Tap Open Claude Code. It opens with the whole task already typed in, so there is nothing to copy.',
+    'If Claude Code asks which project to work on, pick your own copy of the app, then press send. It runs on your own plan.',
+  ],
+  codex: [
+    'Tap Copy to put the whole task on your clipboard.',
+    'Tap Open OpenAI Codex, pick your own copy of the app, paste the task and send it. It runs on your own plan.',
+  ],
+};
+
 /** Civilian voice only — the instructions are about the agent app, not about git (PRD I.2). */
 function handoffInstructions(rail: Rail, task: TaskFixture): string[] {
-  const { label, deepLink } = RAIL_INFO[rail];
+  const { label } = RAIL_INFO[rail];
   void task;
+  const [first, second] = HANDOFF_OPENING_LINES[rail] ?? [
+    'Tap Copy to put the whole task on your clipboard.',
+    `Tap Open ${label}, pick your own copy of the app, paste the task and send it. It runs on your own plan.`,
+  ];
   return [
-    'Tap Copy to put the whole task prompt on your clipboard.',
-    `Tap Open ${label} — it opens ${deepLink} and already has access to your copy of the app.`,
-    `Paste the prompt and send it. ${label} does the work and sends your contribution in for checks automatically; come back here to watch how it goes.`,
+    first,
+    second,
+    `${label} does the work, but sending it in for checks is not automatic yet. Come back here when it is finished to see where it stands.`,
   ];
 }
 

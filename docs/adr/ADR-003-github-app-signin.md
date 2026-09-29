@@ -31,7 +31,7 @@ or a database connection are available wherever identity is checked.
 **An in-house OAuth flow, on `jose` alone.** `packages/auth` is built only on
 `jose@^6.2.12` (Web Crypto under the hood) — no Node built-ins, enforced by
 its own `eslint.config.mjs` — so Next's Edge middleware can import it
-directly to gate `/me` and `/upland` without a database round trip.
+directly to gate `/me` and the Data app (`/apps/data`) without a database round trip.
 Auth.js (NextAuth) v5 was rejected because it's still beta and in
 maintenance mode; Better Auth was rejected because it wants a database,
 which this phase deliberately has none of. A hand-built flow is more code to

@@ -1,55 +1,73 @@
-# Task Spec — Issue #1: CSV export of activity history
+# Task Spec — Issue #1: Polish the CSV export in the Data app
 
 Committed by the spec author (core team) per `tests/acceptance/README.md`.
-Contributors implement against this file and **must not modify it**
+Contributors implement against this directory and **must not modify it**
 (PRD §5 T4 — G0 auto-closes out-of-scope edits, G2.4 flags any test change).
 
 Format: PRD Appendix B (Task Spec issue template).
 
 ## Goal
 
-Users can export their full activity history as a CSV file from the history
-page, without waiting on it.
+A signed-in user can download the Upland actions in the Data app (`/apps/data`)
+as a CSV file that starts streaming at once, however many actions there are.
 
 ## Civilian summary
 
-Download everything you've done in the app as a spreadsheet file.
+Let people download the Upland data they are looking at as a spreadsheet file.
 
 ## Acceptance criteria
 
-1. `GET /api/export` returns `text/csv` with columns `[ts, type, amount]` — the
-   first line is exactly `ts,type,amount` — and an attachment
-   `Content-Disposition` naming `history.csv`.
-2. The export contains every history row (10,000 in the fixture data set), with
-   every `ts` parseable as ISO 8601, every `type` one of `earn|spend|transfer`,
-   and every `amount` a number.
-3. A 10k-row export completes in under 3 seconds against CI fixture data.
+1. GET /api/upland/export returns text/csv whose first line is the 13-column action header
+2. Export CSV button visible on /apps/data for signed-in users (flag: csv_export)
+3. 10k-row export completes < 3s in CI fixture data
+
+The 13 columns, in order: `global_sequence`, `timestamp`, `block_num`,
+`trx_id`, `contract`, `action_name`, `action_meaning`, `category`, `actor`,
+`property_id`, `price_upx`, `from_account`, `to_account`.
 
 ## Acceptance tests
 
-- `tests/acceptance/issue-1/test_csv_export.py` (this directory) — public suite,
-  runs in `make test` via `cd apps/api && uv run pytest`.
+- `tests/acceptance/issue-1/test_csv_export.py` (this directory) — public
+  suite, runs in `make test` and `make test-coverage` via
+  `cd apps/api && uv run pytest`. It seeds a temp database with 10,000
+  deterministic actions, signs its requests the way the web tier does, and
+  checks: a `text/csv` response; an attachment named `upland-actions.csv`;
+  `test_headers` (the 13 columns, in order); exactly 10,000 data rows in
+  strictly increasing `global_sequence`; 13 fields per row with an ISO 8601
+  `timestamp` and an integer `block_num`; the whole export in under 3 seconds.
+- Criterion 2 is a browser check, in the E2E suite (`make e2e`): the export
+  button shows on `/apps/data` while `csv_export` is on and is gone while it
+  is off.
 - The private suite (G5) additionally probes: export behaviour when the
-  `csv_export` flag is off, header-injection safety of memo-derived fields, and
-  streaming back-pressure on a slow client.
+  `csv_export` flag is off, formula-injection safety of the text cells a
+  contract controls (accounts and decoded fields), and streaming
+  back-pressure on a slow client.
 
 ## Scope
 
+```forge-scope
+in:
+- apps/api/src/forge_api/routers/upland.py
+- apps/api/src/forge_api/services/upland/analytics.py
+- apps/web/src/app/apps/data/**
+out:
+- contracts/**
+- .github/**
+- tests/acceptance/**
+- apps/api/src/forge_api/services/identity.py
 ```
-IN:  apps/api/src/forge_api/routers/export.py
-     apps/api/src/forge_api/services/export.py
-     apps/api/src/forge_api/services/history.py
-     apps/web/app/history/**  (the Export button, behind flag csv_export)
-OUT: auth, payments, anything under contracts/, anything under .github/,
-     any existing directory under tests/acceptance/
+
 DEPS: none new — CSV generation must use the Python stdlib `csv` module.
-```
 
 ## Context pack
 
 - the Task Spec issue template (`.github/ISSUE_TEMPLATE/task-spec.yml`)
 - `apps/api/README.md` (layout: thin routers, logic in `services/`)
+- `apps/api/src/forge_api/services/upland/db.py` (the `actions` table) and
+  `scraper.py` (`process_action` and `store_and_update`, which fill it)
 - `config/flags.json` + `apps/api/src/forge_api/services/flags.py` (flag lookup)
+- `apps/web/src/lib/upland-api.ts` (`uplandExportUrl()`: the browser downloads
+  through the same-origin BFF at `/bff/upland/export`, never from the API)
 
 ## Size / tier floor / reward
 

@@ -86,7 +86,7 @@ button, no GitHub App needed. Which build you get is fixed when the app is
 compiled; a live build refuses practice sessions, whatever its environment
 says at runtime. `next dev` also falls back to a hard-coded, obviously-named
 dev-only session secret when `FORGE_SESSION_SECRET` is unset, so a fresh
-checkout of the demo build can sign in and poke around `/me` and `/upland`
+checkout of the demo build can sign in and poke around `/me` and `/apps/data`
 without any setup. That secret is public, so it only ever signs in the
 practice account, and the Data app never calls the API under it (the BFF
 answers `503 not_configured`). A `FORGE_SESSION_SECRET` that is set but

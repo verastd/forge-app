@@ -11,12 +11,7 @@
  * between them would make the offline demo lie about the product.
  */
 
-import type {
-  ContributorProfile,
-  HistoryItem,
-  Size,
-  TaskCard,
-} from '@forge/shared';
+import type { ContributorProfile, Size, TaskCard } from '@forge/shared';
 
 /** A task card plus the acceptance criteria the detail page renders. */
 export interface TaskFixture extends TaskCard {
@@ -30,8 +25,8 @@ export interface TaskFixture extends TaskCard {
 export const TASK_FIXTURES: readonly TaskFixture[] = [
   {
     id: 1,
-    title: 'Polish the CSV export on the history page',
-    civilianSummary: 'Let people download their activity history as a spreadsheet file.',
+    title: 'Polish the CSV export in the Data app',
+    civilianSummary: 'Let people download the Upland data they are looking at as a spreadsheet file.',
     size: 'S',
     rewardClass: 'none',
     tierFloor: 'T0',
@@ -39,8 +34,8 @@ export const TASK_FIXTURES: readonly TaskFixture[] = [
     url: 'https://github.com/verastd/forge-app/issues/1',
     labels: ['agent-ready', 'status:open', 'size:S'],
     acceptanceCriteria: [
-      'GET /api/export returns text/csv with columns [ts, type, amount]',
-      'Export button visible on /history for logged-in users (flag: csv_export)',
+      'GET /api/upland/export returns text/csv whose first line is the 13-column action header',
+      'Export CSV button visible on /apps/data for signed-in users (flag: csv_export)',
       '10k-row export completes < 3s in CI fixture data',
     ],
   },
@@ -182,58 +177,6 @@ export function findTaskFixture(taskId: number): TaskFixture | undefined {
 export function taskCardFixtures(): TaskCard[] {
   return TASK_FIXTURES.map(({ acceptanceCriteria: _criteria, ...card }) => ({ ...card }));
 }
-
-/* --- history --------------------------------------------------------------- */
-
-type HistoryRow = [ts: string, type: HistoryItem['type'], amount: number, memo?: string];
-
-/**
- * Thirty rows in the API's shape: newest first, ids `tx_00000…`, timestamps
- * walking backwards from 2026-08-01T12:00:00Z, memos drawn from the same
- * vocabulary the generator uses.
- */
-const HISTORY_ROWS: readonly HistoryRow[] = [
-  ['2026-08-01T12:00:00Z', 'earn', 42.18, 'Daily streak bonus'],
-  ['2026-08-01T11:46:20Z', 'spend', 129.4, 'Marketplace purchase'],
-  ['2026-08-01T11:31:05Z', 'earn', 8.75, 'Quest completed'],
-  ['2026-08-01T11:18:44Z', 'transfer', 60.0, 'Sent to a friend'],
-  ['2026-08-01T11:04:12Z', 'earn', 316.92],
-  ['2026-08-01T10:52:37Z', 'spend', 19.99, 'Premium month'],
-  ['2026-08-01T10:39:03Z', 'earn', 74.5, 'Referral reward'],
-  ['2026-08-01T10:24:51Z', 'transfer', 12.4, 'Split the bill'],
-  ['2026-08-01T10:11:26Z', 'earn', 5.02, 'Community reward'],
-  ['2026-08-01T09:58:40Z', 'spend', 240.15, 'Collectible minted'],
-  ['2026-08-01T09:44:09Z', 'earn', 133.6, 'Staking payout'],
-  ['2026-08-01T09:29:55Z', 'earn', 21.37],
-  ['2026-08-01T09:16:31Z', 'transfer', 480.0, 'Moved to savings'],
-  ['2026-08-01T09:02:18Z', 'spend', 3.25, 'Tip sent'],
-  ['2026-08-01T08:47:44Z', 'earn', 96.81, 'Daily streak bonus'],
-  ['2026-08-01T08:33:12Z', 'earn', 58.44, 'Quest completed'],
-  ['2026-08-01T08:19:06Z', 'spend', 87.6, 'Boost unlocked'],
-  ['2026-08-01T08:05:33Z', 'transfer', 150.0, 'Received from a friend'],
-  ['2026-08-01T07:51:47Z', 'earn', 11.09, 'Referral reward'],
-  ['2026-08-01T07:38:20Z', 'spend', 64.72],
-  ['2026-08-01T07:24:58Z', 'earn', 205.3, 'Staking payout'],
-  ['2026-08-01T07:10:14Z', 'transfer', 25.0, 'Top-up'],
-  ['2026-08-01T06:56:41Z', 'earn', 47.66, 'Community reward'],
-  ['2026-08-01T06:42:09Z', 'spend', 412.88, 'Marketplace purchase'],
-  ['2026-08-01T06:28:35Z', 'earn', 2.4, 'Daily streak bonus'],
-  ['2026-08-01T06:14:02Z', 'earn', 178.25],
-  ['2026-08-01T05:59:48Z', 'transfer', 33.7, 'Sent to a friend'],
-  ['2026-08-01T05:45:16Z', 'spend', 55.5, 'Premium month'],
-  ['2026-08-01T05:31:29Z', 'earn', 68.93, 'Quest completed'],
-  ['2026-08-01T05:17:55Z', 'earn', 14.21, 'Referral reward'],
-];
-
-export const HISTORY_FIXTURES: readonly HistoryItem[] = HISTORY_ROWS.map(
-  ([ts, type, amount, memo], index) => ({
-    id: `tx_${String(index).padStart(5, '0')}`,
-    ts,
-    type,
-    amount,
-    ...(memo === undefined ? {} : { memo }),
-  }),
-);
 
 /* --- profile --------------------------------------------------------------- */
 

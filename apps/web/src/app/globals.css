@@ -271,11 +271,6 @@ a.faint:hover {
   color: var(--text);
 }
 
-.note-ok {
-  color: var(--ok);
-  font-weight: 650;
-}
-
 /* Section labels read like map legend entries: mono, tracked, with a survey tick. */
 .section-title {
   display: inline-flex;
@@ -676,6 +671,18 @@ a.faint:hover {
   max-width: 52ch;
 }
 
+/* The sub-line's own color, so it reads at the same contrast; the underline,
+   not a color change, marks it as a link (WCAG 1.4.1). */
+.hero-sub a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.hero-sub a:hover {
+  color: var(--text);
+}
+
 .hero-actions {
   margin-top: 28px;
 }
@@ -1043,20 +1050,6 @@ tbody tr:hover td {
   font-size: 0.86em;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-}
-
-.amount-earn {
-  color: var(--ok);
-  font-weight: 600;
-}
-
-.amount-spend {
-  color: var(--danger);
-  font-weight: 600;
-}
-
-.amount-transfer {
-  color: var(--text);
 }
 
 /* --- pagination ------------------------------------------------------------ */
@@ -1726,17 +1719,6 @@ details.disclosure[open] > summary::before {
   animation: shimmer 1.3s linear infinite;
 }
 
-.skeleton-row {
-  display: flex;
-  gap: 18px;
-  padding: 14px 18px;
-  border-bottom: 1px solid var(--border);
-}
-
-.skeleton-row:last-child {
-  border-bottom: 0;
-}
-
 @keyframes shimmer {
   from {
     background-position: 200% 0;
@@ -1902,9 +1884,16 @@ html[data-splash='off'] .splash {
     padding: 28px 16px 60px;
   }
 
+  /* The nav keeps to the viewport: tighter spacing fits the links and the
+     account slot on one row, and whatever still doesn't fit (the offline
+     pill, say) wraps to a second row instead of widening the page. */
   .nav-inner {
-    gap: 12px;
-    padding: 0 16px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    height: auto;
+    min-height: 64px;
+    gap: 6px;
+    padding: 8px 16px;
   }
 
   .wordmark-text {
@@ -1912,12 +1901,19 @@ html[data-splash='off'] .splash {
   }
 
   .nav-link {
-    padding: 7px 8px;
+    padding: 7px 6px;
   }
 
+  /* Under the link itself: once the nav wraps, its bottom edge is a row away. */
   .nav-link[aria-current='page']::after {
-    left: 8px;
-    right: 8px;
+    left: 6px;
+    right: 6px;
+    bottom: -3px;
+  }
+
+  /* The tilted plate draws wider than its box, so the box shrinks with the screen. */
+  .hero-map {
+    max-width: min(280px, 72vw);
   }
 
   .step-label {

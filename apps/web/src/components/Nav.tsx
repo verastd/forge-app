@@ -8,10 +8,9 @@ import { Chip } from './Chip';
 import { useDegraded } from '../lib/degraded';
 
 const LINKS: ReadonlyArray<{ href: string; label: string }> = [
-  { href: '/history', label: 'History' },
-  { href: '/upland', label: 'Upland' },
   { href: '/contribute', label: 'Contribute' },
-  { href: '/contribute/profile', label: 'Profile' },
+  { href: '/propose', label: 'Propose' },
+  { href: '/apps', label: 'Apps' },
 ];
 
 /** The mark: one parcel on the map, with a lot being built on it. */
@@ -30,17 +29,10 @@ export function Nav() {
   const pathname = usePathname();
   const degraded = useDegraded();
 
-  // Profile lives under /contribute, so the Contribute tab stands down there:
-  // exactly one tab is ever current.
-  const isCurrent = (href: string): boolean => {
-    if (href === '/contribute/profile') {
-      return pathname === href;
-    }
-    if (href === '/contribute' && pathname === '/contribute/profile') {
-      return false;
-    }
-    return pathname === href || pathname.startsWith(`${href}/`);
-  };
+  // The three top-level jobs are mutually exclusive prefixes, so a plain
+  // prefix match is enough: exactly one section is ever current.
+  const isCurrent = (href: string): boolean =>
+    pathname === href || pathname.startsWith(`${href}/`);
 
   return (
     <header className="nav">

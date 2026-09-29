@@ -16,7 +16,7 @@ export function Pagination({
   }
 
   return (
-    <nav className="pagination" aria-label="History pages">
+    <nav className="pagination" aria-label="Pages">
       <span className="faint">
         {total.toLocaleString()} rows · page {page + 1} of {pageCount}
       </span>

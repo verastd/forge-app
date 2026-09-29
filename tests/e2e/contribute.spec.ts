@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test';
 
+import { demoSignIn } from './helpers/session';
+
 /** Force the offline path so every assertion holds with or without the API up. */
 async function goOffline(page: import('@playwright/test').Page): Promise<void> {
   await page.route('**/api/**', (route) => route.abort());
@@ -21,7 +23,7 @@ test.describe('the Bridge', () => {
     const cards = page.getByRole('region', { name: 'Tasks' }).getByRole('link');
     await expect(cards).toHaveCount(8);
     await expect(
-      page.getByText('Let people download their activity history as a spreadsheet file.'),
+      page.getByText('Let people download the Upland data they are looking at as a spreadsheet file.'),
     ).toBeVisible();
     // Size is priced in the contributor's agent time, never in story points.
     await expect(page.getByText("~an evening of your agent's time").first()).toBeVisible();
@@ -42,12 +44,12 @@ test.describe('the Bridge', () => {
     await page.goto('/contribute');
 
     await page
-      .getByText('Let people download their activity history as a spreadsheet file.')
+      .getByText('Let people download the Upland data they are looking at as a spreadsheet file.')
       .click();
 
     await expect(page).toHaveURL(/\/contribute\/task\/1$/);
     await expect(page.getByRole('heading', { name: 'What done looks like' })).toBeVisible();
-    await expect(page.getByRole('list').filter({ hasText: 'GET /api/export' })).toBeVisible();
+    await expect(page.getByRole('list').filter({ hasText: 'GET /api/upland/export' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Claim this' })).toBeVisible();
   });
 
@@ -57,6 +59,8 @@ test.describe('the Bridge', () => {
 
     // The lease below is simulated, so the label saying so is part of the test.
     await expect(page.getByText(DEMO_BANNER)).toBeVisible();
+    // The task itself came from the local fixtures, so the nav says that too.
+    await expect(page.getByRole('banner').getByText('offline demo data')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Claim this' })).toBeVisible();
     await page.getByRole('button', { name: 'Claim this' }).click();
 
@@ -87,11 +91,15 @@ test.describe('the Bridge', () => {
     const modal = page.getByRole('dialog');
     await expect(modal).toBeVisible();
     await expect(modal.getByText(/Preview: we put this together on your device/)).toBeVisible();
-    await expect(modal.getByText('Task #1: Polish the CSV export on the history page')).toBeVisible();
+    await expect(modal.getByText('Task #1: Polish the CSV export in the Data app')).toBeVisible();
     await expect(modal.getByRole('button', { name: 'Copy' })).toBeVisible();
+    // v0.2 PRD addendum: a short-enough prompt makes this the prefilled primary
+    // action (?prompt=...), not the bare deep link — see handoff-golden.spec.ts
+    // for the byte-exact contract. Here we only need it to point at Claude Code
+    // with the task already attached.
     await expect(modal.getByRole('link', { name: 'Open Claude Code' })).toHaveAttribute(
       'href',
-      'https://claude.ai/code',
+      /^https:\/\/claude\.ai\/code\?prompt=/,
     );
   });
 
@@ -115,8 +123,15 @@ test.describe('the Bridge', () => {
     await expect(page.getByRole('link', { name: 'Find another' })).toBeVisible();
   });
 
-  test('shows the ledger and the ladder on the profile', async ({ page }) => {
-    await page.goto('/contribute/profile');
+  test('shows the ledger and the ladder on /me (/contribute/profile now redirects there)', async ({
+    page,
+  }) => {
+    // The Bridge's own settle view moved behind sign-in when /contribute/profile
+    // was deleted in favour of a redirect to /me (Phase 2 restructure) — see
+    // notes-phase2.md. It's the same ContributionRecord, same fixture.
+    await page.goto('/signin');
+    await demoSignIn(page);
+    await page.goto('/me');
 
     await expect(page.getByRole('heading', { name: 'Your contributions' })).toBeVisible();
     await expect(page.getByText('contributions shipped')).toBeVisible();

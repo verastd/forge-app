@@ -54,8 +54,8 @@ hand-written code ADR-003 describes (`docs/adr/ADR-003-github-app-signin.md`):
 - `apps/web/src/app/auth/` — the `/auth/signin`, `/auth/callback`,
   `/auth/signout` and `/auth/demo` routes.
 - `apps/web/src/app/bff/` — the same-origin proxy that mints the API
-  assertion for `/upland`'s data.
-- `apps/web/src/middleware.ts` — the `/me` and `/upland` sign-in gate.
+  assertion for `/apps/data`'s data.
+- `apps/web/src/middleware.ts` — the `/me` and `/apps/data` sign-in gate.
 - `apps/web/src/lib/session.ts` and `apps/web/src/lib/auth/` — the session
   helpers, the Origin check, and where every secret is read from the
   environment.
@@ -66,6 +66,9 @@ hand-written code ADR-003 describes (`docs/adr/ADR-003-github-app-signin.md`):
   that assertion, and the `FORGE_ADMIN_IDS` operator check.
 - `.gitleaksignore` — fingerprints the secret scan skips (known false
   positives only). Core-owned, so no PR can suppress a finding about itself.
+- `CLAUDE.md` and `.gemini/` — files coding agents load as their
+  instructions, each pointing at `AGENTS.md`. Core-owned, so no PR can
+  rewrite what every contributor's agent reads.
 
 These same paths are cold-account-owned in `CODEOWNERS` and listed in
 `.github/forge-protocol.json`'s `protectedPaths`, so a PR touching them
@@ -82,7 +85,7 @@ missing, the headlines:
 - **Sensitive-path review is cold-account approval, not two-person
   control.** `CODEOWNERS` lists `@verastd` and `@forge-cold` on `.github/`,
   `contracts/`, `packages/contracts-client/`, the `auth*`/`pay*` routers,
-  and the sign-in/session paths listed above, but GitHub accepts an
+  and every path listed above, but GitHub accepts an
   approval from any one listed owner and
   both accounts belong to the same person. What it buys is a forced
   sign-in to a hardware-2FA account — friction against a stolen session.

@@ -6,14 +6,17 @@
  * one failing does not blank the other.
  */
 
+import { useFlag } from '@forge/flags/react';
 import { useCallback, useEffect, useState } from 'react';
 
-import { Chip } from '../../../components/Chip';
-import { DataTable } from '../../../components/DataTable';
-import type { Column } from '../../../components/DataTable';
-import { formatChainTimestamp, formatUpx } from '../../../lib/format';
-import { fetchRecentSales, fetchSalesVolume, uplandExportUrl } from '../../../lib/upland-api';
-import type { SalesVolumeDay, UplandAction } from '../../../lib/upland-api';
+import { Chip } from '../../../../components/Chip';
+import { DataTable } from '../../../../components/DataTable';
+import type { Column } from '../../../../components/DataTable';
+import { demoFlagFallback } from '../../../../lib/flags';
+import { formatChainTimestamp, formatUpx } from '../../../../lib/format';
+import { fetchRecentSales, fetchSalesVolume, uplandExportUrl } from '../../../../lib/upland-api';
+import type { SalesVolumeDay, UplandAction } from '../../../../lib/upland-api';
+import { isUnauthorized, SignInRequired } from '../SignInRequired';
 
 const RECENT_LIMIT = 50;
 const VOLUME_DAYS = 30;
@@ -73,14 +76,16 @@ interface Section<T> {
   rows: T[];
   loading: boolean;
   failed: boolean;
+  unauthorized: boolean;
 }
 
-const PENDING: Section<never> = { rows: [], loading: true, failed: false };
+const PENDING: Section<never> = { rows: [], loading: true, failed: false, unauthorized: false };
 
-export default function UplandSalesPage() {
+export default function DataSalesPage() {
   const [sales, setSales] = useState<Section<UplandAction>>(PENDING);
   const [volume, setVolume] = useState<Section<SalesVolumeDay>>(PENDING);
   const [attempt, setAttempt] = useState(0);
+  const canExport = useFlag('csv_export', demoFlagFallback());
 
   useEffect(() => {
     let cancelled = false;
@@ -89,24 +94,26 @@ export default function UplandSalesPage() {
     void fetchRecentSales(RECENT_LIMIT)
       .then((rows) => {
         if (!cancelled) {
-          setSales({ rows, loading: false, failed: false });
+          setSales({ rows, loading: false, failed: false, unauthorized: false });
         }
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (!cancelled) {
-          setSales({ rows: [], loading: false, failed: true });
+          const unauthorized = isUnauthorized(error);
+          setSales({ rows: [], loading: false, failed: !unauthorized, unauthorized });
         }
       });
     void fetchSalesVolume(VOLUME_DAYS)
       .then((rows) => {
         if (!cancelled) {
           // Newest day first, same direction as the sales feed above it.
-          setVolume({ rows: [...rows].reverse(), loading: false, failed: false });
+          setVolume({ rows: [...rows].reverse(), loading: false, failed: false, unauthorized: false });
         }
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (!cancelled) {
-          setVolume({ rows: [], loading: false, failed: true });
+          const unauthorized = isUnauthorized(error);
+          setVolume({ rows: [], loading: false, failed: !unauthorized, unauthorized });
         }
       });
     return () => {
@@ -117,6 +124,8 @@ export default function UplandSalesPage() {
   const retry = useCallback(() => {
     setAttempt((current) => current + 1);
   }, []);
+
+  const unauthorized = sales.unauthorized || volume.unauthorized;
 
   function section<T>(
     state: Section<T>,
@@ -157,32 +166,42 @@ export default function UplandSalesPage() {
           <h1 className="page-title">Sales</h1>
           <p className="lede">What the market is trading, and what it moves per day.</p>
         </div>
-        <a className="btn btn-primary" href={uplandExportUrl('sales')} download>
-          Export sales CSV
-        </a>
+        {/* Export only beside sales that loaded: while they load, fail or ask for a sign-in,
+            the download could only fail. */}
+        {canExport && !sales.loading && !sales.failed && !unauthorized && (
+          <a className="btn btn-primary" href={uplandExportUrl('sales')} download>
+            Export sales CSV
+          </a>
+        )}
       </div>
 
-      <section className="stack">
-        <h2 className="section-title">Latest sales</h2>
-        {section(
-          sales,
-          SALE_COLUMNS,
-          (row) => String(row.globalSequence),
-          'No sales in the data set yet.',
-          "We can't show the latest sales just now",
-        )}
-      </section>
+      {unauthorized ? (
+        <SignInRequired onRetry={retry} />
+      ) : (
+        <>
+          <section className="stack">
+            <h2 className="section-title">Latest sales</h2>
+            {section(
+              sales,
+              SALE_COLUMNS,
+              (row) => String(row.globalSequence),
+              'No sales in the data set yet.',
+              "We can't show the latest sales just now",
+            )}
+          </section>
 
-      <section className="stack">
-        <h2 className="section-title">Daily volume — last {VOLUME_DAYS} days</h2>
-        {section(
-          volume,
-          VOLUME_COLUMNS,
-          (row) => row.date,
-          'No sales volume in the data set yet.',
-          "We can't show the daily volume just now",
-        )}
-      </section>
+          <section className="stack">
+            <h2 className="section-title">Daily volume — last {VOLUME_DAYS} days</h2>
+            {section(
+              volume,
+              VOLUME_COLUMNS,
+              (row) => row.date,
+              'No sales volume in the data set yet.',
+              "We can't show the daily volume just now",
+            )}
+          </section>
+        </>
+      )}
     </main>
   );
 }

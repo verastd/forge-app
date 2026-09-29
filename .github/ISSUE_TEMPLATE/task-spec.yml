@@ -13,7 +13,7 @@ body:
     id: civilian_summary
     attributes:
       label: Civilian summary
-      description: One jargon-free sentence for the in-app Bridge task card ("Make the history page load faster on your phone"). Required for any task open to T0/T1.
+      description: One jargon-free sentence for the in-app Bridge task card ("Make the Data app load faster on your phone"). Required for any task open to T0/T1.
     validations:
       required: true
   - type: textarea
@@ -22,8 +22,8 @@ body:
       label: Acceptance criteria
       description: Numbered, mechanically checkable. Each maps to a test.
       placeholder: |
-        1. GET /api/export returns text/csv with columns [ts, type, amount]
-        2. Export button visible on /history for logged-in users (flag: csv_export)
+        1. GET /api/upland/export returns text/csv whose first line is the 13-column action header
+        2. Export CSV button visible on /apps/data for signed-in users (flag: csv_export)
         3. 10k-row export completes < 3s in CI fixture data
     validations:
       required: true

@@ -29,6 +29,7 @@ from forge_api.services.upland.action_codes import CATEGORIES
 from forge_api.services.upland.hyperion import HyperionClient
 
 FLAG = "upland_data"
+EXPORT_FLAG = "csv_export"
 
 #: `stats/time_series?filter=` accepts any action category, or "all".
 TimeSeriesFilter = str
@@ -38,6 +39,13 @@ def require_upland_enabled() -> None:
     """Router-wide gate: every /api/upland/* route 404s while `upland_data` is off."""
     if not flags_service.is_enabled(FLAG):
         raise ApiError(404, {"error": "upland-disabled"})
+
+
+def require_csv_export() -> None:
+    """The export route's own gate: 403 while `csv_export` is off. It is a route-level
+    dependency, so it runs after the router's two: 404, then 401, then this 403."""
+    if not flags_service.is_enabled(EXPORT_FLAG):
+        raise ApiError(403, {"error": "flag_disabled"})
 
 
 async def get_hyperion() -> AsyncIterator[HyperionClient]:
@@ -55,6 +63,7 @@ router = APIRouter(
     prefix="/api/upland",
     tags=["upland"],
     # In this order: 404 while `upland_data` is off, then 401 without a valid assertion.
+    # A route's own dependencies (the export's `require_csv_export`) run after both.
     dependencies=[Depends(require_upland_enabled), Depends(require_identity)],
 )
 
@@ -169,7 +178,7 @@ async def get_estimate(
     return await analytics.estimate(client, days)
 
 
-@router.get("/export")
+@router.get("/export", dependencies=[Depends(require_csv_export)])
 async def export_csv(type: analytics.ExportType = "actions") -> StreamingResponse:
     return StreamingResponse(
         analytics.iter_export_csv(type),

@@ -9,14 +9,15 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
-import { Chip, FilterChip } from '../../../components/Chip';
-import type { ChipTone } from '../../../components/Chip';
-import { DataTable } from '../../../components/DataTable';
-import type { Column } from '../../../components/DataTable';
-import { Pagination } from '../../../components/Pagination';
-import { formatChainTimestamp, formatUpx } from '../../../lib/format';
-import { fetchActions, fetchStatsOverview } from '../../../lib/upland-api';
-import type { UplandAction } from '../../../lib/upland-api';
+import { Chip, FilterChip } from '../../../../components/Chip';
+import type { ChipTone } from '../../../../components/Chip';
+import { DataTable } from '../../../../components/DataTable';
+import type { Column } from '../../../../components/DataTable';
+import { Pagination } from '../../../../components/Pagination';
+import { formatChainTimestamp, formatUpx } from '../../../../lib/format';
+import { fetchActions, fetchStatsOverview } from '../../../../lib/upland-api';
+import type { UplandAction } from '../../../../lib/upland-api';
+import { isUnauthorized, SignInRequired } from '../SignInRequired';
 
 const PAGE_SIZE = 50;
 
@@ -69,7 +70,7 @@ const COLUMNS: ReadonlyArray<Column<UplandAction>> = [
   },
 ];
 
-export default function UplandActionsPage() {
+export default function DataActionsPage() {
   const [category, setCategory] = useState<string | undefined>(undefined);
   const [actorInput, setActorInput] = useState('');
   const [actor, setActor] = useState<string | undefined>(undefined);
@@ -80,10 +81,11 @@ export default function UplandActionsPage() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
+  const [unauthorized, setUnauthorized] = useState(false);
   const [attempt, setAttempt] = useState(0);
 
-  // The filter chips: one fetch, and a fetch that fails just means no chips —
-  // the table below carries its own error state.
+  // The filter chips: one fetch (again on "Try again"), and a fetch that fails
+  // just means no chips — the table below carries its own error state.
   useEffect(() => {
     let cancelled = false;
     void fetchStatsOverview()
@@ -96,12 +98,13 @@ export default function UplandActionsPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [attempt]);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setFailed(false);
+    setUnauthorized(false);
     void fetchActions({ category, actor, limit: PAGE_SIZE, offset: page * PAGE_SIZE })
       .then((result) => {
         if (cancelled) {
@@ -111,14 +114,15 @@ export default function UplandActionsPage() {
         setTotal(result.total);
         setLoading(false);
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (cancelled) {
           return;
         }
         setItems([]);
         setTotal(0);
-        setFailed(true);
         setLoading(false);
+        setUnauthorized(isUnauthorized(error));
+        setFailed(!isUnauthorized(error));
       });
     return () => {
       cancelled = true;
@@ -208,6 +212,8 @@ export default function UplandActionsPage() {
             <span className="spinner" aria-hidden="true" /> Loading actions…
           </div>
         </div>
+      ) : unauthorized ? (
+        <SignInRequired onRetry={retry} />
       ) : failed ? (
         <div className="card stack" role="alert">
           <h2 className="section-title">We can&apos;t show the actions just now</h2>

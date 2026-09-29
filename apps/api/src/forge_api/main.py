@@ -11,15 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from forge_api import __version__
-from forge_api.routers import (
-    bridge,
-    export,
-    flags,
-    health,
-    history,
-    upland,
-    upland_scrape,
-)
+from forge_api.routers import bridge, flags, health, upland, upland_scrape
 from forge_api.services.errors import ApiError
 
 #: `next dev` (3000) and the Playwright web server (3100). Staging/production
@@ -57,8 +49,6 @@ async def api_error_handler(request: Request, exc: ApiError) -> JSONResponse:
 
 
 app.include_router(health.router)
-app.include_router(history.router)
-app.include_router(export.router)
 app.include_router(flags.router)
 app.include_router(bridge.router)
 app.include_router(upland.router)

@@ -1,0 +1,16 @@
+{
+  "taskId": 1,
+  "prompt": "Task #1: Polish the CSV export in the Data app\n\nWhat this means in plain language: Let people download the Upland data they are looking at as a spreadsheet file.\n\nAcceptance criteria (each one is checked by a test):\n1. GET /api/upland/export returns text/csv whose first line is the 13-column action header\n2. Export CSV button visible on /apps/data for signed-in users (flag: csv_export)\n3. 10k-row export completes < 3s in CI fixture data\n\nRead AGENTS.md at repo root first. Work ONLY in branch task/1-polish-the-csv-export-in-the-data-app of your fork of forge-app. Do not modify .github/, acceptance tests, or files outside the task scope.",
+  "instructions": {
+    "claude-code": [
+      "Tap Open Claude Code. It opens with the whole task already typed in, so there is nothing to copy.",
+      "If Claude Code asks which project to work on, pick your own copy of the app, then press send. It runs on your own plan.",
+      "Claude Code does the work, but sending it in for checks is not automatic yet. Come back here when it is finished to see where it stands."
+    ],
+    "codex": [
+      "Tap Copy to put the whole task on your clipboard.",
+      "Tap Open OpenAI Codex, pick your own copy of the app, paste the task and send it. It runs on your own plan.",
+      "OpenAI Codex does the work, but sending it in for checks is not automatic yet. Come back here when it is finished to see where it stands."
+    ]
+  }
+}

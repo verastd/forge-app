@@ -6,7 +6,7 @@
  * contribution" (PRD §4.9, Appendix I).
  */
 
-import type { BridgeStage, HistoryItem, RewardClass, Size, Tier } from '@forge/shared';
+import type { BridgeStage, RewardClass, Size, Tier } from '@forge/shared';
 
 /* --- dates and numbers ----------------------------------------------------- */
 
@@ -55,21 +55,6 @@ const UPX_FORMAT = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }
 /** "15,000 UPX" — whole numbers; Upland prices don't carry meaningful cents. */
 export function formatUpx(amount: number): string {
   return `${UPX_FORMAT.format(amount)} UPX`;
-}
-
-const AMOUNT_FORMAT = new Intl.NumberFormat(undefined, {
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-});
-
-/** Signed by type: spending reads negative even though the API stores magnitude. */
-export function formatAmount(item: Pick<HistoryItem, 'type' | 'amount'>): string {
-  const sign = item.type === 'spend' ? '-' : item.type === 'earn' ? '+' : '';
-  return `${sign}${AMOUNT_FORMAT.format(Math.abs(item.amount))}`;
-}
-
-export function amountClass(type: HistoryItem['type']): string {
-  return `num amount-${type}`;
 }
 
 /** Days left, rounded up so a part-day still reads as a day. Never negative. */

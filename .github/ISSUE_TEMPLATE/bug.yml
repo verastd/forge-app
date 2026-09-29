@@ -14,7 +14,7 @@ body:
     attributes:
       label: What were you doing?
       description: Describe the steps leading up to the problem.
-      placeholder: I was exporting my history to CSV from the /history page...
+      placeholder: I was exporting my Upland data to CSV from the /apps/data page...
     validations:
       required: true
 
@@ -38,7 +38,7 @@ body:
       label: Steps to reproduce
       description: Numbered steps, as exact as you can make them.
       placeholder: |
-        1. Go to /history
+        1. Go to /apps/data
         2. Click "Export CSV"
         3. ...
     validations:

@@ -13,6 +13,8 @@
     ".github/",
     "CODEOWNERS",
     "AGENTS.md",
+    "CLAUDE.md",
+    ".gemini/",
     "packages/auth/",
     "apps/web/src/app/auth/",
     "apps/web/src/app/bff/",

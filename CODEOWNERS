@@ -43,3 +43,7 @@
 /apps/web/next.config.mjs                      @verastd @forge-cold
 # Secret-scan suppressions: a contributor PR must never silence the scan for itself.
 /.gitleaksignore                               @verastd @forge-cold
+# What coding agents load as instructions: a PR here rewrites every contributor's agent.
+/AGENTS.md                                     @verastd @forge-cold
+/CLAUDE.md                                     @verastd @forge-cold
+/.gemini/                                      @verastd @forge-cold

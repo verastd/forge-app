@@ -91,14 +91,18 @@ export default function HomePage() {
           </p>
           <p className="hero-sub">
             A live beta app that its own users help build — with the coding agents they already pay
-            for.
+            for, in the open on{' '}
+            <a href={REPO_URL} target="_blank" rel="noreferrer noopener">
+              GitHub
+            </a>
+            .
           </p>
           <div className="row hero-actions">
             <Link href="/contribute" className="btn btn-primary btn-lg">
               Find a task
             </Link>
-            <Link href="/history" className="btn btn-ghost btn-lg">
-              See your history
+            <Link href="/apps" className="btn btn-ghost btn-lg">
+              Enter the lobby
             </Link>
           </div>
         </div>
@@ -106,40 +110,32 @@ export default function HomePage() {
       </section>
 
       <section className="grid-3">
-        <Link href="/history" className="card card-link">
-          <span className="card-kicker">01 · Ledger</span>
-          <h2 className="card-title">Your history</h2>
-          <p className="muted">
-            Everything that has moved in your account, with a one-tap spreadsheet download.
-          </p>
-          <span className="card-go" aria-hidden="true">
-            Open ledger →
-          </span>
-        </Link>
-
         <Link href="/contribute" className="card card-link">
-          <span className="card-kicker">02 · Build</span>
+          <span className="card-kicker">01 · Contribute</span>
           <h2 className="card-title">Help build FORGE</h2>
-          <p className="muted">
-            Pick something the app needs, hand it to your agent, watch it ship. No coding required
-            from you.
-          </p>
+          <p className="muted">Find an open contribution and point your AI at it.</p>
           <span className="card-go" aria-hidden="true">
             Browse tasks →
           </span>
         </Link>
 
-        <a href={REPO_URL} className="card card-link" target="_blank" rel="noreferrer noopener">
-          <span className="card-kicker">03 · Source</span>
-          <h2 className="card-title">The workshop</h2>
-          <p className="muted">
-            Every task, every check and every decision in the open, for the people who like to read
-            the source.
-          </p>
+        <Link href="/propose" className="card card-link">
+          <span className="card-kicker">02 · Propose</span>
+          <h2 className="card-title">Bring an idea</h2>
+          <p className="muted">Pitch it in plain English. The community decides by Robert's Rules.</p>
           <span className="card-go" aria-hidden="true">
-            Read the source ↗
+            Make a proposal →
           </span>
-        </a>
+        </Link>
+
+        <Link href="/apps" className="card card-link">
+          <span className="card-kicker">03 · Apps</span>
+          <h2 className="card-title">Enter the lobby</h2>
+          <p className="muted">Everything the community has built, on one wall.</p>
+          <span className="card-go" aria-hidden="true">
+            Enter the lobby →
+          </span>
+        </Link>
       </section>
     </main>
   );
