@@ -1,4 +1,4 @@
-## FORGE
+# FORGE
 
 FORGE is a contribution pipeline for this app. Instead of assigning work to
 people and waiting, we publish a curated queue of well-specified tasks as
