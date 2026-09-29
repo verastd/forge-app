@@ -1,5 +1,7 @@
 import Link from 'next/link';
 
+import { Splash } from '../components/Splash';
+
 const REPO_URL = 'https://github.com/verastd/forge-app';
 
 /*
@@ -52,6 +54,13 @@ function CityBlock() {
           />
         ))}
         <circle className="map-pin" cx="46" cy="207" r="18" />
+        {/*
+          Never drawn. It spans the lots exactly, and it lives inside the svg so
+          it picks up the isometric transform — which makes its client rect the
+          parcels as actually projected, and that is what the splash aligns its
+          copy of the plate to. See src/components/Splash.tsx.
+        */}
+        <rect data-splash-anchor="plate" x="24" y="24" width="212" height="212" fill="none" />
       </svg>
     </div>
   );
@@ -60,11 +69,20 @@ function CityBlock() {
 export default function HomePage() {
   return (
     <main className="page">
+      <Splash />
+
       <section className="hero">
         <div className="hero-copy">
           <p className="hero-eyebrow">Beta · made for Upland players</p>
+          {/*
+            The inner span is the splash's alignment anchor: an inline box hugs
+            the glyphs, so its rect is the wordmark's own ink rather than the
+            column it sits in. See src/components/Splash.tsx.
+          */}
           <p className="hero-mark">
-            FORG<span className="hero-mark-accent">E</span>
+            <span data-splash-anchor="mark">
+              FORG<span className="hero-mark-accent">E</span>
+            </span>
           </p>
           <p className="hero-pitch">
             The community brings the intelligence and pays for the tokens. The repo brings the tasks
