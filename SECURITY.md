@@ -55,6 +55,8 @@ hand-written code ADR-003 describes (`docs/adr/ADR-003-github-app-signin.md`):
   `/auth/signout` and `/auth/demo` routes.
 - `apps/web/src/app/bff/` — the same-origin proxy that mints the API
   assertion for `/apps/data`'s data.
+- `apps/web/src/app/api/lobby/` — the lobby's LiveKit room-token route,
+  which signs who each voice and name tag in the Apps lobby belongs to.
 - `apps/web/src/middleware.ts` — the `/me` and `/apps/data` sign-in gate.
 - `apps/web/src/lib/session.ts` and `apps/web/src/lib/auth/` — the session
   helpers, the Origin check, and where every secret is read from the

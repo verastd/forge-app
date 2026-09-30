@@ -6,6 +6,9 @@ const DEMO_PORT = 3100;
 const LIVE_PORT = 3101;
 const DEMO_URL = `http://localhost:${DEMO_PORT}`;
 const LIVE_URL = `http://localhost:${LIVE_PORT}`;
+// The Apps lobby is WebGL2. Pin Chromium to SwiftShader, its software GL, so
+// the lobby renders the same on a GPU-less CI runner as anywhere else.
+const SWIFTSHADER_ARGS = ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'];
 
 /**
  * Two apps, because demo mode is a property of the build, not of the request:
@@ -64,12 +67,12 @@ export default defineConfig({
     {
       name: 'chromium-demo',
       testIgnore: /live-.*\.spec\.ts/,
-      use: { ...devices['Desktop Chrome'], baseURL: DEMO_URL },
+      use: { ...devices['Desktop Chrome'], baseURL: DEMO_URL, launchOptions: { args: SWIFTSHADER_ARGS } },
     },
     {
       name: 'chromium-live',
       testMatch: /live-.*\.spec\.ts/,
-      use: { ...devices['Desktop Chrome'], baseURL: LIVE_URL },
+      use: { ...devices['Desktop Chrome'], baseURL: LIVE_URL, launchOptions: { args: SWIFTSHADER_ARGS } },
     },
   ],
   // No `reuseExistingServer`: the env is what makes each of these servers the
@@ -84,6 +87,10 @@ export default defineConfig({
         FORGE_API_ASSERTION_SECRET: ASSERTION_SECRET,
         FORGE_PUBLIC_ORIGIN: DEMO_URL,
         FORGE_API_URL: `http://127.0.0.1:${DEMO_API_PORT}`,
+        // Never the machine's own LiveKit settings: empty counts as unset, so the token route answers 503.
+        LIVEKIT_URL: '',
+        LIVEKIT_API_KEY: '',
+        LIVEKIT_API_SECRET: '',
       },
       port: DEMO_PORT,
       reuseExistingServer: false,
@@ -102,6 +109,13 @@ export default defineConfig({
         // ever reaching github.com.
         GITHUB_APP_CLIENT_ID: 'Iv1.e2e0000000000000',
         GITHUB_APP_CLIENT_SECRET: 'e2e-fake-client-secret',
+        // Live-only: dummy LiveKit settings, so POST /api/lobby/token mints a
+        // real token (live-lobby.spec.ts). The room URL never resolves
+        // (`.invalid`), so a lobby that tries to join fails as it would with
+        // LiveKit down, and nothing ever reaches a LiveKit server.
+        LIVEKIT_URL: 'wss://example.invalid',
+        LIVEKIT_API_KEY: 'test-key',
+        LIVEKIT_API_SECRET: 'x'.repeat(40),
       },
       port: LIVE_PORT,
       reuseExistingServer: false,

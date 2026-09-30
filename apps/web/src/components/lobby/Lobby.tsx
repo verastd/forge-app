@@ -1,0 +1,470 @@
+'use client';
+
+/**
+ * The Apps lobby's shell: everything around the 3D view.
+ *
+ * - The `apps_lobby` flag. While it loads there is no canvas; switched off,
+ *   the page is its heading and directory plus one line saying so.
+ * - A WebGL2 probe on a throwaway canvas before the scene mounts. Without
+ *   WebGL2 the directory still works and the page says the view can't show.
+ * - The scene itself (LobbyScene, loaded on the client only), inside an
+ *   error boundary. A lost WebGL context, a throw while building or a throw
+ *   in a frame all end in the same "Reload to try again" state.
+ * - Presence: one feed per visit, connected on mount and closed on unmount.
+ *   The scene publishes to it and draws its peers every frame; the mic
+ *   button, and "Rejoin here" after the lobby was opened in another tab or
+ *   device, are the only other things that talk to it. The button shows the
+ *   feed's own word on the mic, which a reconnect can turn off.
+ * - Opening: a tap on a lit panel saves the camera and opens the app; a tap
+ *   on an empty slot opens /propose for that slot. Any visit to /apps starts
+ *   from the camera this tab saved, if it saved one; otherwise at the
+ *   centre, facing the app named by `?from=<slug>`. Coming back from an app
+ *   (`?from=<slug>`) also puts keyboard focus on that app's directory link.
+ * - The veil, the hint, the toast, the touch stick and the lift buttons,
+ *   as in the prototype.
+ *
+ * The root carries `data-lobby` and the state attributes e2e reads:
+ * `data-lobby-state`, `data-focus`, `data-motion`, `data-peers`,
+ * `data-voice` and `data-feed` here, and `data-x/y/z/yaw`, which the scene
+ * writes itself ten times a second.
+ */
+
+import { useFlags } from '@forge/flags/react';
+import {
+  CAMERA_STORAGE_ITEM,
+  INITIAL_CAMERA,
+  appBySlug,
+  facing,
+  parseCameraState,
+  serializeCameraState,
+  slotIndex,
+} from '@forge/lobby';
+import type { CameraState } from '@forge/lobby';
+import dynamic from 'next/dynamic';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Component, Suspense, useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import type { ReactNode, RefObject } from 'react';
+
+import { demoFlagFallback } from '../../lib/flags';
+import { isDemoMode } from '../../lib/mode';
+import { useSession } from '../SessionProvider';
+import styles from './Lobby.module.css';
+import type { LobbySceneProps, SceneEvents } from './LobbyScene';
+import { createPresenceFeed } from './presence/types';
+import type { FeedKind, PresenceFeed } from './presence/types';
+import type { Hit } from './scene/controls';
+
+const LobbyScene = dynamic(() => import('./LobbyScene'), { ssr: false });
+
+type LobbyState = 'loading' | 'ready' | 'unsupported' | 'lost' | 'off';
+
+const MESSAGES: Partial<Record<LobbyState, string>> = {
+  off: 'The 3D lobby is switched off right now.',
+  unsupported: "This browser can't show the 3D lobby.",
+  lost: 'The 3D view stopped. Reload to try again.',
+};
+
+const TOAST_MS = 1800;
+
+const cx = (...names: Array<string | false | null | undefined>): string => names.filter(Boolean).join(' ');
+
+// ---------- reduced motion, as a store ----------
+
+const MOTION_QUERY = '(prefers-reduced-motion: reduce)';
+
+function subscribeMotion(onChange: () => void): () => void {
+  const query = window.matchMedia(MOTION_QUERY);
+  query.addEventListener('change', onChange);
+  return () => query.removeEventListener('change', onChange);
+}
+
+const reducedMotionNow = (): boolean => window.matchMedia(MOTION_QUERY).matches;
+/** Full motion on the server, so the first client render matches the markup. */
+const reducedMotionOnServer = (): boolean => false;
+
+function useReducedMotion(): boolean {
+  return useSyncExternalStore(subscribeMotion, reducedMotionNow, reducedMotionOnServer);
+}
+
+// ---------- WebGL2, and the camera in session storage ----------
+
+let webgl2: boolean | null = null;
+
+/**
+ * Asks a throwaway canvas for a WebGL2 context, then gives the context
+ * straight back. Once per page load: the answer doesn't change, and every
+ * probe costs a context.
+ */
+function supportsWebGL2(): boolean {
+  if (webgl2 === null) {
+    try {
+      const probe = document.createElement('canvas');
+      const gl = probe.getContext('webgl2');
+      gl?.getExtension('WEBGL_lose_context')?.loseContext();
+      webgl2 = gl !== null;
+    } catch {
+      webgl2 = false;
+    }
+  }
+  return webgl2;
+}
+
+function readSavedCamera(): CameraState | null {
+  try {
+    return parseCameraState(window.sessionStorage.getItem(CAMERA_STORAGE_ITEM));
+  } catch {
+    return null;
+  }
+}
+
+function saveCamera(pose: CameraState): void {
+  try {
+    window.sessionStorage.setItem(CAMERA_STORAGE_ITEM, serializeCameraState(pose));
+  } catch {
+    // Storage is off or full: the lobby just opens at the start next time.
+  }
+}
+
+/**
+ * Where the camera starts: where this tab last left the lobby, if it saved a
+ * camera (sessionStorage is per tab, so a new tab starts fresh). Otherwise
+ * the centre, facing the app named by `?from=<slug>`, or slot 0 for an
+ * unknown slug or no `from` at all.
+ */
+function spawnFor(from: string | null): CameraState {
+  const saved = readSavedCamera();
+  if (saved !== null) {
+    return saved;
+  }
+  const app = from === null ? undefined : appBySlug(from);
+  return app ? { ...INITIAL_CAMERA, yaw: facing(slotIndex(app.slot)) } : INITIAL_CAMERA;
+}
+
+// ---------- the scene's mount ----------
+
+class SceneBoundary extends Component<{ onError: () => void; children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+
+  static getDerivedStateFromError(): { failed: boolean } {
+    return { failed: true };
+  }
+
+  componentDidCatch(): void {
+    this.props.onError();
+  }
+
+  render(): ReactNode {
+    return this.state.failed ? null : this.props.children;
+  }
+}
+
+/** Reads `?from=` once, inside its own Suspense boundary so the rest of the page still prerenders. */
+function SceneHost(props: Omit<LobbySceneProps, 'initial'>) {
+  const params = useSearchParams();
+  const [initial] = useState(() => spawnFor(params.get('from')));
+  return <LobbyScene initial={initial} {...props} />;
+}
+
+/**
+ * Back from an app (`?from=<slug>`): keyboard focus goes to that app's link
+ * in the directory, so Tab carries on from where the visitor left. The link
+ * is marked `data-arrival-focus` too, which SiteChrome's focus-on-arrival
+ * prefers to the page's h1. Rendered with or without the 3D view.
+ */
+function ArrivalFocus({ root }: { root: RefObject<HTMLDivElement | null> }) {
+  const from = useSearchParams().get('from');
+  useEffect(() => {
+    const app = from === null ? undefined : appBySlug(from);
+    const link = app ? root.current?.querySelector<HTMLElement>(`a[data-slug="${app.slug}"]`) : null;
+    if (!link) {
+      return undefined;
+    }
+    link.setAttribute('data-arrival-focus', '');
+    link.focus({ preventScroll: true });
+    return () => link.removeAttribute('data-arrival-focus');
+  }, [from, root]);
+  return null;
+}
+
+// ---------- presence ----------
+
+interface FeedInfo {
+  kind: FeedKind;
+  voice: boolean;
+  /** The lobby is open in another tab or device, which took this one's seat. */
+  elsewhere: boolean;
+}
+
+const NO_FEED: FeedInfo = { kind: 'none', voice: false, elsewhere: false };
+
+// ---------- the shell ----------
+
+export function Lobby({ heading, directory }: { heading: ReactNode; directory: ReactNode }) {
+  const router = useRouter();
+  const { session } = useSession();
+  const { flags, loading } = useFlags(demoFlagFallback());
+  const reducedMotion = useReducedMotion();
+
+  const [webgl, setWebgl] = useState<'unknown' | 'yes' | 'no'>('unknown');
+  const [broken, setBroken] = useState(false);
+  const [ready, setReady] = useState(false);
+  const [focus, setFocus] = useState('');
+  const [peerCount, setPeerCount] = useState(0);
+  const [micOn, setMicOn] = useState(false);
+  const [feedInfo, setFeedInfo] = useState<FeedInfo>(NO_FEED);
+  const [toast, setToast] = useState({ text: '', on: false, id: 0 });
+
+  const feedRef = useRef<PresenceFeed | null>(null);
+  /** Reads the feed into state now; the effect that owns the feed sets it. */
+  const syncRef = useRef<() => void>(() => undefined);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const nearRef = useRef<HTMLDivElement>(null);
+  const micRef = useRef<HTMLButtonElement>(null);
+  const stickRef = useRef<HTMLDivElement>(null);
+  const knobRef = useRef<HTMLDivElement>(null);
+  const riseRef = useRef<HTMLButtonElement>(null);
+  const fallRef = useRef<HTMLButtonElement>(null);
+
+  const enabled = !loading && flags.apps_lobby;
+  const live = enabled && webgl === 'yes' && !broken;
+
+  useEffect(() => {
+    if (enabled && webgl === 'unknown') {
+      setWebgl(supportsWebGL2() ? 'yes' : 'no');
+    }
+  }, [enabled, webgl]);
+
+  // One presence feed while the 3D view is up.
+  const login = session?.login ?? null;
+  useEffect(() => {
+    if (!live) {
+      return undefined;
+    }
+    const feed = createPresenceFeed({ demo: isDemoMode(), me: login === null ? null : { name: login } });
+    feedRef.current = feed;
+    let active = true;
+    const sync = (): void => {
+      if (!active) {
+        return;
+      }
+      // What presence runs on now, not which feed this is: a LiveKit feed
+      // that was refused a token, or couldn't reach the room, reports 'none'.
+      const status = feed.status();
+      const next: FeedInfo = {
+        kind: status.kind,
+        voice: feed.voiceAvailable(),
+        elsewhere: status.kind === 'none' && status.reason === 'elsewhere',
+      };
+      setFeedInfo((prev) =>
+        prev.kind === next.kind && prev.voice === next.voice && prev.elsewhere === next.elsewhere ? prev : next,
+      );
+      // The feed's own word on the mic: off while voice is unavailable, and
+      // off after a reconnect that rejoined the room.
+      setMicOn(feed.micOn());
+    };
+    syncRef.current = sync;
+    sync();
+    void feed.connect().then(sync, sync);
+    const timer = window.setInterval(sync, 1000);
+    return () => {
+      active = false;
+      syncRef.current = () => undefined;
+      window.clearInterval(timer);
+      if (feedRef.current === feed) {
+        feedRef.current = null;
+      }
+      feed.close();
+      setFeedInfo(NO_FEED);
+      setMicOn(false);
+      setPeerCount(0);
+      setFocus('');
+    };
+  }, [live, login]);
+
+  useEffect(() => {
+    if (!toast.on) {
+      return undefined;
+    }
+    const timer = window.setTimeout(() => setToast((current) => ({ ...current, on: false })), TOAST_MS);
+    return () => window.clearTimeout(timer);
+  }, [toast.on, toast.id]);
+
+  const say = useCallback((text: string) => setToast((current) => ({ text, on: true, id: current.id + 1 })), []);
+
+  const open = (hit: Hit, pose: CameraState): void => {
+    saveCamera(pose);
+    if (hit.lit) {
+      const app = appBySlug(hit.slug);
+      if (!app) {
+        return;
+      }
+      say(`Opening ${app.title}`);
+      router.push(app.route);
+    } else {
+      say('Empty slot. Propose something for it.');
+      router.push(`/propose?slot=${hit.slot}`);
+    }
+  };
+
+  const events: SceneEvents = {
+    onReady: () => setReady(true),
+    onLost: () => setBroken(true),
+    onError: () => setBroken(true),
+    onPick: open,
+    onFocus: setFocus,
+    onPeers: setPeerCount,
+    onLeave: saveCamera,
+  };
+
+  const hud = useCallback(() => {
+    const root = rootRef.current;
+    if (!root) {
+      return null;
+    }
+    return {
+      root,
+      near: nearRef.current,
+      mic: micRef.current,
+      stick: stickRef.current,
+      knob: knobRef.current,
+      rise: riseRef.current,
+      fall: fallRef.current,
+    };
+  }, []);
+
+  /** The room keeps one seat per member: joining again here takes it back from the other tab. */
+  const rejoin = (): void => {
+    const feed = feedRef.current;
+    if (!feed) {
+      return;
+    }
+    const sync = syncRef.current;
+    void feed.connect().then(sync, sync);
+    sync();
+  };
+
+  const toggleMic = async (): Promise<void> => {
+    const feed = feedRef.current;
+    if (!feed || !feedInfo.voice) {
+      return;
+    }
+    const want = !micOn;
+    let result = false;
+    try {
+      result = await feed.setMic(want);
+    } catch {
+      result = false;
+    }
+    if (feedRef.current !== feed) {
+      return;
+    }
+    setMicOn(result);
+    if (want && !result) {
+      say('Mic blocked');
+    }
+  };
+
+  const state: LobbyState = loading
+    ? 'loading'
+    : !flags.apps_lobby
+      ? 'off'
+      : webgl === 'no'
+        ? 'unsupported'
+        : broken
+          ? 'lost'
+          : ready && webgl === 'yes'
+            ? 'ready'
+            : 'loading';
+  const message = MESSAGES[state];
+  const voice = !feedInfo.voice ? 'unavailable' : micOn ? 'on' : 'off';
+
+  return (
+    <div
+      ref={rootRef}
+      className={styles.root}
+      data-lobby=""
+      data-lobby-state={state}
+      data-focus={live ? focus : ''}
+      data-motion={reducedMotion ? 'reduced' : 'full'}
+      data-peers={String(live ? peerCount : 0)}
+      data-voice={voice}
+      data-feed={feedInfo.kind}
+    >
+      {live && (
+        <SceneBoundary onError={() => setBroken(true)}>
+          <Suspense fallback={null}>
+            <SceneHost reducedMotion={reducedMotion} feed={feedRef} hud={hud} events={events} />
+          </Suspense>
+        </SceneBoundary>
+      )}
+      {live && (
+        <div className={cx(styles.veil, ready && styles.veilOff)} aria-hidden="true">
+          <p>Entering</p>
+        </div>
+      )}
+
+      <Suspense fallback={null}>
+        <ArrivalFocus root={rootRef} />
+      </Suspense>
+
+      <div className={styles.overlay}>
+        <div className={styles.intro}>
+          {heading}
+          {message && (
+            <p className={styles.message} role="status">
+              {message}
+            </p>
+          )}
+          {directory}
+        </div>
+        {live && (
+          <aside className={styles.chat} aria-label="People nearby">
+            {feedInfo.elsewhere && (
+              <div className={styles.elsewhere}>
+                <p role="status">{"You're in the lobby in another tab or device."}</p>
+                <button type="button" onClick={rejoin}>
+                  Rejoin here
+                </button>
+              </div>
+            )}
+            <div ref={nearRef} className={styles.near} />
+            <button
+              ref={micRef}
+              type="button"
+              className={cx(styles.mic, micOn && styles.on)}
+              disabled={!feedInfo.voice}
+              aria-pressed={feedInfo.voice ? micOn : undefined}
+              onClick={() => void toggleMic()}
+            >
+              <span>{!feedInfo.voice ? 'Voice unavailable' : micOn ? 'Mic · live' : 'Mic'}</span>
+            </button>
+          </aside>
+        )}
+      </div>
+
+      {live && (
+        <>
+          <div className={styles.hint}>
+            <span className={styles.desk}>Drag to look · WASD walk · Space/Shift rise, fall</span>
+            <span className={styles.mob}>Drag to look · stick to walk</span>
+            <span>Tap a panel to open · Voice carries 9 m</span>
+          </div>
+          <div ref={stickRef} className={styles.stick} aria-hidden="true">
+            <div ref={knobRef} />
+          </div>
+          <div className={styles.lift}>
+            <button ref={riseRef} type="button" aria-label="Rise">
+              ▲
+            </button>
+            <button ref={fallRef} type="button" aria-label="Fall">
+              ▼
+            </button>
+          </div>
+        </>
+      )}
+      <div className={cx(styles.toast, toast.on && styles.on)} role="status" aria-live="polite">
+        {toast.text}
+      </div>
+    </div>
+  );
+}

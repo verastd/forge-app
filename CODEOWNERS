@@ -38,6 +38,8 @@
 /apps/web/src/lib/session.ts                   @verastd @forge-cold
 /apps/api/src/forge_api/services/identity.py   @verastd @forge-cold
 /apps/web/src/lib/auth/                        @verastd @forge-cold
+# The lobby's LiveKit room token: it signs whose voice and name tag a member is.
+/apps/web/src/app/api/lobby/                   @verastd @forge-cold
 # Whether practice sessions count at all: decided at build time by these two.
 /apps/web/src/lib/mode.ts                      @verastd @forge-cold
 /apps/web/next.config.mjs                      @verastd @forge-cold

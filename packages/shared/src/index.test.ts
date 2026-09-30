@@ -54,6 +54,7 @@ describe('FlagConfigSchema', () => {
       contribute_bridge: false,
       upland_data: true,
       github_signin: false,
+      apps_lobby: true,
     });
     expect(result.success).toBe(true);
   });
@@ -68,6 +69,17 @@ describe('FlagConfigSchema', () => {
       csv_export: true,
       contribute_bridge: true,
       upland_data: true,
+      apps_lobby: true,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('requires apps_lobby: a config written before the flag existed is incomplete', () => {
+    const result = FlagConfigSchema.safeParse({
+      csv_export: true,
+      contribute_bridge: true,
+      upland_data: true,
+      github_signin: true,
     });
     expect(result.success).toBe(false);
   });
@@ -78,12 +90,24 @@ describe('FlagConfigSchema', () => {
       contribute_bridge: false,
       upland_data: false,
       github_signin: false,
+      apps_lobby: false,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a non-boolean apps_lobby', () => {
+    const result = FlagConfigSchema.safeParse({
+      csv_export: true,
+      contribute_bridge: true,
+      upland_data: true,
+      github_signin: true,
+      apps_lobby: 'true',
     });
     expect(result.success).toBe(false);
   });
 
   it('exposes the flag names as a const tuple', () => {
-    expect(FLAG_NAMES).toEqual(['csv_export', 'contribute_bridge', 'upland_data', 'github_signin']);
+    expect(FLAG_NAMES).toEqual(['csv_export', 'contribute_bridge', 'upland_data', 'github_signin', 'apps_lobby']);
   });
 });
 

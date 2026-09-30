@@ -18,6 +18,7 @@
     "packages/auth/",
     "apps/web/src/app/auth/",
     "apps/web/src/app/bff/",
+    "apps/web/src/app/api/lobby/",
     "apps/web/src/middleware.ts",
     "apps/web/src/lib/session.ts",
     "apps/api/src/forge_api/services/identity.py",

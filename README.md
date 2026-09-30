@@ -103,14 +103,26 @@ user ids of the operators). See
 the complete env var table, and how to rotate a secret without signing
 everyone out.
 
+### The Apps lobby
+
+`/apps` is a 3D lobby: a cave you walk around, whose wall holds every app
+(three.js, loaded on that page only). Members signed in with GitHub see and
+hear each other there through [LiveKit](https://livekit.io), which needs
+`LIVEKIT_URL`, `LIVEKIT_API_KEY` and `LIVEKIT_API_SECRET` on the server;
+without them the lobby still works, just alone. The demo build shows
+presence between tabs of one browser instead, with no voice. See
+[`docs/architecture.md`](docs/architecture.md#the-apps-lobby) and
+[ADR-004](docs/adr/ADR-004-apps-lobby.md) for why it's built this way.
+
 ## Repo map
 
 | Path | What's there |
 |---|---|
-| `apps/web` | Next.js 15 (App Router, TypeScript strict): the app itself, including the [`/contribute`](apps/web/src/app/contribute) Bridge surface. |
+| `apps/web` | Next.js 15 (App Router, TypeScript strict): the app itself, including the [`/contribute`](apps/web/src/app/contribute) Bridge surface and the 3D Apps lobby at `/apps`. |
 | `apps/api` | FastAPI (Python 3.12, `uv`), package `forge_api`: the backend, and the Bridge's server-side service. See [`apps/api/README.md`](apps/api/README.md). |
 | `packages/shared` | zod schemas — the reference copy of the web/API contract, hand-mirrored by `apps/api`'s Pydantic models. |
 | `packages/flags` | The feature-flag client, backed by [`config/flags.json`](config/flags.json). Fails closed: code defaults are all off. |
+| `packages/lobby` | The Apps lobby's pure logic: the wall, the camera, the app registry and the presence rules. No DOM, no three.js. |
 | `packages/contracts-client` | The only module allowed to import a chain SDK; mock-only today. See [its README](packages/contracts-client/README.md). |
 | `tests/e2e` | Playwright end-to-end tests, one project per build (demo and live). |
 | `tests/acceptance/issue-<N>/` | Per-task acceptance tests, one directory per issue, owned by whoever wrote the Task Spec — never by whoever implements it. See [`tests/acceptance/README.md`](tests/acceptance/README.md). |

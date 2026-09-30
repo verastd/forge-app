@@ -24,6 +24,7 @@ export const DEFAULT_FLAGS: FlagConfig = {
   contribute_bridge: false,
   upland_data: false,
   github_signin: false,
+  apps_lobby: false,
 };
 
 /**

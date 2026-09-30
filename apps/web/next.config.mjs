@@ -25,7 +25,7 @@ const nextConfig = {
   // pulls `node:fs/promises`/`node:path` in dynamically from server code only.
   // `@forge/auth` imports none at all (its eslint config enforces it), because
   // Edge middleware imports it.
-  transpilePackages: ['@forge/shared', '@forge/flags', '@forge/auth'],
+  transpilePackages: ['@forge/shared', '@forge/flags', '@forge/auth', '@forge/lobby', 'three'],
 
   // Baseline response headers on every route: no framing (clickjacking on the
   // sign-in and account pages), no MIME sniffing, and no full URLs (the OAuth

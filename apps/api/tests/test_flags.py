@@ -62,6 +62,7 @@ def test_all_flags_false_when_no_source_is_present(
         "contribute_bridge": False,
         "upland_data": False,
         "github_signin": False,
+        "apps_lobby": False,
     }
 
 
@@ -98,6 +99,7 @@ def test_env_json_bad_json_fails_closed_even_over_a_valid_earlier_layer(
         "contribute_bridge": False,
         "upland_data": False,
         "github_signin": False,
+        "apps_lobby": False,
     }
 
 
@@ -110,6 +112,7 @@ def test_env_path_missing_file_fails_closed(
         "contribute_bridge": False,
         "upland_data": False,
         "github_signin": False,
+        "apps_lobby": False,
     }
 
 
@@ -129,6 +132,7 @@ def test_known_flag_non_boolean_fails_closed_even_with_a_valid_sibling_key(
         "contribute_bridge": False,
         "upland_data": False,
         "github_signin": False,
+        "apps_lobby": False,
     }
 
 
@@ -142,6 +146,7 @@ def test_non_object_top_level_fails_closed(
         "contribute_bridge": False,
         "upland_data": False,
         "github_signin": False,
+        "apps_lobby": False,
     }
 
 
@@ -174,7 +179,22 @@ def test_is_enabled_is_false_for_an_unknown_flag_name() -> None:
     assert flags_service.is_enabled("some_flag_that_does_not_exist") is False
 
 
+def test_apps_lobby_is_on_in_the_repo_config_and_fails_closed_on_a_typo(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert flags_service.is_enabled("apps_lobby") is True
+    monkeypatch.setenv(flags_service.ENV_JSON, json.dumps({"apps_lobby": "true"}))
+    assert flags_service.get_flags().model_dump() == flags_service.DEFAULT_FLAGS
+    assert flags_service.is_enabled("apps_lobby") is False
+
+
 def test_flags_endpoint_returns_both_flags(client: TestClient) -> None:
     payload = client.get("/api/flags").json()
-    assert set(payload) == {"csv_export", "contribute_bridge", "upland_data", "github_signin"}
+    assert set(payload) == {
+        "csv_export",
+        "contribute_bridge",
+        "upland_data",
+        "github_signin",
+        "apps_lobby",
+    }
     assert all(isinstance(value, bool) for value in payload.values())
