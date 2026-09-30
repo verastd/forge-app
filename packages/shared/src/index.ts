@@ -16,6 +16,7 @@ export const FLAG_NAMES = [
   'contribute_bridge',
   'upland_data',
   'github_signin',
+  'apps_lobby',
 ] as const;
 export type FlagName = (typeof FLAG_NAMES)[number];
 
@@ -24,6 +25,7 @@ export const FlagConfigSchema = z.object({
   contribute_bridge: z.boolean(),
   upland_data: z.boolean(),
   github_signin: z.boolean(),
+  apps_lobby: z.boolean(),
 });
 export type FlagConfig = z.infer<typeof FlagConfigSchema>;
 

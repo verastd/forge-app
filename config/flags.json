@@ -2,5 +2,6 @@
   "csv_export": true,
   "contribute_bridge": true,
   "upland_data": true,
-  "github_signin": true
+  "github_signin": true,
+  "apps_lobby": true
 }

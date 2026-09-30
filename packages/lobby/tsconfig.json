@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // Pure logic, loaded by the three.js scene, the React shell and
+    // next.config.mjs alike: no DOM lib and no ambient @types. A stray
+    // `window` fails every type check. A stray `process` or `URL` fails the
+    // build (tsconfig.build.json leaves out the tests, whose vitest types
+    // pull in Node's). eslint.config.mjs catches both everywhere.
+    "lib": ["ES2022"],
+    "types": []
+  },
+  "include": ["src"]
+}

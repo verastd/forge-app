@@ -47,6 +47,7 @@ DEFAULT_FLAGS: dict[str, bool] = {
     "contribute_bridge": False,
     "upland_data": False,
     "github_signin": False,
+    "apps_lobby": False,
 }
 
 logger = logging.getLogger(__name__)

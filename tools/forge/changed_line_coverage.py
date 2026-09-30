@@ -37,6 +37,7 @@ ROOTS: tuple[tuple[str, str, str], ...] = (
     ("packages/flags", "js", "packages/flags/coverage/coverage-final.json"),
     ("packages/contracts-client", "js", "packages/contracts-client/coverage/coverage-final.json"),
     ("packages/auth", "js", "packages/auth/coverage/coverage-final.json"),
+    ("packages/lobby", "js", "packages/lobby/coverage/coverage-final.json"),
     ("apps/api", "py", "apps/api/coverage.xml"),
 )
 

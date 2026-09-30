@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import type { Page, Route } from '@playwright/test';
 
+import { DATA_LINK, DATA_SLOT, clickThrough, lobbyRoot, openLobby, slotOnScreen, tapThrough } from './helpers/lobby';
 import { demoSignIn, signInAs } from './helpers/session';
 
 /**
@@ -12,6 +13,10 @@ import { demoSignIn, signInAs } from './helpers/session';
  * payloads through page.route — the same wire shapes `@forge/shared`
  * validates, requested same-origin through `/bff/upland/*` rather than the
  * API's own origin.
+ *
+ * The way in is the Apps lobby at /apps: its directory link, or a tap on
+ * the Data app's lit screen in the 3D view (lobby.spec.ts covers the lobby
+ * itself, and helpers/lobby.ts how a test aims a tap).
  *
  * `/apps/data*` is behind sign-in, so every test past the entry flow below
  * signs in first, mostly with the practice account. The practice account
@@ -74,15 +79,31 @@ const SALE_ACTION = {
 };
 
 test.describe('reaching the Data app', () => {
-  test('from /apps, signed out then in with the practice account, lands on /apps/data', async ({
+  test('from the lobby directory, signed out then in with the practice account, lands on /apps/data', async ({
     page,
   }) => {
     await page.goto('/apps');
-    await page.getByRole('link', { name: 'Data: Upland blockchain data' }).click();
+    await clickThrough(
+      page.getByRole('navigation', { name: 'Apps', exact: true }).getByRole('link', { name: DATA_LINK, exact: true }),
+      /\/signin\?next=%2Fapps%2Fdata$/,
+    );
 
-    await expect(page).toHaveURL(/\/signin\?next=%2Fapps%2Fdata$/);
     await demoSignIn(page);
     await expect(page).toHaveURL(/\/apps\/data$/);
+  });
+
+  test('from a tap on its lit screen in the 3D lobby, signed out then in, lands on /apps/data', async ({
+    page,
+  }) => {
+    // The 3D view has to be up first, and SwiftShader builds it slowly.
+    test.setTimeout(90_000);
+    await openLobby(page);
+    await expect(lobbyRoot(page)).toHaveAttribute('data-focus', 'data');
+
+    await tapThrough(page, await slotOnScreen(page, DATA_SLOT), /\/signin\?next=%2Fapps%2Fdata$/);
+    await demoSignIn(page);
+    await expect(page).toHaveURL(/\/apps\/data$/);
+    await expect(page.getByRole('link', { name: 'Back to the lobby' })).toHaveAttribute('href', '/apps?from=data');
   });
 });
 

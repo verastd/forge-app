@@ -37,6 +37,7 @@ class FlagConfig(BaseModel):
     contribute_bridge: bool
     upland_data: bool
     github_signin: bool
+    apps_lobby: bool
 
 
 class TaskCard(BaseModel):

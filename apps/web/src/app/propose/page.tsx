@@ -7,6 +7,9 @@
  * rules people will actually rely on, not copy.
  */
 
+import { Suspense } from 'react';
+
+import { ProposeSlotNote } from '../../components/lobby/ProposeSlotNote';
 import styles from './propose.module.css';
 
 export default function ProposePage() {
@@ -16,6 +19,10 @@ export default function ProposePage() {
         <h1 className="page-title">Propose</h1>
         <p className="lede">Proposals aren't open yet.</p>
       </div>
+      {/* After the heading and lede, so a screen reader that lands on the h1 reads on into it. */}
+      <Suspense fallback={null}>
+        <ProposeSlotNote />
+      </Suspense>
 
       <section className="card stack">
         <h2 className="section-title">How a proposal will move</h2>

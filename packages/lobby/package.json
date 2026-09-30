@@ -1,0 +1,39 @@
+{
+  "name": "@forge/lobby",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The Apps lobby's pure logic for FORGE — the wall layout, the free-roam camera and its persistence, the app registry, the page chrome decision and the presence rules. No DOM, no three.js, no runtime dependencies.",
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint src",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9",
+    "@types/node": "^22",
+    "@vitest/coverage-v8": "^2.1",
+    "eslint": "^9",
+    "typescript": "~5.6",
+    "typescript-eslint": "^8",
+    "vitest": "^2.1"
+  }
+}
