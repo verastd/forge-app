@@ -395,9 +395,9 @@ describe('sanitizeName', () => {
     expect(sanitizeName('\ttab')).toBe('tab');
     expect(sanitizeName('del\u007f')).toBe('del');
     expect(sanitizeName('\u0085c1\u009b')).toBe('c1');
-    expect(sanitizeName('‮evil‬')).toBe('evil');
-    expect(sanitizeName('⁦iso⁩‎‏')).toBe('iso');
-    expect(sanitizeName('​m‍ara﻿')).toBe('mara');
+    expect(sanitizeName('\u202Eevil\u202C')).toBe('evil');
+    expect(sanitizeName('\u2066iso\u2069\u200E\u200F')).toBe('iso');
+    expect(sanitizeName('\u200Bm\u200Dara\uFEFF')).toBe('mara');
     expect(sanitizeName('para graph ')).toBe('paragraph');
     expect(sanitizeName(' \u0000 kit \u0007 ')).toBe('kit');
   });
@@ -416,7 +416,7 @@ describe('sanitizeName', () => {
   });
 
   it('falls back to "member" when nothing is left, or for anything but a string', () => {
-    for (const name of ['', '   ', '\u0000\u0001', '‮', '​  ', null, undefined, 42, {}, [], ['mara']]) {
+    for (const name of ['', '   ', '\u0000\u0001', '\u202E', '\u200B  ', null, undefined, 42, {}, [], ['mara']]) {
       expect(sanitizeName(name)).toBe('member');
     }
   });
