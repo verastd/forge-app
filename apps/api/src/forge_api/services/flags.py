@@ -4,8 +4,9 @@ Every flag defaults OFF (see `DEFAULT_FLAGS`): this module is a deploy-safety
 kill switch, not a convenience toggle, and an unconfigured or misconfigured
 deploy must never silently come up "enabled" (an independent assessment found
 the prior all-true defaults let flags fail open). `config/flags.json` is
-checked into the repo and stays all-true; that file — not this module's
-defaults — is what keeps local/demo behavior enabled.
+checked into the repo with every flag on except `agent_start` (off until its
+rails pass their live tests); that file — not this module's defaults — is
+what keeps local/demo behavior enabled.
 
 Layers, lowest precedence first (each is optional; later layers merge over
 earlier ones, stating only what they change):
@@ -48,6 +49,8 @@ DEFAULT_FLAGS: dict[str, bool] = {
     "upland_data": False,
     "github_signin": False,
     "apps_lobby": False,
+    "mcp_connector": False,
+    "agent_start": False,
 }
 
 logger = logging.getLogger(__name__)

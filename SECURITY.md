@@ -47,17 +47,23 @@ is in production yet (see `README.md` "Current status").
 The GitHub sign-in flow and everything that seals, opens or trusts a
 session are a priority target for review, precisely because a flaw there
 can impersonate any visitor rather than misbehave for one. This is the
-hand-written code ADR-003 describes (`docs/adr/ADR-003-github-app-signin.md`):
+hand-written code ADR-003 describes (`docs/adr/ADR-003-github-app-signin.md`),
+plus the agent hand-off and the FORGE connector that ADR-005 adds
+(`docs/adr/ADR-005-agent-handoff.md`):
 
 - `packages/auth/` — PKCE, session/transaction sealing and opening, the
   API assertion.
 - `apps/web/src/app/auth/` — the `/auth/signin`, `/auth/callback`,
-  `/auth/signout` and `/auth/demo` routes.
+  `/auth/signout` and `/auth/demo` routes, and `/auth/github/agent`, the
+  one-time GitHub authorization that starts Copilot on a contributor's
+  fork (spent on that one start, never stored).
 - `apps/web/src/app/bff/` — the same-origin proxy that mints the API
-  assertion for `/apps/data`'s data.
+  assertion for `/apps/data`'s data, the Contribute page's Bridge calls
+  and the connected-agents list.
 - `apps/web/src/app/api/lobby/` — the lobby's LiveKit room-token route,
   which signs who each voice and name tag in the Apps lobby belongs to.
-- `apps/web/src/middleware.ts` — the `/me` and `/apps/data` sign-in gate.
+- `apps/web/src/middleware.ts` — the `/me`, `/apps/data` and
+  `/oauth/authorize` sign-in gate.
 - `apps/web/src/lib/session.ts` and `apps/web/src/lib/auth/` — the session
   helpers, the Origin check, and where every secret is read from the
   environment.
@@ -71,6 +77,26 @@ hand-written code ADR-003 describes (`docs/adr/ADR-003-github-app-signin.md`):
 - `CLAUDE.md` and `.gemini/` — files coding agents load as their
   instructions, each pointing at `AGENTS.md`. Core-owned, so no PR can
   rewrite what every contributor's agent reads.
+- `.codex/`, `.agents/`, `.cursor/` and `.github/agents/` — agent config:
+  they tell every contributor's agent where the FORGE connector is, and
+  the custom agents in `.agents/agents/` and `.github/agents/` how to work
+  a task, so a PR that repoints them would phish every contributor.
+  `.mcp.json`, `.vscode/` and `.claude/` are protected the same way,
+  whether or not the repo has them yet.
+- `apps/api/src/forge_api/services/oauth.py`, `services/mcp_server.py`,
+  `routers/oauth.py`, `routers/mcp.py` and `apps/web/src/app/oauth/` — the
+  FORGE connector: its OAuth server (registration, consent, tokens,
+  revocation), the consent page, and the MCP server that acts for a
+  connected agent.
+- `apps/api/src/forge_api/services/vault.py` and `services/rail_adapters/`
+  — the encrypted store of contributors' saved agent keys, and the only
+  code that sends a key (or Copilot's one-time GitHub authorization) to a
+  vendor.
+- `apps/web/src/app/connect/`, `apps/web/src/lib/launch.ts`, the brief
+  (`packages/shared/src/brief.ts`, `services/brief.py`), the rail registry
+  (`packages/shared/src/rails.ts`, `services/rails.py`) and the connector's
+  tools (`services/bridge_mcp.py`) — what every agent is told, and the
+  links that send people to an agent or a key page.
 
 These same paths are cold-account-owned in `CODEOWNERS` and listed in
 `.github/forge-protocol.json`'s `protectedPaths`, so a PR touching them

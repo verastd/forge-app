@@ -15,9 +15,9 @@ export type { FlagConfig, FlagName } from '@forge/shared';
  * deploy-safety kill switch, not a convenience toggle: an unconfigured or
  * misconfigured deploy must never silently come up "enabled" (an
  * independent assessment found the prior all-true defaults let flags fail
- * open). `config/flags.json` is checked into the repo and stays all-true;
- * that file — not this constant — is what keeps local/demo behavior
- * enabled.
+ * open). `config/flags.json` is checked into the repo with every flag on
+ * except `agent_start` (off until its rails pass their live tests); that
+ * file — not this constant — is what keeps local/demo behavior enabled.
  */
 export const DEFAULT_FLAGS: FlagConfig = {
   csv_export: false,
@@ -25,6 +25,8 @@ export const DEFAULT_FLAGS: FlagConfig = {
   upland_data: false,
   github_signin: false,
   apps_lobby: false,
+  mcp_connector: false,
+  agent_start: false,
 };
 
 /**

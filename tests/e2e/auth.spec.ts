@@ -1,10 +1,9 @@
-import { createServer } from 'node:http';
-
 import { expect, test } from '@playwright/test';
 import type { Locator } from '@playwright/test';
 
-import { DEMO_API_PORT } from './helpers/env';
 import { demoSignIn, signInAs } from './helpers/session';
+import { withStandIn } from './helpers/standin';
+import type { Answer, Seen } from './helpers/standin';
 
 /**
  * Sign-in on the demo build (project `chromium-demo`, API deliberately down).
@@ -216,22 +215,23 @@ test.describe('the BFF (/bff/upland/*)', () => {
     baseURL,
   }) => {
     // A hostile stand-in for the API, on the port this server's FORGE_API_URL
-    // names: HTML for anything but an export, and headers the BFF must drop.
-    const upstream = createServer((request, response) => {
-      const csv = request.url?.startsWith('/api/upland/export') ?? false;
-      response.writeHead(200, {
-        'content-type': csv ? 'text/csv; charset=utf-8' : 'text/html',
-        ...(csv ? { 'content-disposition': 'attachment; filename="upland-actions.csv"' } : {}),
-        'cache-control': 'public, max-age=3600',
-        'set-cookie': 'planted=1; Path=/',
-      });
-      response.end(csv ? 'a,b\n1,2\n' : '<script>document.title = "from upstream"</script>');
-    });
-    await new Promise<void>((resolve, reject) => {
-      upstream.once('error', reject);
-      upstream.listen(DEMO_API_PORT, '127.0.0.1', resolve);
-    });
-    try {
+    // names (shared with other specs, so `withStandIn` waits for it): HTML for
+    // anything but an export, and headers the BFF must drop.
+    const hostile = (request: Seen): Answer | undefined => {
+      if (!request.path.startsWith('/api/upland/')) return undefined;
+      const csv = request.path.startsWith('/api/upland/export');
+      return {
+        status: 200,
+        headers: {
+          'content-type': csv ? 'text/csv; charset=utf-8' : 'text/html',
+          ...(csv ? { 'content-disposition': 'attachment; filename="upland-actions.csv"' } : {}),
+          'cache-control': 'public, max-age=3600',
+          'set-cookie': 'planted=1; Path=/',
+        },
+        body: csv ? 'a,b\n1,2\n' : '<script>document.title = "from upstream"</script>',
+      };
+    };
+    await withStandIn(hostile, async () => {
       await signInAs(context, baseURL ?? '', { sub: '4001002', login: 'header-check' });
 
       const html = await context.request.get('/bff/upland/overview');
@@ -247,10 +247,7 @@ test.describe('the BFF (/bff/upland/*)', () => {
       expect(csv.headers()['content-disposition']).toBe('attachment; filename="upland-actions.csv"');
       expect(csv.headers()['cache-control']).toBe('private, no-store');
       expect(await csv.text()).toBe('a,b\n1,2\n');
-    } finally {
-      upstream.closeAllConnections();
-      await new Promise((resolve) => upstream.close(resolve));
-    }
+    });
   });
 });
 

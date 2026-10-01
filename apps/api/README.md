@@ -1,7 +1,7 @@
 # apps/api — FORGE API
 
-FastAPI (Python 3.12, uv) backend for the beta app plus the Bridge stubs
-(PRD §4.9, Appendix I).
+FastAPI (Python 3.12, uv) backend for the beta app, the Bridge and the
+FORGE connector (PRD §4.9, Appendix I; `docs/adr/ADR-005-agent-handoff.md`).
 
 ```bash
 cd apps/api
@@ -15,9 +15,27 @@ Layout — routers stay thin, all logic lives in `services/` (AGENTS.md):
 
 ```
 src/forge_api/
-  main.py            app factory: title/version, CORS, routers, error handler
-  models.py          pydantic mirrors of packages/shared zod schemas
-  routers/           HTTP surface only (health, flags, bridge, upland, upland_scrape)
-  services/          flags resolution, bridge lease/dispatch, identity verification, upland scraper/analytics
+  main.py              app factory: title/version, CORS (and the connector paths' own), routers, error handler
+  models.py            pydantic mirrors of packages/shared zod schemas
+  routers/             HTTP surface only: health, flags, bridge, upland, upland_scrape,
+                       oauth (the connector's OAuth endpoints and the consent page's calls),
+                       mcp (POST /mcp)
+  services/
+    flags.py           flag resolution
+    identity.py        verifies the web tier's API assertion; the admin check
+    errors.py          the flat error envelope every endpoint answers with
+    state.py           the SQLite state database (FORGE_STATE_DB_PATH)
+    brief.py           the brief every agent gets (mirrors packages/shared/src/brief.ts)
+    rails.py           the rail registry (mirrors packages/shared/src/rails.ts)
+    bridge.py          the Bridge: tasks, claims, hand-offs, status, checks, submission
+    vault.py           saved agent keys, encrypted (FORGE_VAULT_KEY)
+    github_reads.py    pull requests, check runs, forks and task issues from GitHub
+    rail_adapters/     one module per start rail's vendor API
+    bridge_mcp.py      the connector's tools, prompt and server instructions
+    mcp_types.py       the seam between the MCP server and those tools
+    mcp_server.py      the MCP server: JSON-RPC 2.0 over POST /mcp
+    oauth.py           the connector's OAuth 2.1 authorization server
+    upland/            the Upland scraper, storage and analytics
+  tools/live_rails.py  runs one start rail outside the web app (docs/live-tests.md)
   fixtures/tasks.json  8 agent-ready starter tasks (PRD H.3)
 ```

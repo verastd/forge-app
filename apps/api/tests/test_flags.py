@@ -63,6 +63,8 @@ def test_all_flags_false_when_no_source_is_present(
         "upland_data": False,
         "github_signin": False,
         "apps_lobby": False,
+        "mcp_connector": False,
+        "agent_start": False,
     }
 
 
@@ -100,6 +102,8 @@ def test_env_json_bad_json_fails_closed_even_over_a_valid_earlier_layer(
         "upland_data": False,
         "github_signin": False,
         "apps_lobby": False,
+        "mcp_connector": False,
+        "agent_start": False,
     }
 
 
@@ -113,6 +117,8 @@ def test_env_path_missing_file_fails_closed(
         "upland_data": False,
         "github_signin": False,
         "apps_lobby": False,
+        "mcp_connector": False,
+        "agent_start": False,
     }
 
 
@@ -133,6 +139,8 @@ def test_known_flag_non_boolean_fails_closed_even_with_a_valid_sibling_key(
         "upland_data": False,
         "github_signin": False,
         "apps_lobby": False,
+        "mcp_connector": False,
+        "agent_start": False,
     }
 
 
@@ -147,6 +155,8 @@ def test_non_object_top_level_fails_closed(
         "upland_data": False,
         "github_signin": False,
         "apps_lobby": False,
+        "mcp_connector": False,
+        "agent_start": False,
     }
 
 
@@ -188,7 +198,26 @@ def test_apps_lobby_is_on_in_the_repo_config_and_fails_closed_on_a_typo(
     assert flags_service.is_enabled("apps_lobby") is False
 
 
-def test_flags_endpoint_returns_both_flags(client: TestClient) -> None:
+def test_mcp_connector_is_on_and_agent_start_off_in_the_repo_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # agent_start stays off in the checked-in file until its rails pass the live tests.
+    assert flags_service.is_enabled("mcp_connector") is True
+    assert flags_service.is_enabled("agent_start") is False
+    monkeypatch.setenv(flags_service.ENV_JSON, json.dumps({"agent_start": True}))
+    assert flags_service.is_enabled("agent_start") is True
+    assert flags_service.is_enabled("mcp_connector") is True
+
+
+def test_a_non_boolean_agent_start_fails_every_flag_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(flags_service.ENV_JSON, json.dumps({"agent_start": "yes"}))
+    assert flags_service.get_flags().model_dump() == flags_service.DEFAULT_FLAGS
+    assert flags_service.is_enabled("mcp_connector") is False
+
+
+def test_flags_endpoint_returns_every_flag(client: TestClient) -> None:
     payload = client.get("/api/flags").json()
     assert set(payload) == {
         "csv_export",
@@ -196,5 +225,7 @@ def test_flags_endpoint_returns_both_flags(client: TestClient) -> None:
         "upland_data",
         "github_signin",
         "apps_lobby",
+        "mcp_connector",
+        "agent_start",
     }
     assert all(isinstance(value, bool) for value in payload.values())

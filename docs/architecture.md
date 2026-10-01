@@ -23,11 +23,11 @@ incomplete), `experimental` (scaffold/stub only).
 
 | Path | Purpose | Owners | Stability | Tier-floor notes |
 |---|---|---|---|---|
-| `apps/web` | Next.js 15 App Router, TypeScript strict. The app itself, including the Bridge's `/contribute` surface, GitHub sign-in (`src/app/auth/`, `src/app/bff/`) and the Apps lobby at `/apps` (`src/components/lobby/`, with its LiveKit token route in `src/app/api/lobby/`) | `@verastd`; `src/app/auth/`, `src/app/bff/`, `src/app/api/lobby/`, `src/middleware.ts`, `src/lib/session.ts`, `src/lib/auth/`, `src/lib/mode.ts` and `next.config.mjs` need cold-account approval | beta — live and demo builds both work end to end; no unit-test runner yet, so it's exempt from the changed-line coverage gate | Open to all tiers per task; the cold-account sub-paths above are effectively T2+ in practice |
-| `apps/api` | FastAPI (Python 3.12, `uv`), package `forge_api`. App backend + the Bridge's server-side service | `@verastd`; `routers/auth*`, `routers/pay*` and `services/identity.py` need cold-account approval | beta — `health`, `flags`, `bridge`, and `upland`/`upland_scrape` routers are live, each with pytest coverage; `auth*`/`pay*` don't exist yet (identity verification lives in `services/identity.py`, consumed by the `upland` routers' dependencies, not a dedicated router) | `auth*`/`pay*`/`services/identity.py` paths: cold-account approval, effectively T2+ in practice |
-| `packages/shared` | zod schemas — reference copy of the web/API contract, hand-mirrored and test-locked against `apps/api`'s Pydantic models | `@verastd` | stable — schemas populated, mirrored field-for-field by `models.py`, locked by contract tests | Open |
+| `apps/web` | Next.js 15 App Router, TypeScript strict. The app itself, including the Bridge's `/contribute` surface, GitHub sign-in (`src/app/auth/`, `src/app/bff/`), the FORGE connector's consent page (`src/app/oauth/`) and setup page (`src/app/connect/`), and the Apps lobby at `/apps` (`src/components/lobby/`, with its LiveKit token route in `src/app/api/lobby/`) | `@verastd`; `src/app/auth/`, `src/app/bff/`, `src/app/oauth/`, `src/app/connect/`, `src/app/api/lobby/`, `src/middleware.ts`, `src/lib/session.ts`, `src/lib/auth/`, `src/lib/launch.ts`, `src/lib/mode.ts` and `next.config.mjs` need cold-account approval | beta — live and demo builds both work end to end; no unit-test runner yet, so it's exempt from the changed-line coverage gate | Open to all tiers per task; the cold-account sub-paths above are effectively T2+ in practice |
+| `apps/api` | FastAPI (Python 3.12, `uv`), package `forge_api`. App backend, the Bridge's server-side service and the FORGE connector (OAuth + MCP) | `@verastd`; `routers/auth*`, `routers/pay*`, `routers/oauth.py`, `routers/mcp.py`, `services/identity.py`, `services/oauth.py`, `services/mcp_server.py`, `services/vault.py`, `services/rail_adapters/`, `services/bridge_mcp.py`, `services/brief.py` and `services/rails.py` need cold-account approval | beta — `health`, `flags`, `bridge`, `oauth`, `mcp`, and `upland`/`upland_scrape` routers are live, each with pytest coverage; `auth*`/`pay*` don't exist yet (identity verification lives in `services/identity.py`, consumed by the `upland` and `bridge` routers' dependencies, not a dedicated router) | `auth*`/`pay*`/`services/identity.py` and the connector, vault, rail and brief paths: cold-account approval, effectively T2+ in practice |
+| `packages/shared` | zod schemas — reference copy of the web/API contract, hand-mirrored and test-locked against `apps/api`'s Pydantic models; also the rail registry (`src/rails.ts`) and the brief every agent gets (`src/brief.ts`), mirrored by `services/rails.py` and `services/brief.py` and held to golden fixtures in `tests/fixtures/` | `@verastd`; `src/rails.ts` and `src/brief.ts` need cold-account approval | stable — schemas populated, mirrored field-for-field by `models.py`, locked by contract tests | Open; `src/rails.ts` and `src/brief.ts`: cold-account approval |
 | `packages/auth` | Sign-in with GitHub: PKCE, sealed session/transaction cookies, the API assertion. Built on `jose` and Web Crypto only (no `node:` imports), so Next's Edge middleware can import it — see [ADR-003](adr/ADR-003-github-app-signin.md) | `@verastd` `@forge-cold` (cold-account approval) | stable — 100% coverage enforced in `vitest.config.ts`, includes the RFC 7636 PKCE test vector | **Tier floor T2** |
-| `packages/flags` | Feature-flag client; layered load, fail-closed. `config/flags.json` -> `FORGE_FLAGS_PATH` -> `FORGE_FLAGS_JSON` | `@verastd` | stable — `csv_export`, `contribute_bridge`, `upland_data`, `github_signin` and `apps_lobby`, all real gates | Open |
+| `packages/flags` | Feature-flag client; layered load, fail-closed. `config/flags.json` -> `FORGE_FLAGS_PATH` -> `FORGE_FLAGS_JSON` | `@verastd` | stable — `csv_export`, `contribute_bridge`, `upland_data`, `github_signin`, `apps_lobby`, `mcp_connector` (the FORGE connector) and `agent_start` (FORGE starting agents through vendor APIs; off in `config/flags.json` until those rails pass their live tests), all real gates | Open |
 | `packages/lobby` | The Apps lobby's pure logic: the wall's geometry, the free-roam camera and how it is saved, the app registry and the rules every entry must pass (slots, routes, and the sandbox and CSP for framed apps), which page chrome a route gets, and the presence packet, ranges and name rules. No DOM, no three.js and no runtime dependencies (its `tsconfig.json` and `eslint.config.mjs` enforce it) — see [ADR-004](adr/ADR-004-apps-lobby.md) | `@verastd` | stable — unit-tested in Node at full line coverage; the framed-app rules are enforced, though nothing framed ships yet | Open |
 | `packages/contracts-client` | The only module allowed to import a chain SDK. Mock-only isolation layer | `@verastd` `@forge-cold` (cold-account approval) | experimental — mock-only; `mode: 'live'` throws, no chain wiring | **Tier floor T2** |
 | `contracts/` | On-chain code, if any lands in-repo | `@verastd` `@forge-cold` (cold-account approval) | placeholder — no contract source yet | **Tier floor T2** |
@@ -36,6 +36,7 @@ incomplete), `experimental` (scaffold/stub only).
 | `tools/forge` | The `forge` CLI (`tasks`/`claim`/`status`) and the Gauntlet's gate scripts (`check-lockfile-diff.sh`, `coverage-gate.sh` + `changed_line_coverage.py`, `test-mod-detector.sh`) | `@verastd` | stable — all three gates enforce | Open |
 | `.github/workflows` | `gauntlet.yml` (the four unprivileged jobs: `hygiene`/`tests`/`security`/`e2e`), `foreman-annotate.yml` (privileged: posts the merge decision brief once the Gauntlet finishes, never checks out fork code), plus `agents-md-lint.yml` and `deploy-staging.yml` | `@verastd` `@forge-cold` (cold-account approval via CODEOWNERS on `.github/`) | beta — the four Gauntlet jobs run and are merge-queue-safe; G0 runs inside Foreman and doesn't post its own commit status here yet | T3-only |
 | `.github/rulesets` | Importable branch-protection ruleset JSON (`main-protection.json`) | `@verastd` `@forge-cold` | beta — schema is current, not yet imported into a live repo | Cold-account approval |
+| Agent config: `.mcp.json`, `.codex/`, `.agents/`, `.cursor/`, `.github/agents/`, `.gemini/`, `CLAUDE.md` | Points contributors' agents at `AGENTS.md` and the FORGE connector (see [The FORGE connector](#the-forge-connector)) | `@verastd` `@forge-cold` (cold-account approval) | beta — each file follows its client's docs as read on 2026-10-01; Antigravity 2.0 and Claude Code on the web are still to be live-tested ([`live-tests.md`](live-tests.md)) | T3-only (protected paths) |
 | `docs/` | This documentation suite, plus the ADRs recording stack decisions | `@verastd` | stable | Open (community-improvable) |
 
 Foreman itself has no row here: it's the GitHub App that enforces the
@@ -156,16 +157,25 @@ The rules are one pure function, `resolveSessionKeys` in
 |---|---|---|---|
 | `GITHUB_APP_CLIENT_ID` | web — `lib/auth/config.ts`'s `githubAppConfig()` | For real GitHub sign-in | The GitHub App's client ID; sign-in reads as `'unavailable'` without it |
 | `GITHUB_APP_CLIENT_SECRET` | web, same | For real GitHub sign-in | Never sent to the browser or logged; only used server-side in the `/auth/callback` code exchange |
-| `FORGE_PUBLIC_ORIGIN` | web — `publicOrigin()` (the OAuth `redirect_uri`, the callback's final redirect) and `isTrustedOrigin()` (the Origin check on `POST /auth/signout`, `POST /auth/demo`, and `POST /bff/upland/*`) | Required outside `next dev`; optional in `next dev` only, where an unset value falls back to the request's own origin | An `http(s)` URL with no path, query, fragment or credentials, e.g. `https://forge.example` (not `.../` ) — a set-but-invalid value refuses every state-changing request rather than guessing |
+| `GITHUB_APP_SLUG` | web — the Copilot rail's "Install FORGE's GitHub app on your fork" link (`https://github.com/apps/<slug>/installations/new`) | For that link; unset hides it | The App's URL name, as in `https://github.com/apps/<slug>`. Server-side only: handed to the page as a prop, never `NEXT_PUBLIC_*` |
+| `FORGE_PUBLIC_ORIGIN` | web — `publicOrigin()` (the OAuth `redirect_uri`, the callback's final redirect) and `isTrustedOrigin()` (the Origin check on `POST /auth/signout`, `POST /auth/demo`, `POST /bff/upland/*` and the other state-changing routes); API — the FORGE connector's public URLs (the OAuth metadata, the `iss` it sends back, the `<origin>/mcp` resource every token is bound to) and the Origin check on `/mcp` | Web: required outside `next dev`; optional in `next dev` only, where an unset value falls back to the request's own origin. API: required for the connector, which answers `503 connector_unavailable` without it | An `http(s)` URL with no path, query, fragment or credentials, e.g. `https://forge.example` (not `.../` ) — a set-but-invalid value refuses every state-changing request rather than guessing. On the API it must also be `https`, except `http` on a loopback host (`http://localhost:3000`) for development; anything else answers `503 connector_unavailable`. The same value on web and API: production is `https://forge-app-eta-mocha.vercel.app`; it is the connector's OAuth issuer and its address is this plus `/mcp`, so changing it disconnects every agent |
 | `FORGE_SESSION_SECRET` | web — seals and (with `_PREVIOUS`) opens session and transaction cookies | Required outside `next dev` | >= 32 characters, ASCII (`MIN_SECRET_LENGTH` in `@forge/auth`). Unset or empty under `next dev` only: the public dev secret, for practice sessions only, and the BFF never mints (see The development secret, above). Set but shorter than 32 characters: sign-in is disabled in every mode, with one logged warning |
 | `FORGE_SESSION_SECRET_PREVIOUS` | web, same | Optional | Same constraints; set only while rotating (see Operations) |
 | `FORGE_API_ASSERTION_SECRET` | web — mints the BFF's assertion; API — `verify_assertion` checks it | Required for `/apps/data` to work end to end; its absence (or weakness) on the web side answers `503 not_configured` rather than pretending the Data app is merely down | >= 32 characters, ASCII, used exactly as stored (not trimmed); must be byte-for-byte identical on web and API |
-| `FORGE_API_URL` | web — `apiUrl()`, where the BFF forwards `/bff/upland/*` | Optional | Defaults to `http://localhost:8000` |
+| `FORGE_API_URL` | web — `apiUrl()`, where the BFF forwards `/bff/upland/*` and `/bff/bridge/*`; and `next.config.mjs`, which rewrites the connector's paths (`/mcp`, `/oauth/register`, `/oauth/token`, `/oauth/revoke`, `/.well-known/oauth-*`, and the fallback `/register` and `/token`) to it | Optional for the BFF; required for the connector | Defaults to `http://localhost:8000` for the BFF. The rewrites are written when the app is built, and only if this is set to an absolute `http(s)` URL: set it in Vercel before the build, or the connector's paths 404 on the web origin |
 | `NEXT_PUBLIC_FORGE_DEMO` | web — `lib/mode.ts`'s `isDemoMode()`, read at build time only | Optional | `1` when building makes the demo build (practice sign-in, fixtures); anything else, or unset, a live build. Inlined by `next.config.mjs`'s `env`, so the value at runtime is ignored |
 | `FORGE_ADMIN_IDS` | API — the admin check behind `require_admin` | Optional | Comma-separated numeric GitHub user ids (not logins), each matching `^[1-9][0-9]{0,19}$`; entries trimmed, blanks ignored; unset means nobody is admin. One invalid entry makes nobody admin, with one logged warning |
 | `LIVEKIT_URL` | web — the lobby's token route (`src/app/api/lobby/token/route.ts`), which hands it to the browser with each token (see [The Apps lobby](#the-apps-lobby)) | For presence and voice in the Apps lobby; without all three LiveKit settings the route answers `503 voice_unavailable` and the lobby works alone | A `wss:`, `ws:`, `https:` or `http:` URL with no credentials, e.g. `wss://<project>.livekit.cloud`; anything else counts as unset. Server-side only, never `NEXT_PUBLIC_*`. Read on every request, so a build without it still succeeds |
 | `LIVEKIT_API_KEY` | web, same — the key each token is issued under | Same | The LiveKit project's API key. Server-side only |
 | `LIVEKIT_API_SECRET` | web, same — signs each token | Same | The LiveKit project's API secret. Server-side only: never sent to the browser or logged |
+| `FORGE_OAUTH_SECRET` | API — signs the FORGE connector's client registrations and derives confidential clients' secrets (`services/oauth.py`; see [The FORGE connector](#the-forge-connector)) | For the connector; unset, or shorter than 32 characters, answers `503 connector_unavailable` | >= 32 characters. Generate it on the API box itself (`openssl rand -base64 32`) and never paste it anywhere; FORGE never sends or logs it. Changing it invalidates every registered client, so connected agents have to connect again |
+| `FORGE_STATE_DB_PATH` | API — the state database: the Bridge's claims and timeline, saved agent keys, and the connector's grants and token hashes (`services/state.py`; see [State, keys and GitHub reads](#state-keys-and-github-reads)) | Optional; set it in production | A file path, created on demand. Defaults to `var/forge-state.db` in the repo (git-ignored). Production: `/var/lib/forge-api/forge.db`, on a disk that survives a redeploy |
+| `FORGE_VAULT_KEY` | API — encrypts the agent keys people ask FORGE to remember (`services/vault.py`) | Optional; without it nothing is saved and keys are typed in at each start | Base64 of 32 random bytes; generate it on the API box (`openssl rand -base64 32`). Surrounding whitespace is ignored. Unset or malformed turns the vault off (`vault: false` in `GET /api/bridge/rails`); a malformed value also logs one warning, which never includes the value. Changing it makes every saved key unreadable, so people enter them again |
+| `FORGE_START_RAILS` | API — which start rails may run (`GET /api/bridge/rails`, `POST /api/bridge/dispatch`) | Optional | Comma-separated rail ids from `copilot`, `jules`, `cursor`, `devin`, `openhands`, `claude-routine` (case and spaces don't matter; unknown ids are ignored); unset or empty means none. A rail runs only when it is listed here AND the `agent_start` flag is on. Add a rail only after it passes its live test ([`live-tests.md`](live-tests.md)) |
+| `FORGE_MAX_ACTIVE_CLAIMS` | API — how many tasks one person may hold at once | Optional | An integer from 1 to 100; unset or anything else means 2. One more claim answers `409 claim_limit` |
+| `FORGE_MCP_ALLOWED_ORIGINS` | API — the Origin check on `/mcp` | Optional | Comma-separated origins (`https://host`), allowed besides `FORGE_PUBLIC_ORIGIN` and the hosted clients' origins FORGE always accepts (listed under [The FORGE connector](#the-forge-connector)). Agents running outside a browser send no `Origin` and are unaffected; a request whose `Origin` is in none of these, or is `null`, gets `403` |
+| `FORGE_GITHUB_READ_TOKEN` | API — the GitHub reads behind status, check results, submission, the fork check and the GitHub task source (`services/github_reads.py`) | Optional in development; needed in production | A fine-grained token with read-only access to public repositories and no write permission of any kind, created by the operator and set on the API box by the operator, never pasted anywhere else; it raises GitHub's limit from 60 to 5,000 requests an hour. Without it the reads are anonymous: 60 an hour per IP, and every task someone is watching can cost two reads a minute (its pull request and its checks, each cached 60 seconds), so a few watched tasks use the hour up and status and checks fall back to "couldn't reach GitHub". The API reads only this variable, never a `GITHUB_TOKEN` that happens to be in its environment |
+| `FORGE_TASK_SOURCE` | API — where the Bridge's tasks come from | Optional | `github` reads open issues labelled `agent-ready` + `status:open` from `verastd/forge-app` (cached 5 minutes); anything else, or unset, uses the checked-in fixture tasks |
 
 **Operations.**
 
@@ -204,40 +214,63 @@ config in the environment.
 
 ## The Bridge
 
-The Bridge is the in-app, no-GitHub-account-needed client for the same
-pipeline GitHub-native contributors use. It is not a separate system:
-every action it takes lands on GitHub as the user's own authenticated
-action, through the same lease, tier, and Gauntlet rules everyone else
-goes through.
+The Bridge is the in-app client for the same pipeline GitHub-native
+contributors use: [`/contribute`](../apps/web/src/app/contribute) in the
+web app and `/api/bridge/*` in the API. It is not a separate system. The
+work happens in the contributor's own fork, by their own agent, on their
+own account, and reaches upstream as an ordinary pull request that goes
+through the same Gauntlet as everyone else's. FORGE never pays for an
+agent, never pushes code and never opens a pull request for anyone: the
+agent does that. How a task reaches the agent without copy and paste is
+[ADR-005](adr/ADR-005-agent-handoff.md).
 
 **Components:**
 
-- [`apps/web`'s `/contribute`](../apps/web/src/app/contribute) — built.
-  Task board, task detail with a rail picker and guided handoff, and a
-  status stepper. The contributor's own record (ledger and ladder) is on
-  [`/me`](../apps/web/src/app/me), behind sign-in; the old
-  `/contribute/profile` redirects there. Every `/contribute` screen hangs off
-  [`apps/web/src/app/contribute/layout.tsx`](../apps/web/src/app/contribute/layout.tsx),
-  the `contribute_bridge` kill switch: flag off (or unreachable — flags
-  fail closed) and the whole surface is replaced by a plain-language
-  notice instead.
-- `apps/api`'s bridge service — built as a demo service:
-  [`/api/bridge/*`](../apps/api/src/forge_api/routers/bridge.py) serves
-  fixture task cards, an in-memory lease store, and compiled agent prompts
-  for seven rails. The same flag gates it at the router level, so the kill
-  switch 404s `{"error": "bridge-disabled"}` rather than leaving the API
-  serving a UI that's switched off.
-- Not built, and load-bearing before any real user touches it: **the
-  Bridge's own need for GitHub identity** — a token authorized to open a
-  PR on the signed-in visitor's behalf, a different and much larger grant
-  than the read-only profile sign-in in [Identity](#identity) above, and
-  deliberately not what Phase 1 built — plus fork authorization, vendor
-  credential custody, durable session state, webhooks, retries, conflict
-  handling, notifications, and abuse prevention. The task source that
-  would read real GitHub issues
-  ([`GitHubTaskSource`](../apps/api/src/forge_api/services/bridge.py)) is
-  a stub that raises `NotImplementedError`. The Bridge holds no merge or
-  deploy authority of any kind and never will.
+- [`apps/web`'s `/contribute`](../apps/web/src/app/contribute): the task
+  board, and a task page that, once you hold the claim, offers two ways to
+  hand the task to your agent (below) and then follows it: the stage, a
+  short timeline of what FORGE and the agent reported, the pull request and
+  its checks, and "Notes for your agent" when checks fail. What the agent
+  wrote is shown only to the person holding the task; everyone else sees
+  FORGE's own entries, because agent text on a public page would be a way
+  to deface it. Calls that need
+  to know who you are go through the same-origin BFF (`/bff/bridge/*`),
+  which mints the API assertion exactly as `/bff/upland/*` does (see
+  [Identity](#identity)); a practice session never gets one. Your saved
+  agent keys and connected agents are on [`/me`](../apps/web/src/app/me).
+  Every `/contribute` screen hangs off
+  [`layout.tsx`](../apps/web/src/app/contribute/layout.tsx), the
+  `contribute_bridge` kill switch: flag off (or unreachable — flags fail
+  closed) and the whole surface is a plain-language notice instead.
+- `apps/api`'s Bridge service
+  ([`routers/bridge.py`](../apps/api/src/forge_api/routers/bridge.py),
+  `services/bridge.py`): tasks, claims, hand-offs, the progress timeline,
+  check results and submission, kept in the state database (see
+  [State, keys and GitHub reads](#state-keys-and-github-reads)). The
+  caller is identified by the BFF's assertion on the web's side and by an
+  OAuth token on the connector's. One person may hold
+  `FORGE_MAX_ACTIVE_CLAIMS` tasks at once (default 2). The stage comes
+  only from real signals: *claimed* (the claim alone), *agent working* (a
+  hand-off or an agent's report), *ready to submit* (the agent says it
+  pushed or opened the pull request, but none is found upstream yet), *in
+  checks* (an upstream pull request whose checks are pending or failing),
+  *in review* (every check passed), *shipped* (merged). Status shows the
+  newest 50 events, and events an agent sent (`source: "agent"`) only to
+  the holder. The same flag 404s every route with
+  `{"error": "bridge-disabled"}`.
+- Tasks come from the checked-in fixtures unless `FORGE_TASK_SOURCE=github`,
+  which reads open issues labelled `agent-ready` + `status:open` from
+  `verastd/forge-app`.
+- Not built: FORGE doesn't fork, branch or open pull requests for anyone
+  (the agent works in a fork the contributor already has, and the only
+  GitHub write FORGE makes is starting Copilot, on the contributor's
+  one-time authorization), and there are no webhooks, notifications or
+  retries. **Not joined
+  yet:** the Bridge's claims live in FORGE's own database, while Foreman's
+  G0 claim check reads `/claim` leases on GitHub, so once Foreman runs, a
+  Bridge contributor's pull request fails claim linkage until the two are
+  joined. The Bridge holds no merge or deploy authority of any kind and
+  never will.
 
 **Demo mode versus live mode.**
 [`apps/web/src/lib/mode.ts`](../apps/web/src/lib/mode.ts) is the single
@@ -248,8 +281,10 @@ so the live app and the demo app are different build artifacts.
 | | Live (default, deployed) | Demo (`NEXT_PUBLIC_FORGE_DEMO=1`) |
 |---|---|---|
 | Read fails | typed error, per-page error state with retry | falls back to local fixtures |
-| Write fails (claim/dispatch/feedback) | throws, nothing on screen moves | simulated |
+| Write fails (claim/hand-off/feedback) | throws, nothing on screen moves | simulated |
 | Status polling | holds the last server-reported stage | advances the simulation |
+| "Start it for me" | FORGE calls the vendor | nothing is sent, and the page says so ("Practice: nothing was sent") |
+| "Open my agent" | real links | real links |
 | `contribute_bridge` off | Bridge closed | forced open (demonstrating it is the job) |
 | Labeling | none needed | persistent banner: practice data, nothing real or saved |
 
@@ -258,29 +293,273 @@ healthy server. There's no durable outbox and no retry daemon, so live
 mode never tells a contributor their claim will sync later; it says the
 claim didn't happen, because it didn't.
 
-**Dispatch rails.** One internal interface, seven vendors, two mechanisms
-— five dispatch through an API call, two hand the contributor a compiled
-prompt and a deep link instead:
+**Handing a task to an agent.** One registry lists every agent in display
+order, mirrored in Python (`services/rails.py`) and TypeScript
+(`packages/shared/src/rails.ts`) and held to
+`tests/fixtures/rails-golden.json`. Every agent gets the same text, the
+*brief* (`services/brief.py` and `packages/shared/src/brief.ts`,
+byte-identical, held to `tests/fixtures/brief-golden.json`): the task and
+why it matters, when it's done, the fork and branch to work in, the rules,
+how to open the pull request, and which FORGE tools to call if the agent
+has them. Once you hold the claim, the task page offers two buttons.
 
-| Rail | Mechanism | What it takes |
+**Start it for me** (start rails): FORGE calls the vendor's API and the
+agent starts in the contributor's fork, on their own account and plan. A
+rail runs only when the `agent_start` flag is on AND its id is in the API's
+`FORGE_START_RAILS` (empty by default), and each one stays off until it
+passes its live test ([`live-tests.md`](live-tests.md)). The calls, as
+documented by each vendor on 2026-10-01:
+
+| Rail | What FORGE calls | What the contributor needs |
 |---|---|---|
-| GitHub Copilot | API dispatch | Nothing extra — the same account you signed in with |
-| Google Jules | API dispatch | A pasted API key; the free tier covers 15 tasks/day |
-| Cursor | API dispatch | A connected dashboard API key |
-| Devin | API dispatch | A connected API key |
-| OpenHands Cloud | API dispatch | A connected API key |
-| Claude Code | Guided handoff | Open claude.ai/code with the prompt already typed in, then send (copy and paste when it's too long for a link) |
-| OpenAI Codex | Guided handoff | Copy the prompt, open chatgpt.com/codex, paste it in |
+| GitHub Copilot | `POST https://api.github.com/agents/repos/{login}/forge-app/tasks` with `X-GitHub-Api-Version: 2026-03-10` (public preview) | Copilot Pro, Pro+, Max, Business or Enterprise, and FORGE's GitHub app installed on the fork. Nothing to paste: a one-time GitHub authorization for each start, used for that one call and never stored |
+| Google Jules | `POST https://jules.googleapis.com/v1alpha/sessions` | The Jules GitHub app on the fork, and an API key from <https://jules.google.com/settings> |
+| Cursor cloud agent | `POST https://api.cursor.com/v1/agents` | A paid Cursor plan with GitHub connected, and an API key from <https://cursor.com/dashboard> (Integrations) |
+| Devin | `POST https://api.devin.ai/v3/organizations/{org_id}/sessions` | GitHub connected in Devin, and an API key and organization ID from <https://app.devin.ai/settings> |
+| OpenHands Cloud | `POST https://app.all-hands.dev/api/v1/app-conversations` | GitHub connected at <https://app.all-hands.dev>, and an API key from its settings |
+| Claude Code routine | `POST https://api.anthropic.com/v1/claude_code/routines/{trig_id}/fire` with `anthropic-version: 2023-06-01` and `anthropic-beta: experimental-cc-routine-2026-04-01` (research preview) | A routine they create once in Claude Code for their fork, with FORGE's routine prompt and an API trigger: its URL and token |
 
-**No rail dispatches for real today** — the API rails return a stub
-session reference rather than actually starting one, and for the handoff
-rails the compiled prompt is genuinely all that gets handed over.
+A start rail's key is used for the one vendor call the contributor asked
+for, and is never logged or echoed (`/dispatch` reads its own body, so not
+even a validation error repeats it). If they tick "Remember it" (offered
+only while the vault is on) it is saved encrypted; otherwise it is dropped
+after the call. Before any vendor call, `/dispatch` answers
+`400 rail_disabled`, `400 credential_required` (no key sent and none
+saved), `400 credential_invalid` (the key's shape, Devin's organization ID
+or the routine's URL) or `429 dispatch_limit` with `Retry-After`: vendor
+calls, meaning starts and check notes relayed to an agent, failed ones
+included, are limited to 10 per person per hour. Then the vendor's answer:
+`400 credential_rejected` when it refuses the key (a saved key it rejected
+is deleted), `400 rail_setup_needed` with a plain sentence about what to
+connect when the fork or the vendor's app isn't set up (Copilot's 403 and
+404 mean this), and `502 rail_failed` with the vendor's status for anything
+else. A body over 16 KB answers `413 body_too_large`, any other malformed
+one `422 invalid_request`.
+
+**Open my agent** (open rails): a link that opens the agent with the brief
+already typed in; the contributor presses send. Always on.
+
+| Rail | How it opens |
+|---|---|
+| Claude Code on the web | `https://claude.ai/code?prompt=<brief>&repositories=<login>/forge-app`. When that would pass 7,000 characters, `prompt_url=` points at the API's `GET /api/bridge/tasks/<id>/brief?login=<login>` instead (plain text, readable from any origin) |
+| Claude Code on your computer | `claude-cli://open?repo=<login>/forge-app&q=<brief>` (5,000-character cap; over it the link opens without the brief and the steps say "ask it: Start FORGE task #N") |
+| Codex app | `codex://new?prompt=<brief>&originUrl=https://github.com/<login>/forge-app.git` (the desktop app, with the fork cloned) |
+| VS Code agents | `vscode://agents/new?prompt=<brief>` (VS Code 1.140 or newer; the contributor picks Copilot, Claude or Codex and sends) |
+| Cursor app | `cursor://anysphere.cursor-deeplink/prompt?text=<brief>` (10,000-character cap) |
+| Google Antigravity | No link exists: open the fork in Antigravity and ask it "Start FORGE task #N"; the connector is already set up in the repo |
+
+An agent opened this way has the brief; with the FORGE connector (below) it
+can also claim, report progress and read check results by itself. Copy and
+paste survives only as a closed "Using another agent? Copy the brief"
+fallback.
 
 The Bridge changes the pipeline's *reachability*, never its
-*permeability*: a worst-case full compromise of the Bridge yields the
-ability to open fork PRs and claim tasks as Bridge users — which lands in
-the same Gauntlet and protocol checks that already assume hostile PR
-authors.
+*permeability*: whatever reaches upstream is a fork pull request, which
+lands in the same Gauntlet and protocol checks that already assume hostile
+authors. A full compromise of FORGE is still worse for contributors than it
+used to be. Whoever holds the state database and `FORGE_VAULT_KEY` holds
+every saved vendor key, and each works on whatever that vendor account can
+reach, not only the fork; whoever controls the API can send connected agents
+misleading task text. That is why keys are saved only when asked, can be
+removed on `/me`, and are encrypted under a key that lives only on the API
+box; why no GitHub token is ever stored; and why the agent config and the
+connector, vault and rail code are protected paths.
+
+## The FORGE connector
+
+An MCP server with OAuth, so a contributor's own agent can read a task,
+claim it, report progress, read check results and submit the pull request
+by itself: nothing is pasted, and the task page shows what the agent
+reports. Claude (claude.ai, the desktop app, Claude Code), Codex,
+Antigravity, Cursor, VS Code and ChatGPT's developer mode can connect; the
+GitHub Copilot cloud agent and Jules can't, and don't need to, because
+FORGE starts them. [ADR-005](adr/ADR-005-agent-handoff.md) has the
+reasoning.
+
+**One public address.** Every public URL lives on the web origin
+(`FORGE_PUBLIC_ORIGIN`, production `https://forge-app-eta-mocha.vercel.app`),
+so the connector's address, `<origin>/mcp`, survives the API moving
+elsewhere. `next.config.mjs` rewrites (`beforeFiles`) the protocol paths to
+the same path on `FORGE_API_URL`; the pages a person sees stay in the web
+app.
+
+| Path (web origin) | Served by | What |
+|---|---|---|
+| `/mcp` | API `POST /mcp`, via rewrite | The connector: MCP over Streamable HTTP, answered as plain JSON with no session |
+| `/.well-known/oauth-protected-resource`, `/.well-known/oauth-protected-resource/mcp` | API, via rewrite | Which authorization server protects `/mcp` (RFC 9728) |
+| `/.well-known/oauth-authorization-server` | API, via rewrite | The authorization server's endpoints and abilities (RFC 8414) |
+| `/oauth/register`, `/oauth/token`, `/oauth/revoke` | API, via rewrite | Client registration (RFC 7591), tokens, revocation (RFC 7009) |
+| `/register`, `/token` | API, via rewrite | MCP 2025-03-26's default paths, for a client that didn't keep the metadata (the MCP Python SDK refreshes at `/token` after a restart): the same handlers, switches and CORS as `/oauth/register` and `/oauth/token`, and never named in the metadata |
+| `/authorize` | web redirect | To `/oauth/authorize` with the same query, for the same clients |
+| `/oauth/authorize` | web page | GitHub sign-in if needed, then the consent screen |
+| `/oauth/authorize/decision` | web route | The Allow / Cancel form post; answers `303` back to the agent |
+| `/connect` | web page | "Connect your agent to FORGE": the address and the steps for each client, with one-click installs for VS Code and Cursor |
+| `/bff/oauth/grants` | web route | Your connected agents (list, disconnect), through the BFF |
+
+**Connecting an agent** (OAuth 2.1, authorization code with PKCE):
+
+1. The agent calls `/mcp` without a token and gets `401` with
+   `WWW-Authenticate: Bearer resource_metadata="<origin>/.well-known/oauth-protected-resource/mcp", scope="forge.tasks"`.
+2. It reads the metadata and registers at `/oauth/register`. Registration
+   keeps nothing on the server: the `client_id` it gets back carries the
+   client's name, redirect URIs and auth method, signed with
+   `FORGE_OAUTH_SECRET` (HMAC-SHA256).
+3. It opens `/oauth/authorize` in the browser with a PKCE challenge (S256
+   only). The person signs in with GitHub if needed (practice accounts are
+   refused) and sees "Connect <name> to FORGE?", where it will send them
+   back (the redirect host, shown because the name is whatever the agent
+   chose to call itself), what the agent can and can't do, and Allow or
+   Cancel. The page is never cached or framed, and the decision post needs
+   the session and a same-origin request.
+4. Allow issues a single-use code (5 minutes, because Antigravity's
+   sign-in has the person paste the code back by hand) bound to the
+   client, the redirect URI, the PKCE challenge, the person and the
+   resource, and the browser goes back to the agent with `code`, `state`
+   and `iss`. A code presented a second time revokes everything issued
+   from it.
+5. The agent trades the code at `/oauth/token` for an access token (1 hour)
+   and a refresh token (30 days, replaced on every use). An old refresh
+   token presented again within 30 seconds of being replaced is a retry
+   (the agent lost the answer, or two of its sessions refreshed at once)
+   and gets a fresh pair in the same grant; after that, reusing it revokes
+   the whole grant. A grant revoked any other way stays revoked, retry or
+   not. Both tokens are random strings, stored only as SHA-256 hashes, and
+   bound to `<origin>/mcp`.
+
+Redirect URIs must match exactly, except that a loopback address
+(`127.0.0.1`, `localhost`, `[::1]`) matches on any port. Fragments,
+`javascript:`, `data:`, `file:`, `vbscript:`, `about:` and `blob:` URIs,
+and plain `http:` to anything but loopback, are refused, and an error about
+the client or its redirect URI is shown as a page, never redirected. Each
+connection is a grant: `/me` lists your connected agents (name, where it
+sends you back, when connected, last used), and Disconnect revokes the grant
+and every token in it.
+
+**The MCP server.** Hand-written JSON-RPC 2.0 over `POST /mcp`
+(`services/mcp_server.py`, `routers/mcp.py`; no MCP library and no new
+dependency). It answers `application/json`, never a stream, and keeps no
+session. Protocol versions `2025-11-25`, `2025-06-18` and `2025-03-26`.
+Every call needs a bearer token issued for `<origin>/mcp`; one issued for
+anything else gets `401 invalid_token`. Agents outside a browser send no
+`Origin` header. One that is sent must be `FORGE_PUBLIC_ORIGIN`, one of
+the hosted clients' origins (`https://claude.ai`, `https://chatgpt.com`,
+`https://chat.openai.com`, `https://antigravity.google`,
+`https://cursor.com`, `https://www.cursor.com`, `https://vscode.dev`,
+`https://insiders.vscode.dev`, `https://github.com`) or one listed in
+`FORGE_MCP_ALLOWED_ORIGINS`; anything else, and `null`, gets `403`. The
+token, not the origin, is what protects `/mcp` (there are no cookies), so
+the hosted list only keeps those clients from being locked out. Each
+token may make 120 calls a minute (more answer JSON-RPC error `-32000`
+"rate limited"). The tools
+(`services/bridge_mcp.py`) call the same service functions as the HTTP
+routes, as the person the token belongs to:
+
+| Tool | What it does |
+|---|---|
+| `whoami` | Which GitHub account the agent is acting for |
+| `list_tasks` | Open tasks, your own, or all (`filter`) |
+| `get_task` | One task: the brief written for you, the acceptance criteria, your fork and branch, the issue, who holds it, and the compare link |
+| `claim_task` / `release_task` | Claim the task in your name, or let it go |
+| `report_progress` | `started`, `working`, `pushed`, `pr_opened`, `blocked` or `done`, with a message of up to 500 characters and, optionally, the pull request link; at most 200 reports per claim |
+| `get_check_results` | The pull request's checks, and plain notes on what failed |
+| `submit_task` | Submit the pull request (it must be yours, against `verastd/forge-app`) |
+
+There is one prompt, `forge_task`, and short server instructions that tell
+an agent the task flow. Anything an agent writes (progress messages, the
+name it registers under) is untrusted: stored and shown as plain text only,
+length-capped, with control characters stripped, and its progress messages
+are shown only to the person holding the task.
+
+**Switches.** `mcp_connector` off: every connector route answers
+`404 {"error": "connector-disabled"}`. `FORGE_PUBLIC_ORIGIN` unset or not
+`https` (loopback `http` aside), or `FORGE_OAUTH_SECRET` unset or shorter
+than 32 characters: `503 {"error": "connector_unavailable"}`. CORS on
+`/.well-known/*`, `/oauth/register`, `/oauth/token`, `/oauth/revoke`,
+`/register`, `/token` and `/mcp` allows any origin with no credentials, so
+an agent running in a browser can connect; every other API route keeps its
+existing CORS policy.
+
+**Limits.** OAuth request bodies up to 16 KiB (`413` above that); up to 10
+redirect URIs per client, each up to 512 characters; client names cut to
+64 characters; `state` up to 2,048 characters. MCP bodies up to 256 KiB
+(`413`), JSON only (`415` otherwise), batches of up to 32 messages; an
+`MCP-Protocol-Version` header naming another version gets `400`, and `GET`
+or `DELETE` on `/mcp` gets `405`.
+
+**Where agents find it.** An agent opened in a contributor's fork finds the
+connector in the repo itself:
+
+| Client | File | When it's used |
+|---|---|---|
+| Claude Code; also VS Code 1.140+ and GitHub Copilot CLI | `.mcp.json` | Claude Code asks once before using a project's servers; VS Code follows Workspace Trust. Sign in with `/mcp` in Claude Code, or when VS Code asks |
+| Codex (CLI, IDE extension, ChatGPT desktop app) | `.codex/config.toml` | Only in a trusted project. Sign in once with `codex mcp login forge` |
+| Google Antigravity (CLI and IDE; 2.0 is still to be live-tested) | `.agents/mcp_config.json` | Sign in under Settings → Customizations; Antigravity shows a code to paste back once |
+| Cursor | `.cursor/mcp.json` | Cursor asks before it uses the server's tools |
+
+There is no `.vscode/mcp.json`: VS Code 1.140 calls that file deprecated,
+reads the workspace's `.mcp.json` instead, and would run the server twice
+if both existed. Claude on claude.ai and in the desktop app, and ChatGPT,
+connect from their own settings (`/connect` has the steps). Two custom
+agents carry the same task flow as `AGENTS.md`:
+`.github/agents/forge.agent.md` for GitHub Copilot and
+`.agents/agents/forge.md` for Antigravity. Neither is ever the default:
+Copilot's sets `disable-model-invocation: true` and Antigravity's
+`subagent: false`, so each runs only when a person picks it. The Copilot
+cloud agent supports remote MCP servers with header secrets only, not
+OAuth, so it can't use the connector; FORGE starts it through the tasks API
+instead. `.gemini/settings.json` still points Gemini CLI, which people with
+a paid Gemini API key or a Gemini Code Assist Standard or Enterprise license
+still have, at `AGENTS.md`.
+
+Every one of these files is a protected path (cold-account approval in
+`CODEOWNERS`, and `.github/forge-protocol.json`'s `protectedPaths`), and so
+are `.vscode/` and `.claude/`, which this repo doesn't use yet: an agent
+connects to whatever server these files name, so a pull request that
+repoints them would phish every contributor. The same goes for the page
+that shows the connector's address and builds the one-click installs
+(`apps/web/src/app/connect/`), the links that open agents
+(`apps/web/src/lib/launch.ts`), and the text every agent is given (the
+brief, the rail registry with its key pages, and the connector's tools).
+
+## State, keys and GitHub reads
+
+**The state database.** One SQLite file (`services/state.py`) at
+`FORGE_STATE_DB_PATH`: `var/forge-state.db` in the repo by default (created
+on demand, git-ignored), `/var/lib/forge-api/forge.db` in production. It
+holds the Bridge's claims, hand-offs, progress events and submissions
+(`bridge_` tables), saved agent keys (`vault_`), and the connector's
+grants, codes and token hashes (`oauth_`). Write-ahead logging, foreign
+keys on, one lock per process: it is built for the one API process on one
+box that the pilot runs. Back it up, and keep the backups as private as
+the box: losing the file forgets every claim and saved key and disconnects
+every agent, and the file together with `FORGE_VAULT_KEY` opens every saved
+key.
+
+**The vault.** A key a contributor asks FORGE to remember is encrypted
+with AES-256-GCM under a key of its own for each person, derived from
+`FORGE_VAULT_KEY` with HKDF-SHA256 and the person's GitHub id, with the
+person and the rail bound in as associated data, so a row copied to another
+person or rail won't decrypt (`services/vault.py`). Afterwards FORGE shows
+only a hint (the last four characters), uses the key only for a start the
+person asks for, and deletes it when they remove it on `/me` or the vendor
+rejects it. With `FORGE_VAULT_KEY` unset or malformed the vault is off:
+nothing is saved, "Remember it" isn't offered, and starting still works
+with a key typed in each time. Copilot never touches the vault: its
+one-time GitHub authorization is used for that one call and dropped.
+
+**GitHub reads.** The API reads public GitHub data only
+(`services/github_reads.py`): the contributor's pull request
+(`GET /repos/verastd/forge-app/pulls?head=<login>:<branch>&state=all`), its
+check runs, a pull request by number at submission, and whether the
+contributor's fork exists (and, with `FORGE_TASK_SOURCE=github`, the open
+task issues). Results are cached for 60 seconds (the fork check and the
+task list for 5 minutes). Production needs `FORGE_GITHUB_READ_TOKEN`: a
+fine-grained token with read-only access to public repositories, which
+the operator creates and sets on the API box, raising GitHub's limit from
+60 to 5,000 requests an hour. Anonymous reads get 60 an hour per IP, and
+every task someone is watching can cost two a minute. Any GitHub failure,
+running out of that limit included, reads as "pending" or "couldn't reach
+GitHub" with a plain note, never an error.
 
 ## The Apps lobby
 
@@ -465,11 +744,20 @@ read for in-app profile/tier/reward views — not built yet.
 
 Endpoints this app defines for itself today: `/api/flags`, `/api/upland/*`
 (gated by `upland_data`; its `/export` route additionally requires
-`csv_export`), and `/api/bridge/*` (gated by `contribute_bridge`; fixture
-data and an in-memory lease store, per the Bridge section above). `apps/web`
-answers one API route itself, `POST /api/lobby/token`, the lobby's LiveKit
-room token (see [The Apps lobby](#the-apps-lobby)); it never calls
-`apps/api`.
+`csv_export`), `/api/bridge/*` (gated by `contribute_bridge`; see
+[The Bridge](#the-bridge)), and the FORGE connector's `/mcp`,
+`/oauth/register`, `/oauth/token`, `/oauth/revoke`, their fallback aliases
+`/register` and `/token`, `/.well-known/oauth-*` and `/api/oauth/*` (gated
+by `mcp_connector`; see
+[The FORGE connector](#the-forge-connector)), which the web origin reaches
+through rewrites. `apps/web` answers one API route itself,
+`POST /api/lobby/token`, the lobby's LiveKit room token (see
+[The Apps lobby](#the-apps-lobby)); it never calls `apps/api`. Its other
+server-side calls to the API (the BFF's `/bff/*`, the consent page and its
+decision route, and `/auth/callback` finishing a Copilot start) carry the
+same short-lived assertion whenever they act for a signed-in person.
+Outbound, `apps/api` calls GitHub's public REST API for reads, and a
+vendor's API only when a contributor starts a start rail.
 
 ## Flags flow
 
@@ -478,7 +766,8 @@ client is **fail-closed in code**: `DEFAULT_FLAGS` in both mirrors
 (`packages/flags/src/core.ts` and
 `apps/api/src/forge_api/services/flags.py`) is all-`false`. The enabled
 dev/demo posture comes from [`config/flags.json`](../config/flags.json),
-which is checked in with every flag `true` — from the file, never from a
+which is checked in with every flag `true` except `agent_start` (off until
+the start rails pass their live tests) — from the file, never from a
 default.
 
 Resolution is layered, and identical in both languages: defaults ->
@@ -504,6 +793,15 @@ The flags are real gates, not decoration. For example:
   heading, its directory and "The 3D lobby is switched off right now." The
   practice build falls back to every flag on when the flag service is down,
   as it does for the Bridge.
+- `mcp_connector` — the FORGE connector: off, every connector route on the
+  API (`/mcp`, `/oauth/*`, `/register`, `/token`, `/.well-known/oauth-*`,
+  `/api/oauth/*`) answers
+  `404 {"error": "connector-disabled"}`, and `/connect` says "The FORGE
+  connector is switched off right now."
+- `agent_start` — "Start it for me": off, no start rail runs whatever
+  `FORGE_START_RAILS` lists, and the task page offers "Open my agent"
+  only. Checked in off; turn it on only once at least one start rail has
+  passed its live test ([`live-tests.md`](live-tests.md)).
 
 Flag flips are runtime config, not code — this is what lets features ship
 dark-launched and get killed instantly on revert. The out-of-band kill
@@ -526,8 +824,12 @@ What a PR actually passes through, in order:
    closing on anything unreadable rather than guessing?), **protected
    paths** (everything in `.github/forge-protocol.json`'s
    `protectedPaths` — `.github/`, `CODEOWNERS`, `AGENTS.md`, `CLAUDE.md`,
-   `.gemini/`, the sign-in/session paths from [Identity](#identity) above,
-   and the lobby's token route — needs T3 trust to touch), and raises —
+   `.gemini/` and the other agent config (`.mcp.json`, `.codex/`,
+   `.agents/`, `.cursor/`, `.vscode/`, `.claude/`), the sign-in/session
+   paths from [Identity](#identity) above, the lobby's token route, and
+   the connector, vault, rail and brief code (see
+   [The FORGE connector](#the-forge-connector)) — needs T3 trust to
+   touch), and raises —
    never blocks on — a **tests-modified flag** for PRs that touch an
    existing test.
 2. **The Gauntlet**, this repo's own CI

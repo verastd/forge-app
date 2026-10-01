@@ -1,8 +1,10 @@
 'use client';
 
 /**
- * Text with a Copy button. The handoff rails live or die on this control: the
- * contributor's whole job is copy, open the agent, paste (PRD I.3).
+ * Text with a Copy button. Since Phase 4 the Contribute flow has no copy and
+ * paste in it: this only backs the closed fallbacks ("Using another agent?
+ * Copy the brief", the notes for an agent without the FORGE connector) and
+ * one-time setup text such as the Claude Code routine prompt.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';

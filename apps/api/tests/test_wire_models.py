@@ -1,0 +1,224 @@
+"""The Bridge v2 wire models (contract §3).
+
+tests/fixtures/wire-golden.json records every model's fields as this file describes
+them; packages/shared/src/index.test.ts describes the zod schemas the same way and
+compares against the same file, so a field renamed, retyped or made optional on one side
+only fails a test on both. Update the golden by hand when both sides change together.
+"""
+
+import json
+from pathlib import Path
+from types import NoneType, UnionType
+from typing import Any, Literal, Union, get_args, get_origin
+
+import pytest
+from pydantic import BaseModel, SecretStr, ValidationError
+
+from forge_api.models import (
+    OPEN_RAILS,
+    PROGRESS_STAGES,
+    RAILS,
+    START_RAILS,
+    AuthorizeCheck,
+    AuthorizeDecision,
+    AuthorizeError,
+    AuthorizeParams,
+    BridgeEvent,
+    BridgeStatus,
+    CheckResults,
+    CheckRun,
+    ClaimRequest,
+    ConnectedAgent,
+    ConnectedAgentList,
+    Credential,
+    DispatchRequest,
+    DispatchResult,
+    FeedbackResponse,
+    FlagConfig,
+    ForkStatus,
+    RailInfo,
+    RailList,
+    RailMeta,
+    SavedCredential,
+    SavedCredentialList,
+    SubmitRequest,
+    TaskCard,
+    TaskDetail,
+    TaskList,
+)
+
+GOLDEN = Path(__file__).resolve().parents[3] / "tests" / "fixtures" / "wire-golden.json"
+
+#: Every model whose zod mirror is checked field-for-field. (ClaimResponse is not: its
+#: leaseHours is an int here and any number in zod, a difference older than this file.)
+WIRE_MODELS: list[type[BaseModel]] = [
+    FlagConfig,
+    TaskCard,
+    TaskList,
+    ClaimRequest,
+    RailMeta,
+    RailInfo,
+    RailList,
+    TaskDetail,
+    ForkStatus,
+    Credential,
+    DispatchRequest,
+    DispatchResult,
+    BridgeEvent,
+    BridgeStatus,
+    CheckRun,
+    CheckResults,
+    FeedbackResponse,
+    SubmitRequest,
+    SavedCredential,
+    SavedCredentialList,
+    ConnectedAgent,
+    ConnectedAgentList,
+    AuthorizeParams,
+    AuthorizeCheck,
+    AuthorizeError,
+    AuthorizeDecision,
+]
+
+_SIMPLE = {str: "string", SecretStr: "string", bool: "boolean", int: "integer", float: "number"}
+
+SECRET = "test-only-not-a-real-key-0001"
+
+
+def _kind(annotation: Any) -> dict[str, Any]:
+    origin = get_origin(annotation)
+    if origin in (Union, UnionType):
+        (inner,) = [arg for arg in get_args(annotation) if arg is not NoneType]
+        return _kind(inner)
+    if origin is Literal:
+        return {"type": "enum", "values": list(get_args(annotation))}
+    if origin is list:
+        (item,) = get_args(annotation)
+        return {"type": "array", "items": _kind(item)}
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        return {"type": "object", "ref": annotation.__name__}
+    return {"type": _SIMPLE[annotation]}
+
+
+def describe(model: type[BaseModel]) -> dict[str, Any]:
+    """{field: {type, optional?, values?, items?, ref?}} in declaration order."""
+    described: dict[str, Any] = {}
+    for name, field in model.model_fields.items():
+        entry = _kind(field.annotation)
+        if not field.is_required():
+            entry["optional"] = True
+        described[name] = entry
+    return described
+
+
+def test_every_wire_model_matches_the_golden_the_zod_side_reads() -> None:
+    golden = json.loads(GOLDEN.read_text(encoding="utf-8"))
+    assert golden == {"models": {model.__name__: describe(model) for model in WIRE_MODELS}}
+
+
+def test_the_rail_and_stage_vocabularies() -> None:
+    assert RAILS == START_RAILS + OPEN_RAILS and len(set(RAILS)) == 12
+    assert PROGRESS_STAGES == ("started", "working", "pushed", "pr_opened", "blocked", "done")
+    for retired in ("api", "handoff"):
+        with pytest.raises(ValidationError):
+            DispatchResult(mode=retired, rail="jules", brief="x", startedAt="t")  # type: ignore[arg-type]
+    with pytest.raises(ValidationError):
+        DispatchRequest(taskId=1, rail="gemini-cli")  # type: ignore[arg-type]
+
+
+def test_a_credential_key_never_prints() -> None:
+    request = DispatchRequest.model_validate(
+        {"taskId": 1, "rail": "devin", "credential": {"key": SECRET, "orgId": "org-1"}}
+    )
+    assert request.credential is not None
+    assert request.credential.key.get_secret_value() == SECRET
+    for rendered in (repr(request), str(request), request.model_dump_json()):
+        assert SECRET not in rendered
+    assert request.credential.orgId == "org-1"
+
+
+@pytest.mark.parametrize(
+    "credential",
+    [
+        {"key": ""},
+        {"key": "k" * 4097},
+        {"key": "k", "orgId": "o" * 201},
+        {"key": "k", "routineUrl": "https://example.test/" + "r" * 480},
+    ],
+)
+def test_credential_lengths_are_bounded(credential: dict[str, str]) -> None:
+    with pytest.raises(ValidationError):
+        Credential.model_validate(credential)
+
+
+def test_credential_bounds_are_inclusive() -> None:
+    Credential.model_validate({"key": "k" * 4096, "orgId": "o" * 200, "routineUrl": "u" * 500})
+
+
+def test_optional_fields_leave_the_wire_and_required_lists_stay() -> None:
+    status = BridgeStatus(
+        taskId=1,
+        stage="claimed",
+        detail="This task is yours.",
+        events=[
+            BridgeEvent(at="2026-10-01T00:00:00Z", kind="claimed", source="forge", message="m")
+        ],
+    )
+    assert status.model_dump(exclude_none=True) == {
+        "taskId": 1,
+        "stage": "claimed",
+        "detail": "This task is yours.",
+        "events": [
+            {"at": "2026-10-01T00:00:00Z", "kind": "claimed", "source": "forge", "message": "m"}
+        ],
+    }
+    with pytest.raises(ValidationError):
+        BridgeStatus.model_validate({"taskId": 1, "stage": "claimed", "detail": "x"})
+
+
+@pytest.mark.parametrize(
+    ("model", "payload"),
+    [
+        (BridgeEvent, {"at": "t", "kind": "deleted", "source": "forge", "message": "m"}),
+        (BridgeEvent, {"at": "t", "kind": "progress", "source": "user", "message": "m"}),
+        (
+            BridgeEvent,
+            {"at": "t", "kind": "progress", "source": "agent", "message": "m", "stage": "finished"},
+        ),
+        (CheckRun, {"name": "lint", "status": "done"}),
+        (CheckResults, {"taskId": 1, "state": "ok", "checks": [], "notes": ""}),
+        (
+            RailMeta,
+            {
+                "id": "copilot",
+                "mode": "api",
+                "label": "l",
+                "vendor": "v",
+                "blurb": "b",
+                "setup": [],
+            },
+        ),
+        (
+            RailMeta,
+            {
+                "id": "copilot",
+                "mode": "start",
+                "label": "l",
+                "vendor": "v",
+                "blurb": "b",
+                "setup": [],
+                "credential": "password",
+            },
+        ),
+    ],
+)
+def test_values_outside_the_vocabularies_are_rejected(
+    model: type[BaseModel], payload: dict[str, Any]
+) -> None:
+    with pytest.raises(ValidationError):
+        model.model_validate(payload)
+
+
+def test_feedback_carries_notes_not_a_prompt() -> None:
+    assert set(FeedbackResponse.model_fields) == {"relayed", "notes", "relayedTo"}
+    assert FeedbackResponse(relayed=True, notes="n", relayedTo="jules").relayedTo == "jules"

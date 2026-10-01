@@ -1,6 +1,8 @@
 import { expect, test } from '@playwright/test';
 import type { APIRequestContext } from '@playwright/test';
 
+import { openTransaction } from '../../packages/auth/dist/index.js';
+import { SESSION_SECRET } from './helpers/env';
 import { plantPracticeSession, signInAs } from './helpers/session';
 
 /**
@@ -132,6 +134,47 @@ test('/signin offers GitHub sign-in and no practice button', async ({ page }) =>
   await expect(
     page.getByRole('button', { name: 'Continue with the practice account' }),
   ).toHaveCount(0);
+});
+
+/** A FORGE connector consent URL (path and query), padded by its client_id to `length` characters. */
+function consentPath(length: number): string {
+  const query = (clientId: string): string =>
+    new URLSearchParams({
+      response_type: 'code',
+      client_id: clientId,
+      redirect_uri: 'https://claude.ai/api/mcp/auth_callback',
+      code_challenge: 'test-only-code-challenge-0123456789abcdefghijk',
+      code_challenge_method: 'S256',
+      state: 'test-only-state',
+      scope: 'forge.tasks',
+      resource: 'https://forge.example/mcp',
+    }).toString();
+  const bare = `/oauth/authorize?${query('')}`.length;
+  return `/oauth/authorize?${query(`test-only-client-${'c'.repeat(length - bare - 17)}`)}`;
+}
+
+test('a 600-character consent URL survives GitHub sign-in whole: the gate, /signin and the sealed attempt', async ({
+  page,
+  request,
+  baseURL,
+}) => {
+  // Real clients' consent URLs run to about 570 characters.
+  const consent = consentPath(600);
+  expect(consent).toHaveLength(600);
+
+  await page.goto(consent);
+  await expect(page).toHaveURL(/\/signin\?next=/);
+  expect(new URL(page.url()).searchParams.get('next')).toBe(consent);
+  const github = await page.getByRole('link', { name: 'Continue with GitHub' }).getAttribute('href');
+  expect(new URL(github ?? '', baseURL).searchParams.get('next')).toBe(consent);
+
+  // /auth/signin seals all of it into the transaction cookie, where the
+  // callback reads where to land, and the cookie stays small enough to keep.
+  await startSignIn(request, consent);
+  const { cookies } = await request.storageState();
+  const sealed = cookies.find((cookie) => cookie.name === 'forge_oauth')?.value ?? '';
+  expect(sealed.length).toBeLessThan(3800);
+  expect((await openTransaction(sealed, [SESSION_SECRET]))?.next).toBe(consent);
 });
 
 test.describe('a sealed, GitHub-shaped session', () => {

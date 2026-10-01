@@ -19,6 +19,10 @@ test-results/
 # Scraped Upland chain data (multi-GB SQLite; never committed)
 apps/api/data/
 
+# FORGE's own state (FORGE_STATE_DB_PATH's default, var/forge-state.db): leases,
+# saved keys, OAuth grants. Never committed.
+/var/
+
 # Python coverage artifacts (make test-coverage)
 apps/api/.coverage
 apps/api/coverage.xml

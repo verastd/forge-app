@@ -50,3 +50,48 @@
   font-weight: 650;
   color: var(--text);
 }
+
+/* "Your agent keys" and "Connected agents": one row per item, the action at
+ * the end, wrapping under the text on a narrow screen. */
+.items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+}
+
+.itemText {
+  min-width: 0;
+  flex: 1 1 220px;
+  overflow-wrap: anywhere;
+}
+
+.itemName {
+  font-weight: 700;
+  color: var(--text);
+}
+
+.error {
+  color: var(--danger);
+}
+
+.link {
+  color: var(--spark);
+  text-decoration: underline;
+  text-decoration-color: var(--spark-line);
+  text-underline-offset: 3px;
+}

@@ -3,5 +3,7 @@
   "contribute_bridge": true,
   "upland_data": true,
   "github_signin": true,
-  "apps_lobby": true
+  "apps_lobby": true,
+  "mcp_connector": true,
+  "agent_start": false
 }

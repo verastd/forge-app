@@ -1,0 +1,705 @@
+{
+  "models": {
+    "FlagConfig": {
+      "csv_export": {
+        "type": "boolean"
+      },
+      "contribute_bridge": {
+        "type": "boolean"
+      },
+      "upland_data": {
+        "type": "boolean"
+      },
+      "github_signin": {
+        "type": "boolean"
+      },
+      "apps_lobby": {
+        "type": "boolean"
+      },
+      "mcp_connector": {
+        "type": "boolean"
+      },
+      "agent_start": {
+        "type": "boolean"
+      }
+    },
+    "TaskCard": {
+      "id": {
+        "type": "integer"
+      },
+      "title": {
+        "type": "string"
+      },
+      "civilianSummary": {
+        "type": "string"
+      },
+      "size": {
+        "type": "enum",
+        "values": [
+          "XS",
+          "S",
+          "M"
+        ]
+      },
+      "rewardClass": {
+        "type": "enum",
+        "values": [
+          "none",
+          "R1",
+          "R2",
+          "R3",
+          "R4"
+        ]
+      },
+      "rewardUsd": {
+        "type": "number",
+        "optional": true
+      },
+      "tierFloor": {
+        "type": "enum",
+        "values": [
+          "T0",
+          "T1",
+          "T2"
+        ]
+      },
+      "status": {
+        "type": "enum",
+        "values": [
+          "open",
+          "claimed"
+        ]
+      },
+      "url": {
+        "type": "string"
+      },
+      "labels": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "claimedBy": {
+        "type": "string",
+        "optional": true
+      },
+      "leaseEndsAt": {
+        "type": "string",
+        "optional": true
+      }
+    },
+    "TaskList": {
+      "tasks": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "ref": "TaskCard"
+        }
+      }
+    },
+    "ClaimRequest": {
+      "taskId": {
+        "type": "integer"
+      }
+    },
+    "RailMeta": {
+      "id": {
+        "type": "enum",
+        "values": [
+          "copilot",
+          "jules",
+          "cursor",
+          "devin",
+          "openhands",
+          "claude-routine",
+          "claude-code",
+          "claude-cli",
+          "codex",
+          "vscode",
+          "cursor-app",
+          "antigravity"
+        ]
+      },
+      "mode": {
+        "type": "enum",
+        "values": [
+          "start",
+          "open"
+        ]
+      },
+      "label": {
+        "type": "string"
+      },
+      "vendor": {
+        "type": "string"
+      },
+      "blurb": {
+        "type": "string"
+      },
+      "setup": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "credential": {
+        "type": "enum",
+        "values": [
+          "github",
+          "api_key",
+          "devin",
+          "routine"
+        ],
+        "optional": true
+      },
+      "keyUrl": {
+        "type": "string",
+        "optional": true
+      },
+      "plan": {
+        "type": "string",
+        "optional": true
+      }
+    },
+    "RailInfo": {
+      "id": {
+        "type": "enum",
+        "values": [
+          "copilot",
+          "jules",
+          "cursor",
+          "devin",
+          "openhands",
+          "claude-routine",
+          "claude-code",
+          "claude-cli",
+          "codex",
+          "vscode",
+          "cursor-app",
+          "antigravity"
+        ]
+      },
+      "mode": {
+        "type": "enum",
+        "values": [
+          "start",
+          "open"
+        ]
+      },
+      "label": {
+        "type": "string"
+      },
+      "vendor": {
+        "type": "string"
+      },
+      "blurb": {
+        "type": "string"
+      },
+      "setup": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "credential": {
+        "type": "enum",
+        "values": [
+          "github",
+          "api_key",
+          "devin",
+          "routine"
+        ],
+        "optional": true
+      },
+      "keyUrl": {
+        "type": "string",
+        "optional": true
+      },
+      "plan": {
+        "type": "string",
+        "optional": true
+      },
+      "enabled": {
+        "type": "boolean"
+      },
+      "savedCredential": {
+        "type": "boolean",
+        "optional": true
+      }
+    },
+    "RailList": {
+      "rails": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "ref": "RailInfo"
+        }
+      },
+      "vault": {
+        "type": "boolean"
+      }
+    },
+    "TaskDetail": {
+      "task": {
+        "type": "object",
+        "ref": "TaskCard"
+      },
+      "acceptanceCriteria": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "branch": {
+        "type": "string"
+      },
+      "brief": {
+        "type": "string"
+      }
+    },
+    "ForkStatus": {
+      "exists": {
+        "type": "boolean"
+      },
+      "url": {
+        "type": "string",
+        "optional": true
+      }
+    },
+    "Credential": {
+      "key": {
+        "type": "string"
+      },
+      "orgId": {
+        "type": "string",
+        "optional": true
+      },
+      "routineUrl": {
+        "type": "string",
+        "optional": true
+      }
+    },
+    "DispatchRequest": {
+      "taskId": {
+        "type": "integer"
+      },
+      "rail": {
+        "type": "enum",
+        "values": [
+          "copilot",
+          "jules",
+          "cursor",
+          "devin",
+          "openhands",
+          "claude-routine",
+          "claude-code",
+          "claude-cli",
+          "codex",
+          "vscode",
+          "cursor-app",
+          "antigravity"
+        ]
+      },
+      "credential": {
+        "type": "object",
+        "ref": "Credential",
+        "optional": true
+      },
+      "saveCredential": {
+        "type": "boolean",
+        "optional": true
+      }
+    },
+    "DispatchResult": {
+      "mode": {
+        "type": "enum",
+        "values": [
+          "start",
+          "open"
+        ]
+      },
+      "rail": {
+        "type": "enum",
+        "values": [
+          "copilot",
+          "jules",
+          "cursor",
+          "devin",
+          "openhands",
+          "claude-routine",
+          "claude-code",
+          "claude-cli",
+          "codex",
+          "vscode",
+          "cursor-app",
+          "antigravity"
+        ]
+      },
+      "brief": {
+        "type": "string"
+      },
+      "startedAt": {
+        "type": "string"
+      },
+      "sessionUrl": {
+        "type": "string",
+        "optional": true
+      },
+      "sessionRef": {
+        "type": "string",
+        "optional": true
+      },
+      "credentialSaved": {
+        "type": "boolean",
+        "optional": true
+      }
+    },
+    "BridgeEvent": {
+      "at": {
+        "type": "string"
+      },
+      "kind": {
+        "type": "enum",
+        "values": [
+          "claimed",
+          "dispatched",
+          "opened",
+          "progress",
+          "submitted",
+          "released",
+          "relayed"
+        ]
+      },
+      "source": {
+        "type": "enum",
+        "values": [
+          "forge",
+          "agent"
+        ]
+      },
+      "message": {
+        "type": "string"
+      },
+      "rail": {
+        "type": "enum",
+        "values": [
+          "copilot",
+          "jules",
+          "cursor",
+          "devin",
+          "openhands",
+          "claude-routine",
+          "claude-code",
+          "claude-cli",
+          "codex",
+          "vscode",
+          "cursor-app",
+          "antigravity"
+        ],
+        "optional": true
+      },
+      "stage": {
+        "type": "enum",
+        "values": [
+          "started",
+          "working",
+          "pushed",
+          "pr_opened",
+          "blocked",
+          "done"
+        ],
+        "optional": true
+      }
+    },
+    "BridgeStatus": {
+      "taskId": {
+        "type": "integer"
+      },
+      "stage": {
+        "type": "enum",
+        "values": [
+          "claimed",
+          "agent_working",
+          "ready_to_submit",
+          "in_checks",
+          "in_review",
+          "shipping",
+          "shipped"
+        ]
+      },
+      "detail": {
+        "type": "string"
+      },
+      "events": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "ref": "BridgeEvent"
+        }
+      },
+      "holder": {
+        "type": "string",
+        "optional": true
+      },
+      "leaseEndsAt": {
+        "type": "string",
+        "optional": true
+      },
+      "rail": {
+        "type": "enum",
+        "values": [
+          "copilot",
+          "jules",
+          "cursor",
+          "devin",
+          "openhands",
+          "claude-routine",
+          "claude-code",
+          "claude-cli",
+          "codex",
+          "vscode",
+          "cursor-app",
+          "antigravity"
+        ],
+        "optional": true
+      },
+      "sessionUrl": {
+        "type": "string",
+        "optional": true
+      },
+      "prUrl": {
+        "type": "string",
+        "optional": true
+      },
+      "compareUrl": {
+        "type": "string",
+        "optional": true
+      },
+      "checksPassed": {
+        "type": "integer",
+        "optional": true
+      },
+      "checksTotal": {
+        "type": "integer",
+        "optional": true
+      }
+    },
+    "CheckRun": {
+      "name": {
+        "type": "string"
+      },
+      "status": {
+        "type": "enum",
+        "values": [
+          "queued",
+          "in_progress",
+          "completed"
+        ]
+      },
+      "conclusion": {
+        "type": "string",
+        "optional": true
+      },
+      "summary": {
+        "type": "string",
+        "optional": true
+      },
+      "url": {
+        "type": "string",
+        "optional": true
+      }
+    },
+    "CheckResults": {
+      "taskId": {
+        "type": "integer"
+      },
+      "state": {
+        "type": "enum",
+        "values": [
+          "no_pr",
+          "pending",
+          "passed",
+          "failed"
+        ]
+      },
+      "checks": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "ref": "CheckRun"
+        }
+      },
+      "notes": {
+        "type": "string"
+      },
+      "prUrl": {
+        "type": "string",
+        "optional": true
+      },
+      "headSha": {
+        "type": "string",
+        "optional": true
+      }
+    },
+    "FeedbackResponse": {
+      "relayed": {
+        "type": "boolean"
+      },
+      "notes": {
+        "type": "string"
+      },
+      "relayedTo": {
+        "type": "enum",
+        "values": [
+          "copilot",
+          "jules",
+          "cursor",
+          "devin",
+          "openhands",
+          "claude-routine",
+          "claude-code",
+          "claude-cli",
+          "codex",
+          "vscode",
+          "cursor-app",
+          "antigravity"
+        ],
+        "optional": true
+      }
+    },
+    "SubmitRequest": {
+      "prUrl": {
+        "type": "string"
+      }
+    },
+    "SavedCredential": {
+      "rail": {
+        "type": "enum",
+        "values": [
+          "copilot",
+          "jules",
+          "cursor",
+          "devin",
+          "openhands",
+          "claude-routine",
+          "claude-code",
+          "claude-cli",
+          "codex",
+          "vscode",
+          "cursor-app",
+          "antigravity"
+        ]
+      },
+      "hint": {
+        "type": "string"
+      },
+      "savedAt": {
+        "type": "string"
+      },
+      "lastUsedAt": {
+        "type": "string",
+        "optional": true
+      }
+    },
+    "SavedCredentialList": {
+      "credentials": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "ref": "SavedCredential"
+        }
+      },
+      "vault": {
+        "type": "boolean"
+      }
+    },
+    "ConnectedAgent": {
+      "id": {
+        "type": "string"
+      },
+      "clientName": {
+        "type": "string"
+      },
+      "redirectHost": {
+        "type": "string"
+      },
+      "connectedAt": {
+        "type": "string"
+      },
+      "lastUsedAt": {
+        "type": "string",
+        "optional": true
+      }
+    },
+    "ConnectedAgentList": {
+      "agents": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "ref": "ConnectedAgent"
+        }
+      }
+    },
+    "AuthorizeParams": {
+      "responseType": {
+        "type": "string"
+      },
+      "clientId": {
+        "type": "string"
+      },
+      "redirectUri": {
+        "type": "string"
+      },
+      "codeChallenge": {
+        "type": "string"
+      },
+      "codeChallengeMethod": {
+        "type": "string"
+      },
+      "state": {
+        "type": "string",
+        "optional": true
+      },
+      "scope": {
+        "type": "string",
+        "optional": true
+      },
+      "resource": {
+        "type": "string",
+        "optional": true
+      }
+    },
+    "AuthorizeCheck": {
+      "clientName": {
+        "type": "string"
+      },
+      "redirectHost": {
+        "type": "string"
+      },
+      "scopes": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "AuthorizeError": {
+      "error": {
+        "type": "string"
+      },
+      "errorDescription": {
+        "type": "string",
+        "optional": true
+      },
+      "redirectTo": {
+        "type": "string",
+        "optional": true
+      }
+    },
+    "AuthorizeDecision": {
+      "redirectTo": {
+        "type": "string"
+      }
+    }
+  }
+}

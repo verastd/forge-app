@@ -1,0 +1,62 @@
+/* The connector URL and its Copy button: side by side when they fit, the button
+   below on a phone. The address wraps anywhere rather than widening the page. */
+.urlBox {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.url {
+  flex: 1 1 260px;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+  color: var(--text);
+  font-size: 0.95rem;
+  overflow-wrap: anywhere;
+}
+
+.copied {
+  background: var(--ok);
+  border-color: var(--ok);
+}
+
+/* One column on a phone, two or three once there is room; never narrower than the screen allows. */
+.clients {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 330px), 1fr));
+  align-items: start;
+}
+
+.client {
+  min-width: 0;
+  scroll-margin-top: 80px;
+}
+
+.client code {
+  overflow-wrap: anywhere;
+}
+
+/* Commands are shown whole and wrap: copying the wrapped text still gives one line. */
+.command {
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.6;
+}
+
+/* Links inside running text: the site's links are plain by default, so these say they are links. */
+.link {
+  color: var(--spark);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}

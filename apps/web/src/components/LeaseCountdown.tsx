@@ -10,6 +10,7 @@
 import { useEffect, useState } from 'react';
 
 import { Chip } from './Chip';
+import styles from './contribute/contribute.module.css';
 import { formatCountdown, formatTime } from '../lib/format';
 
 export function LeaseCountdown({
@@ -35,7 +36,7 @@ export function LeaseCountdown({
   const expired = remaining <= 0;
 
   return (
-    <Chip tone={expired ? 'warn' : 'ok'}>
+    <Chip tone={expired ? 'warn' : 'ok'} className={styles.wrapChip}>
       {expired
         ? 'Your time on this one ran out — no hard feelings, claim it again'
         : `yours for ${leaseHours}h — ends ${formatTime(leaseEndsAt)} · ${formatCountdown(remaining)} left`}

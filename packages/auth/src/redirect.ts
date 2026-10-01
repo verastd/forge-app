@@ -2,8 +2,13 @@
  * Where to land after sign-in. `next` arrives in a query string, so it is
  * attacker-controlled: an open redirect here would turn FORGE's own GitHub
  * sign-in into a phishing link. Only same-origin absolute paths get through.
+ *
+ * The cap fits the FORGE connector's consent URLs (a signed `client_id`, a
+ * redirect URI, PKCE and `state` make 490 to 570 characters for real
+ * clients) with room to spare, while a sealed transaction carrying the
+ * longest `next` stays well under a browser's 4 KB cookie limit.
  */
-const MAX_LENGTH = 512;
+const MAX_LENGTH = 2048;
 
 /** A placeholder origin that can never be a real host (RFC 2606 `.invalid`). */
 const BASE = 'https://forge.invalid';
@@ -37,7 +42,7 @@ function isSafePath(value: unknown): value is string {
 }
 
 /**
- * `input` if it is a same-origin absolute path (at most 512 characters of
+ * `input` if it is a same-origin absolute path (at most 2048 characters of
  * printable ASCII, starting with exactly one `/`, with no backslash), else
  * `fallback`. The fallback goes through the same rules, and `/` replaces it
  * if it fails them. The value comes back exactly as given, so

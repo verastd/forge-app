@@ -1,0 +1,7 @@
+# The FORGE connector for Codex (CLI, IDE extension and the ChatGPT desktop app).
+# Codex reads this file only once you trust the project. Sign in once with:
+#   codex mcp login forge
+# Format: https://learn.chatgpt.com/docs/extend/mcp (checked 2026-10-01).
+
+[mcp_servers.forge]
+url = "https://forge-app-eta-mocha.vercel.app/mcp"

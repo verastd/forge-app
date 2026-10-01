@@ -1,0 +1,86 @@
+/* The consent page asks one question, so it reads as one narrow column, like /signin. */
+.panel {
+  max-width: 560px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+/* An app's name is whatever it chose: never let a long one push the page sideways. */
+.title {
+  max-width: none;
+  overflow-wrap: anywhere;
+}
+
+/* Where the code goes is the part to check, so it is the loudest line after the question. */
+.returnTo {
+  margin-top: 14px;
+  font-size: 1.12rem;
+  color: var(--text);
+}
+
+.host {
+  font-family: var(--font-mono);
+  font-size: 0.95em;
+  color: var(--accent);
+  overflow-wrap: anywhere;
+}
+
+.list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  color: var(--text-muted);
+}
+
+.list li {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+}
+
+/* The marks are decoration: the section headings say which list is which, so
+   screen readers get an empty alternative where the syntax is supported. */
+.can li::before,
+.cannot li::before {
+  flex: 0 0 auto;
+  width: 1.1em;
+  font-weight: 800;
+  text-align: center;
+}
+
+.can li::before {
+  content: '✓';
+  content: '✓' / '';
+  color: var(--ok);
+}
+
+.cannot li::before {
+  content: '✕';
+  content: '✕' / '';
+  color: var(--danger);
+}
+
+/* Full-width buttons on a phone, side by side once there is room. */
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.actions > button {
+  flex: 1 1 160px;
+}
+
+.detail {
+  overflow-wrap: anywhere;
+}
+
+/* A link inside running text says it is one. */
+.link {
+  color: var(--spark);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
