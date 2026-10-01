@@ -1,0 +1,262 @@
+/* The Contribute hand-off (Phase 4): "Start it for me", "Open my agent" and
+ * the progress view. Everything else on these screens reuses globals.css
+ * (.card, .rail, .steps, .disclosure, .text-input, .btn, .chip). */
+
+.part {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+}
+
+.partHead {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.railGrid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.railItem {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* The start rail whose panel is open. */
+.railChosen {
+  border-color: var(--spark-line);
+  background: var(--bg-elev-2);
+  box-shadow: 0 0 0 1px var(--spark-line);
+}
+
+.railMark {
+  color: var(--text-faint);
+  font-size: 0.8rem;
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--spark-line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+}
+
+.panel h3:focus {
+  outline: none;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 520px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field label {
+  font-size: 0.86rem;
+  font-weight: 650;
+  color: var(--text);
+}
+
+.input {
+  width: 100%;
+  font-family: var(--font-mono);
+}
+
+.check {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 0.88rem;
+  color: var(--text-muted);
+}
+
+.check input {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  margin: 2px 0 0;
+  accent-color: var(--accent);
+}
+
+.check input:focus-visible {
+  outline: 2px solid var(--spark);
+  outline-offset: 3px;
+}
+
+/* Buttons whose label can outgrow a phone screen wrap instead of overflowing. */
+.wrap {
+  white-space: normal;
+  text-align: center;
+}
+
+.outcome {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-elev-2);
+  overflow-wrap: anywhere;
+}
+
+.outcomeOk {
+  border-color: var(--ok-line);
+  background: var(--ok-soft);
+}
+
+.outcomeError {
+  border-color: var(--danger-line);
+  background: var(--danger-soft);
+}
+
+.outcomePractice {
+  border-color: var(--warn-line);
+  background: var(--warn-soft);
+}
+
+.outcomeTitle {
+  font-weight: 750;
+  color: var(--text);
+}
+
+.firstTime > summary {
+  cursor: pointer;
+  font-size: 0.82rem;
+  color: var(--text-faint);
+  width: fit-content;
+}
+
+.firstTime > summary:hover {
+  color: var(--text-muted);
+}
+
+.firstTime[open] > summary {
+  margin-bottom: 10px;
+}
+
+.note {
+  font-size: 0.82rem;
+  color: var(--warn);
+}
+
+.links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.timeline li {
+  display: grid;
+  grid-template-columns: minmax(84px, auto) 1fr;
+  gap: 4px 12px;
+  align-items: baseline;
+  font-size: 0.88rem;
+}
+
+.when {
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+.what {
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.who {
+  font-weight: 700;
+  color: var(--text);
+}
+
+.checks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.checks li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  min-width: 0;
+}
+
+.checkSummary {
+  flex-basis: 100%;
+  font-size: 0.82rem;
+  color: var(--text-faint);
+  overflow-wrap: anywhere;
+}
+
+.confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--warn-line);
+  border-radius: var(--radius-sm);
+  background: var(--warn-soft);
+}
+
+.sub {
+  font-size: 1rem;
+}
+
+/* A link inside running text: the app's links are otherwise unstyled. */
+.inlineLink {
+  color: var(--spark);
+  text-decoration: underline;
+  text-decoration-color: var(--spark-line);
+  text-underline-offset: 3px;
+}
+
+.inlineLink:hover {
+  text-decoration-color: var(--spark);
+}
+
+/* A chip with a sentence in it (the lease countdown) wraps on a phone
+ * instead of running off the screen. */
+.wrapChip {
+  white-space: normal;
+  max-width: 100%;
+  line-height: 1.45;
+  padding-top: 4px;
+  padding-bottom: 4px;
+}

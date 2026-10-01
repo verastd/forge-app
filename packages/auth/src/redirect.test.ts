@@ -9,6 +9,13 @@ const PRINTABLE = Array.from({ length: 0x7e - 0x21 + 1 }, (_, i) => String.fromC
   .filter((char) => char !== '\\')
   .join('');
 
+/** A consent URL the way an agent's OAuth client builds one, padded out to 600 characters by its client_id. */
+const CONSENT_HEAD =
+  '/oauth/authorize?response_type=code&redirect_uri=https%3A%2F%2Fclaude.ai%2Fapi%2Fmcp%2Fauth_callback' +
+  '&code_challenge=test-only-challenge&code_challenge_method=S256&state=test-only-state&scope=forge.tasks' +
+  '&resource=https%3A%2F%2Fforge.example%2Fmcp&client_id=';
+const CONSENT_600 = `${CONSENT_HEAD}${'c'.repeat(600 - CONSENT_HEAD.length)}`;
+
 const ACCEPTED: Row[] = [
   ['the root', '/', '/'],
   ['a page', '/me', '/me'],
@@ -19,7 +26,8 @@ const ACCEPTED: Row[] = [
   ['a percent-encoded non-ASCII path', '/caf%C3%A9', '/caf%C3%A9'],
   ['a percent-encoded fullwidth solidus', '/%EF%BC%8Fx', '/%EF%BC%8Fx'],
   ['every printable ASCII character but the backslash', `/${PRINTABLE}`, `/${PRINTABLE}`],
-  ['exactly 512 characters', `/${'a'.repeat(511)}`, `/${'a'.repeat(511)}`],
+  ['a 600-character connector consent URL', CONSENT_600, CONSENT_600],
+  ['exactly 2048 characters', `/${'a'.repeat(2047)}`, `/${'a'.repeat(2047)}`],
 ];
 
 const REJECTED: Row[] = [
@@ -54,7 +62,7 @@ const REJECTED: Row[] = [
   ['a relative path', 'me', '/'],
   ['dot segments that normalize to //', '/..//evil.com', '/'],
   ['a dot segment that normalizes to //', '/.//evil.com', '/'],
-  ['513 characters', `/${'a'.repeat(512)}`, '/'],
+  ['2049 characters', `/${'a'.repeat(2048)}`, '/'],
   ['an empty string', '', '/'],
   ['null', null, '/'],
   ['undefined', undefined, '/'],

@@ -6,19 +6,32 @@ Field names are camelCase on purpose: these models ARE the JSON wire contract th
 Next.js app (via @forge/shared zod schemas) is coded against. Renaming a field here
 without renaming it there is a cross-boundary drift bug the Gauntlet should catch
 (PRD Appendix H.1).
+
+Optional fields are `X | None = None` and Bridge routes serialize with
+`response_model_exclude_none`: zod's `.optional()` accepts a missing key but rejects an
+explicit null, so None must never reach the wire (Upland is the documented exception).
+The rail registry and the brief have their own mirrors: services/rails.py ⇄
+packages/shared/src/rails.ts and services/brief.py ⇄ packages/shared/src/brief.ts.
 """
 
-from typing import Literal
+from typing import Literal, get_args
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SecretStr
 
 Size = Literal["XS", "S", "M"]
 RewardClass = Literal["none", "R1", "R2", "R3", "R4"]
 TierFloor = Literal["T0", "T1", "T2"]
 Tier = Literal["T0", "T1", "T2", "T3"]
 TaskStatus = Literal["open", "claimed"]
-DispatchMode = Literal["api", "handoff"]
-Rail = Literal["copilot", "jules", "cursor", "devin", "openhands", "claude-code", "codex"]
+
+#: Rails FORGE starts through the vendor's API (contract §2), in display order.
+StartRail = Literal["copilot", "jules", "cursor", "devin", "openhands", "claude-routine"]
+#: Rails FORGE opens as a link or a few steps (contract §2), in display order.
+OpenRail = Literal["claude-code", "claude-cli", "codex", "vscode", "cursor-app", "antigravity"]
+Rail = Literal[StartRail, OpenRail]
+RailMode = Literal["start", "open"]
+CredentialKind = Literal["github", "api_key", "devin", "routine"]
+
 BridgeStage = Literal[
     "claimed",
     "agent_working",
@@ -28,6 +41,21 @@ BridgeStage = Literal[
     "shipping",
     "shipped",
 ]
+#: What an agent may report through the connector's `report_progress`.
+ProgressStage = Literal["started", "working", "pushed", "pr_opened", "blocked", "done"]
+BridgeEventKind = Literal[
+    "claimed", "dispatched", "opened", "progress", "submitted", "released", "relayed"
+]
+BridgeEventSource = Literal["forge", "agent"]
+CheckRunStatus = Literal["queued", "in_progress", "completed"]
+CheckState = Literal["no_pr", "pending", "passed", "failed"]
+
+#: The runtime tuples behind the literals above — START_RAILS, OPEN_RAILS, RAILS and
+#: PROGRESS_STAGES in packages/shared, in the same order.
+START_RAILS: tuple[StartRail, ...] = get_args(StartRail)
+OPEN_RAILS: tuple[OpenRail, ...] = get_args(OpenRail)
+RAILS: tuple[Rail, ...] = get_args(Rail)
+PROGRESS_STAGES: tuple[ProgressStage, ...] = get_args(ProgressStage)
 
 
 class FlagConfig(BaseModel):
@@ -38,6 +66,8 @@ class FlagConfig(BaseModel):
     upland_data: bool
     github_signin: bool
     apps_lobby: bool
+    mcp_connector: bool
+    agent_start: bool
 
 
 class TaskCard(BaseModel):
@@ -61,19 +91,84 @@ class TaskList(BaseModel):
     tasks: list[TaskCard]
 
 
+# ---------------------------------------------------------------------------
+# Rails (contract §2) and the task as an agent gets it
+# ---------------------------------------------------------------------------
+
+
+class RailMeta(BaseModel):
+    """One rail's static description. services/rails.py holds every rail's copy."""
+
+    id: Rail
+    mode: RailMode
+    label: str
+    vendor: str
+    blurb: str
+    setup: list[str]
+    credential: CredentialKind | None = None  # start rails only
+    keyUrl: str | None = None  # start rails except copilot
+    plan: str | None = None
+
+
+class RailInfo(RailMeta):
+    """A rail as GET /api/bridge/rails serves it."""
+
+    enabled: bool  # open: always; start: flag agent_start AND id in FORGE_START_RAILS
+    savedCredential: bool | None = None  # present only when the caller is identified
+
+
+class RailList(BaseModel):
+    rails: list[RailInfo]
+    vault: bool  # FORGE can save keys (FORGE_VAULT_KEY is set and valid)
+
+
+class TaskDetail(BaseModel):
+    """GET /api/bridge/tasks/{id}: the card plus everything an agent needs."""
+
+    task: TaskCard
+    acceptanceCriteria: list[str]
+    branch: str
+    brief: str
+
+
+class ForkStatus(BaseModel):
+    """GET /api/bridge/me/fork: whether the caller has a fork of verastd/forge-app."""
+
+    exists: bool
+    url: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Dispatch
+# ---------------------------------------------------------------------------
+
+
+class Credential(BaseModel):
+    """What a contributor pastes for a start rail. `key` is a SecretStr so it never
+    shows up in a repr, a log line or a serialized response."""
+
+    key: SecretStr = Field(min_length=1, max_length=4096)
+    orgId: str | None = Field(default=None, max_length=200)  # devin
+    routineUrl: str | None = Field(default=None, max_length=500)  # claude-routine
+
+
 class DispatchRequest(BaseModel):
     taskId: int
     rail: Rail
+    credential: Credential | None = None
+    saveCredential: bool | None = None
 
 
 class DispatchResult(BaseModel):
-    """Result of handing a task to the contributor's own agent (PRD I.3 adapter matrix)."""
+    """Result of handing a task to the contributor's own agent (contract §5, /dispatch)."""
 
-    mode: DispatchMode
-    compiledPrompt: str
-    deepLink: str | None = None
+    mode: RailMode
+    rail: Rail
+    brief: str
+    startedAt: str
+    sessionUrl: str | None = None
     sessionRef: str | None = None
-    instructions: list[str]
+    credentialSaved: bool | None = None
 
 
 class ClaimRequest(BaseModel):
@@ -87,19 +182,125 @@ class ClaimResponse(BaseModel):
     leaseHours: int
 
 
+# ---------------------------------------------------------------------------
+# Watch, checks, iterate, submit
+# ---------------------------------------------------------------------------
+
+
+class BridgeEvent(BaseModel):
+    """One line of a task's history. `message` from an agent is untrusted plain text."""
+
+    at: str
+    kind: BridgeEventKind
+    source: BridgeEventSource
+    message: str
+    rail: Rail | None = None
+    stage: ProgressStage | None = None
+
+
 class BridgeStatus(BaseModel):
     """Translated pipeline status — plain English, no CI jargon (PRD I.2, Watch row)."""
 
     taskId: int
     stage: BridgeStage
     detail: str
+    events: list[BridgeEvent]
+    holder: str | None = None
+    leaseEndsAt: str | None = None
+    rail: Rail | None = None
+    sessionUrl: str | None = None  # holder only
+    prUrl: str | None = None
+    compareUrl: str | None = None  # holder only
     checksPassed: int | None = None
     checksTotal: int | None = None
 
 
+class CheckRun(BaseModel):
+    name: str
+    status: CheckRunStatus
+    conclusion: str | None = None
+    summary: str | None = None
+    url: str | None = None
+
+
+class CheckResults(BaseModel):
+    taskId: int
+    state: CheckState
+    checks: list[CheckRun]
+    notes: str
+    prUrl: str | None = None
+    headSha: str | None = None
+
+
 class FeedbackResponse(BaseModel):
     relayed: bool
-    prompt: str
+    notes: str
+    relayedTo: Rail | None = None
+
+
+class SubmitRequest(BaseModel):
+    prUrl: str
+
+
+# ---------------------------------------------------------------------------
+# The caller's saved keys and connected agents (/api/bridge/me/*)
+# ---------------------------------------------------------------------------
+
+
+class SavedCredential(BaseModel):
+    rail: Rail
+    hint: str  # the last 4 characters, e.g. "…a1b2"; never the key
+    savedAt: str
+    lastUsedAt: str | None = None
+
+
+class SavedCredentialList(BaseModel):
+    credentials: list[SavedCredential]
+    vault: bool
+
+
+class ConnectedAgent(BaseModel):
+    id: str
+    clientName: str  # self-declared by the client: untrusted text
+    redirectHost: str
+    connectedAt: str
+    lastUsedAt: str | None = None
+
+
+class ConnectedAgentList(BaseModel):
+    agents: list[ConnectedAgent]
+
+
+# ---------------------------------------------------------------------------
+# OAuth consent — web server ⇄ API only (/api/oauth/authorize/*)
+# ---------------------------------------------------------------------------
+
+
+class AuthorizeParams(BaseModel):
+    responseType: str
+    clientId: str
+    redirectUri: str
+    codeChallenge: str
+    codeChallengeMethod: str
+    state: str | None = None
+    scope: str | None = None
+    resource: str | None = None
+
+
+class AuthorizeCheck(BaseModel):
+    clientName: str
+    redirectHost: str
+    scopes: list[str]
+
+
+class AuthorizeError(BaseModel):
+    error: str
+    errorDescription: str | None = None
+    redirectTo: str | None = None  # only when it is safe to send the user back
+
+
+class AuthorizeDecision(BaseModel):
+    redirectTo: str
 
 
 class PendingReward(BaseModel):

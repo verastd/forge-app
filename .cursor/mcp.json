@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "forge": {
+      "url": "https://forge-app-eta-mocha.vercel.app/mcp"
+    }
+  }
+}

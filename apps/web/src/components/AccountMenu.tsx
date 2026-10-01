@@ -5,8 +5,9 @@
  *
  * Signed out, a plain "Sign in" link — shown only once sign-in is actually
  * offered, never a button that would just 404. Signed in, a disclosure
- * button with the avatar, opening a small panel: Profile, Settings, Sign
- * out. Deliberately not an ARIA `menu` — its items are ordinary links and a
+ * button with the avatar, opening a small panel: Profile, Settings, Connect
+ * an agent (the FORGE connector's one-time setup, /connect), Sign out.
+ * Deliberately not an ARIA `menu` — its items are ordinary links and a
  * form button, reachable in normal tab order, same as any other disclosure
  * on the site (see Modal for the pattern this borrows Escape-to-close from).
  */
@@ -130,6 +131,11 @@ export function AccountMenu() {
           <li>
             <Link href="/me/settings" className={styles.item} onClick={close}>
               Settings
+            </Link>
+          </li>
+          <li>
+            <Link href="/connect" className={styles.item} onClick={close}>
+              Connect an agent
             </Link>
           </li>
           <li>

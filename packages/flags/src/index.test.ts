@@ -34,6 +34,8 @@ describe('parseFlags', () => {
         upland_data: true,
         github_signin: true,
         apps_lobby: true,
+        mcp_connector: true,
+        agent_start: false,
       }),
     ).toEqual({
       csv_export: false,
@@ -41,6 +43,8 @@ describe('parseFlags', () => {
       upland_data: true,
       github_signin: true,
       apps_lobby: true,
+      mcp_connector: true,
+      agent_start: false,
     });
   });
 
@@ -51,6 +55,8 @@ describe('parseFlags', () => {
       upland_data: DEFAULT_FLAGS.upland_data,
       github_signin: DEFAULT_FLAGS.github_signin,
       apps_lobby: DEFAULT_FLAGS.apps_lobby,
+      mcp_connector: DEFAULT_FLAGS.mcp_connector,
+      agent_start: DEFAULT_FLAGS.agent_start,
     });
   });
 
@@ -65,6 +71,8 @@ describe('parseFlags', () => {
       upland_data: false,
       github_signin: false,
       apps_lobby: false,
+      mcp_connector: false,
+      agent_start: false,
     });
   });
 
@@ -76,6 +84,8 @@ describe('parseFlags', () => {
         upland_data: false,
         github_signin: true,
         apps_lobby: true,
+        mcp_connector: true,
+        agent_start: false,
         unknown_flag: true,
       }),
     ).toEqual({
@@ -84,6 +94,8 @@ describe('parseFlags', () => {
       upland_data: false,
       github_signin: true,
       apps_lobby: true,
+      mcp_connector: true,
+      agent_start: false,
     });
   });
 
@@ -94,7 +106,26 @@ describe('parseFlags', () => {
       upland_data: true,
       github_signin: true,
       apps_lobby: false,
+      mcp_connector: false,
+      agent_start: false,
     });
+  });
+
+  it('leaves mcp_connector and agent_start off when a payload predates them', () => {
+    const result = parseFlags({
+      csv_export: true,
+      contribute_bridge: true,
+      upland_data: true,
+      github_signin: true,
+      apps_lobby: true,
+    });
+    expect(result.mcp_connector).toBe(false);
+    expect(result.agent_start).toBe(false);
+    expect(result.apps_lobby).toBe(true);
+  });
+
+  it.each(['mcp_connector', 'agent_start'])('a non-boolean %s fails every flag closed', (name) => {
+    expect(parseFlags({ csv_export: true, mcp_connector: true, [name]: 'true' })).toEqual(DEFAULT_FLAGS);
   });
 
   it('a non-boolean apps_lobby fails every flag closed', () => {
@@ -121,12 +152,16 @@ describe('isEnabled', () => {
       upland_data: true,
       github_signin: true,
       apps_lobby: true,
+      mcp_connector: true,
+      agent_start: false,
     };
     expect(isEnabled(flags, 'csv_export')).toBe(true);
     expect(isEnabled(flags, 'contribute_bridge')).toBe(false);
     expect(isEnabled(flags, 'upland_data')).toBe(true);
     expect(isEnabled(flags, 'github_signin')).toBe(true);
     expect(isEnabled(flags, 'apps_lobby')).toBe(true);
+    expect(isEnabled(flags, 'mcp_connector')).toBe(true);
+    expect(isEnabled(flags, 'agent_start')).toBe(false);
   });
 });
 
@@ -137,7 +172,7 @@ describe('loadFlags precedence', () => {
 
   /** Point cwd at a fresh, empty temp dir so the always-attempted repo
    * config/flags.json layer is cleanly ABSENT and can't bleed the real
-   * (all-true) repo file into a test that means to isolate other layers. */
+   * (mostly-true) repo file into a test that means to isolate other layers. */
   async function useEmptyCwd(): Promise<string> {
     const dir = await mkdtemp(join(tmpdir(), 'forge-flags-'));
     vi.spyOn(process, 'cwd').mockReturnValue(dir);
@@ -158,6 +193,8 @@ describe('loadFlags precedence', () => {
         upland_data: false,
         github_signin: false,
         apps_lobby: false,
+        mcp_connector: false,
+        agent_start: false,
       });
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -178,6 +215,8 @@ describe('loadFlags precedence', () => {
         upland_data: DEFAULT_FLAGS.upland_data,
         github_signin: DEFAULT_FLAGS.github_signin,
         apps_lobby: DEFAULT_FLAGS.apps_lobby,
+        mcp_connector: DEFAULT_FLAGS.mcp_connector,
+        agent_start: DEFAULT_FLAGS.agent_start,
       });
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -193,14 +232,16 @@ describe('loadFlags precedence', () => {
       const result = await loadFlags({ env: { FORGE_FLAGS_PATH: filePath } });
 
       // cwd is not mocked here, so the walk-up finds the real repo
-      // config/flags.json as layer 1; upland_data, github_signin and
-      // apps_lobby (untouched by the path layer) survive from it as true.
+      // config/flags.json as layer 1; the flags the path layer leaves alone
+      // survive from it: all true except agent_start.
       expect(result).toEqual({
         csv_export: false,
         contribute_bridge: true,
         upland_data: true,
         github_signin: true,
         apps_lobby: true,
+        mcp_connector: true,
+        agent_start: false,
       });
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -228,6 +269,8 @@ describe('loadFlags precedence', () => {
         upland_data: false,
         github_signin: false,
         apps_lobby: false,
+        mcp_connector: false,
+        agent_start: false,
       });
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -238,7 +281,8 @@ describe('loadFlags precedence', () => {
     // No mocking: this test relies on `pnpm --filter` running the test
     // script with cwd = packages/flags, two levels below the repo root
     // that owns config/flags.json. config/flags.json — not DEFAULT_FLAGS —
-    // is what keeps local/demo behavior enabled (see core.ts).
+    // is what keeps local/demo behavior enabled (see core.ts); agent_start
+    // stays off there until its rails pass the live tests.
     const result = await loadFlags({ env: {} });
     expect(result).toEqual({
       csv_export: true,
@@ -246,6 +290,8 @@ describe('loadFlags precedence', () => {
       upland_data: true,
       github_signin: true,
       apps_lobby: true,
+      mcp_connector: true,
+      agent_start: false,
     });
   });
 
@@ -261,6 +307,8 @@ describe('loadFlags precedence', () => {
         upland_data: false,
         github_signin: false,
         apps_lobby: false,
+        mcp_connector: false,
+        agent_start: false,
       });
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -299,6 +347,8 @@ describe('loadFlags precedence', () => {
         upland_data: false,
         github_signin: false,
         apps_lobby: false,
+        mcp_connector: false,
+        agent_start: false,
       });
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -322,6 +372,8 @@ describe('loadFlags precedence', () => {
         upland_data: DEFAULT_FLAGS.upland_data,
         github_signin: DEFAULT_FLAGS.github_signin,
         apps_lobby: DEFAULT_FLAGS.apps_lobby,
+        mcp_connector: DEFAULT_FLAGS.mcp_connector,
+        agent_start: DEFAULT_FLAGS.agent_start,
       });
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -347,6 +399,8 @@ describe('loadFlags precedence', () => {
           upland_data: false,
           github_signin: false,
           apps_lobby: false,
+          mcp_connector: false,
+          agent_start: false,
         });
       } finally {
         await rm(dir, { recursive: true, force: true });
@@ -368,6 +422,8 @@ describe('loadFlags precedence', () => {
           upland_data: false,
           github_signin: false,
           apps_lobby: false,
+          mcp_connector: false,
+          agent_start: false,
         });
       } finally {
         await rm(dir, { recursive: true, force: true });
@@ -386,6 +442,8 @@ describe('loadFlags precedence', () => {
           upland_data: false,
           github_signin: false,
           apps_lobby: false,
+          mcp_connector: false,
+          agent_start: false,
         });
       } finally {
         await rm(dir, { recursive: true, force: true });
@@ -405,6 +463,8 @@ describe('loadFlags precedence', () => {
           upland_data: false,
           github_signin: false,
           apps_lobby: false,
+          mcp_connector: false,
+          agent_start: false,
         });
       } finally {
         await rm(dir, { recursive: true, force: true });
@@ -431,6 +491,8 @@ describe('loadFlags precedence', () => {
           upland_data: false,
           github_signin: false,
           apps_lobby: false,
+          mcp_connector: false,
+          agent_start: false,
         });
       } finally {
         await rm(dir, { recursive: true, force: true });
@@ -448,6 +510,8 @@ describe('loadFlags precedence', () => {
           upland_data: false,
           github_signin: false,
           apps_lobby: false,
+          mcp_connector: false,
+          agent_start: false,
         });
       } finally {
         await rm(dir, { recursive: true, force: true });
@@ -468,6 +532,8 @@ describe('loadFlags precedence', () => {
           upland_data: false,
           github_signin: false,
           apps_lobby: false,
+          mcp_connector: false,
+          agent_start: false,
         });
       } finally {
         await rm(dir, { recursive: true, force: true });

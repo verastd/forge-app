@@ -4,27 +4,64 @@ import {
   ActionCodesSchema,
   ActionDistributionEntrySchema,
   ActiveAccountSchema,
+  AuthorizeCheckSchema,
+  AuthorizeDecisionSchema,
+  AuthorizeErrorSchema,
+  AuthorizeParamsSchema,
+  BRIDGE_EVENT_KINDS,
+  BRIDGE_EVENT_SOURCES,
+  BRIDGE_STAGES,
+  BridgeEventKindSchema,
+  BridgeEventSchema,
+  BridgeEventSourceSchema,
   BridgeStatusSchema,
+  CHECK_RUN_STATUSES,
+  CHECK_STATES,
+  CREDENTIAL_KINDS,
   ChainInfoSchema,
+  CheckResultsSchema,
+  CheckRunSchema,
+  CheckRunStatusSchema,
+  CheckStateSchema,
   ClaimRequestSchema,
   ClaimResponseSchema,
+  ConnectedAgentListSchema,
+  ConnectedAgentSchema,
   ContributorProfileSchema,
+  CredentialKindSchema,
+  CredentialSchema,
   DispatchRequestSchema,
   DispatchResultSchema,
   FLAG_NAMES,
+  FeedbackResponseSchema,
   FlagConfigSchema,
+  ForkStatusSchema,
   GcsStatusSchema,
   GcsSyncResultSchema,
+  OPEN_RAILS,
+  PROGRESS_STAGES,
   PriceDistributionBucketSchema,
+  ProgressStageSchema,
   RAILS,
-  RailSchema,
+  RAIL_MODES,
   REWARD_CLASSES,
+  RailInfoSchema,
+  RailListSchema,
+  RailMetaSchema,
+  RailModeSchema,
+  RailSchema,
   SIZES,
+  START_RAILS,
   SalesVolumeDaySchema,
+  SavedCredentialListSchema,
+  SavedCredentialSchema,
   ScrapeRequestSchema,
   ScrapeStatusSchema,
+  SubmitRequestSchema,
   TIERS,
   TaskCardSchema,
+  TaskDetailSchema,
+  TaskListSchema,
   TimeSeriesPointSchema,
   UPLAND_EXPORT_TYPES,
   UPLAND_INTERVALS,
@@ -48,6 +85,23 @@ describe('History (removed in v0.2)', () => {
 });
 
 describe('FlagConfigSchema', () => {
+  const ALL_ON = {
+    csv_export: true,
+    contribute_bridge: true,
+    upland_data: true,
+    github_signin: true,
+    apps_lobby: true,
+    mcp_connector: true,
+    agent_start: true,
+  };
+
+  /** ALL_ON without `name`: a config written before that flag existed. */
+  function without(name: keyof typeof ALL_ON): Record<string, boolean> {
+    const config: Record<string, boolean> = { ...ALL_ON };
+    delete config[name];
+    return config;
+  }
+
   it('accepts a fully specified boolean config', () => {
     const result = FlagConfigSchema.safeParse({
       csv_export: true,
@@ -55,6 +109,8 @@ describe('FlagConfigSchema', () => {
       upland_data: true,
       github_signin: false,
       apps_lobby: true,
+      mcp_connector: true,
+      agent_start: false,
     });
     expect(result.success).toBe(true);
   });
@@ -64,25 +120,13 @@ describe('FlagConfigSchema', () => {
     expect(result.success).toBe(false);
   });
 
-  it('requires github_signin: a config written before the flag existed is incomplete', () => {
-    const result = FlagConfigSchema.safeParse({
-      csv_export: true,
-      contribute_bridge: true,
-      upland_data: true,
-      apps_lobby: true,
-    });
-    expect(result.success).toBe(false);
-  });
-
-  it('requires apps_lobby: a config written before the flag existed is incomplete', () => {
-    const result = FlagConfigSchema.safeParse({
-      csv_export: true,
-      contribute_bridge: true,
-      upland_data: true,
-      github_signin: true,
-    });
-    expect(result.success).toBe(false);
-  });
+  it.each(['github_signin', 'apps_lobby', 'mcp_connector', 'agent_start'] as const)(
+    'requires %s: a config written before the flag existed is incomplete',
+    (name) => {
+      expect(FlagConfigSchema.safeParse(ALL_ON).success).toBe(true);
+      expect(FlagConfigSchema.safeParse(without(name)).success).toBe(false);
+    },
+  );
 
   it('rejects non-boolean values', () => {
     const result = FlagConfigSchema.safeParse({
@@ -91,23 +135,26 @@ describe('FlagConfigSchema', () => {
       upland_data: false,
       github_signin: false,
       apps_lobby: false,
+      mcp_connector: false,
+      agent_start: false,
     });
     expect(result.success).toBe(false);
   });
 
-  it('rejects a non-boolean apps_lobby', () => {
-    const result = FlagConfigSchema.safeParse({
-      csv_export: true,
-      contribute_bridge: true,
-      upland_data: true,
-      github_signin: true,
-      apps_lobby: 'true',
-    });
-    expect(result.success).toBe(false);
+  it.each(['apps_lobby', 'mcp_connector', 'agent_start'] as const)('rejects a non-boolean %s', (name) => {
+    expect(FlagConfigSchema.safeParse({ ...ALL_ON, [name]: 'true' }).success).toBe(false);
   });
 
   it('exposes the flag names as a const tuple', () => {
-    expect(FLAG_NAMES).toEqual(['csv_export', 'contribute_bridge', 'upland_data', 'github_signin', 'apps_lobby']);
+    expect(FLAG_NAMES).toEqual([
+      'csv_export',
+      'contribute_bridge',
+      'upland_data',
+      'github_signin',
+      'apps_lobby',
+      'mcp_connector',
+      'agent_start',
+    ]);
   });
 });
 
@@ -215,64 +262,157 @@ describe('SIZES / REWARD_CLASSES / TIERS', () => {
 });
 
 describe('RailSchema / RAILS', () => {
+  it('lists the start rails, then the open rails, in display order', () => {
+    expect(START_RAILS).toEqual(['copilot', 'jules', 'cursor', 'devin', 'openhands', 'claude-routine']);
+    expect(OPEN_RAILS).toEqual(['claude-code', 'claude-cli', 'codex', 'vscode', 'cursor-app', 'antigravity']);
+    expect(RAILS).toEqual([...START_RAILS, ...OPEN_RAILS]);
+    expect(RailSchema.options).toEqual([...RAILS]);
+  });
+
   it('accepts every declared rail', () => {
     for (const rail of RAILS) {
       expect(RailSchema.safeParse(rail).success).toBe(true);
     }
   });
 
-  it('rejects an unknown rail', () => {
+  it('rejects an unknown rail, including the retired Gemini CLI', () => {
     expect(RailSchema.safeParse('chatgpt-desktop').success).toBe(false);
+    expect(RailSchema.safeParse('gemini-cli').success).toBe(false);
+  });
+
+  it('has two modes and four credential kinds', () => {
+    expect(RAIL_MODES).toEqual(['start', 'open']);
+    expect(RailModeSchema.safeParse('api').success).toBe(false);
+    expect(CREDENTIAL_KINDS).toEqual(['github', 'api_key', 'devin', 'routine']);
+    expect(CredentialKindSchema.safeParse('password').success).toBe(false);
   });
 });
 
-describe('DispatchRequestSchema', () => {
-  it('accepts a valid dispatch request', () => {
-    const result = DispatchRequestSchema.safeParse({ taskId: 42, rail: 'jules' });
+const JULES_META = {
+  id: 'jules',
+  mode: 'start',
+  label: 'Google Jules',
+  vendor: 'Google',
+  blurb: "Google's Gemini agent works in your fork and opens a pull request.",
+  setup: ['Fork forge-app on GitHub.'],
+  credential: 'api_key',
+  keyUrl: 'https://jules.google.com/settings',
+  plan: 'Free for 15 tasks a day.',
+};
+
+describe('RailMetaSchema / RailInfoSchema / RailListSchema', () => {
+  it('accepts a start rail and an open rail without the start-only fields', () => {
+    expect(RailMetaSchema.safeParse(JULES_META).success).toBe(true);
+    const open = { id: 'codex', mode: 'open', label: 'Codex app', vendor: 'OpenAI', blurb: 'b', setup: [] };
+    expect(RailMetaSchema.safeParse(open).success).toBe(true);
+  });
+
+  it('a RailInfo is a RailMeta plus enabled, and savedCredential only when known', () => {
+    expect(RailInfoSchema.safeParse(JULES_META).success).toBe(false);
+    expect(RailInfoSchema.safeParse({ ...JULES_META, enabled: false }).success).toBe(true);
+    expect(RailInfoSchema.safeParse({ ...JULES_META, enabled: true, savedCredential: true }).success).toBe(true);
+    expect(Object.keys(RailInfoSchema.shape)).toEqual([...Object.keys(RailMetaSchema.shape), 'enabled', 'savedCredential']);
+  });
+
+  it('rejects null for an optional field: the wire leaves it out instead', () => {
+    expect(RailMetaSchema.safeParse({ ...JULES_META, keyUrl: null }).success).toBe(false);
+    expect(RailInfoSchema.safeParse({ ...JULES_META, enabled: true, savedCredential: null }).success).toBe(false);
+  });
+
+  it('a RailList carries the vault switch', () => {
+    expect(RailListSchema.safeParse({ rails: [{ ...JULES_META, enabled: true }], vault: false }).success).toBe(true);
+    expect(RailListSchema.safeParse({ rails: [] }).success).toBe(false);
+  });
+});
+
+const CARD = {
+  id: 7,
+  title: 'Build the feature-flags admin page',
+  civilianSummary: 'Give the team a simple screen to switch app features on and off.',
+  size: 'M',
+  rewardClass: 'R1',
+  tierFloor: 'T1',
+  status: 'claimed',
+  url: 'https://github.com/verastd/forge-app/issues/7',
+  labels: ['agent-ready'],
+  claimedBy: 'maya',
+};
+
+describe('TaskListSchema / TaskDetailSchema / ForkStatusSchema', () => {
+  it('a task list wraps cards', () => {
+    expect(TaskListSchema.safeParse({ tasks: [CARD] }).success).toBe(true);
+    expect(TaskListSchema.safeParse([CARD]).success).toBe(false);
+  });
+
+  it('a task detail carries the card, criteria, branch and brief', () => {
+    const detail = { task: CARD, acceptanceCriteria: ['It works'], branch: 'task/7-x', brief: 'FORGE task #7: x' };
+    expect(TaskDetailSchema.safeParse(detail).success).toBe(true);
+    expect(TaskDetailSchema.safeParse({ ...detail, brief: undefined }).success).toBe(false);
+  });
+
+  it('a fork status has an optional url', () => {
+    expect(ForkStatusSchema.safeParse({ exists: false }).success).toBe(true);
+    expect(ForkStatusSchema.safeParse({ exists: true, url: 'https://github.com/maya/forge-app' }).success).toBe(true);
+    expect(ForkStatusSchema.safeParse({ exists: false, url: null }).success).toBe(false);
+  });
+});
+
+describe('CredentialSchema / DispatchRequestSchema', () => {
+  it('accepts a dispatch with nothing but the task and rail', () => {
+    expect(DispatchRequestSchema.safeParse({ taskId: 42, rail: 'claude-code' }).success).toBe(true);
+  });
+
+  it('accepts a pasted credential and the save switch', () => {
+    const result = DispatchRequestSchema.safeParse({
+      taskId: 42,
+      rail: 'devin',
+      credential: { key: 'test-only-key', orgId: 'org-1' },
+      saveCredential: true,
+    });
     expect(result.success).toBe(true);
   });
 
   it('rejects an invalid rail', () => {
-    const result = DispatchRequestSchema.safeParse({ taskId: 42, rail: 'not-a-rail' });
-    expect(result.success).toBe(false);
+    expect(DispatchRequestSchema.safeParse({ taskId: 42, rail: 'not-a-rail' }).success).toBe(false);
+  });
+
+  it('bounds every credential field', () => {
+    expect(CredentialSchema.safeParse({ key: '' }).success).toBe(false);
+    expect(CredentialSchema.safeParse({ key: 'k'.repeat(4096) }).success).toBe(true);
+    expect(CredentialSchema.safeParse({ key: 'k'.repeat(4097) }).success).toBe(false);
+    expect(CredentialSchema.safeParse({ key: 'k', orgId: 'o'.repeat(200) }).success).toBe(true);
+    expect(CredentialSchema.safeParse({ key: 'k', orgId: 'o'.repeat(201) }).success).toBe(false);
+    expect(CredentialSchema.safeParse({ key: 'k', routineUrl: 'u'.repeat(500) }).success).toBe(true);
+    expect(CredentialSchema.safeParse({ key: 'k', routineUrl: 'u'.repeat(501) }).success).toBe(false);
   });
 });
 
 describe('DispatchResultSchema', () => {
-  it('accepts a handoff-mode result with only the required fields', () => {
+  it('accepts an open-rail result with only the required fields', () => {
     const result = DispatchResultSchema.safeParse({
-      mode: 'handoff',
-      compiledPrompt: 'Task Spec + AGENTS.md pointer...',
-      instructions: ['Open claude.ai/code', 'Paste the compiled prompt'],
+      mode: 'open',
+      rail: 'claude-code',
+      brief: 'FORGE task #1: ...',
+      startedAt: '2026-10-01T09:00:00Z',
     });
     expect(result.success).toBe(true);
   });
 
-  it('accepts an api-mode result with deepLink and sessionRef set', () => {
+  it('accepts a start-rail result with the session and the saved switch', () => {
     const result = DispatchResultSchema.safeParse({
-      mode: 'api',
-      compiledPrompt: 'Task Spec...',
-      deepLink: 'https://jules.google.com/session/abc',
-      sessionRef: 'sess_abc123',
-      instructions: [],
+      mode: 'start',
+      rail: 'jules',
+      brief: 'FORGE task #1: ...',
+      startedAt: '2026-10-01T09:00:00Z',
+      sessionUrl: 'https://jules.google.com/session/abc',
+      sessionRef: 'sessions/abc',
+      credentialSaved: true,
     });
     expect(result.success).toBe(true);
   });
 
-  it('rejects a mode outside api/handoff', () => {
-    const result = DispatchResultSchema.safeParse({
-      mode: 'manual',
-      compiledPrompt: 'x',
-      instructions: [],
-    });
-    expect(result.success).toBe(false);
-  });
-
-  it('rejects a missing instructions array', () => {
-    const result = DispatchResultSchema.safeParse({
-      mode: 'handoff',
-      compiledPrompt: 'x',
-    });
+  it('rejects the retired api/handoff modes and the old fields alone', () => {
+    const result = DispatchResultSchema.safeParse({ mode: 'handoff', compiledPrompt: 'x', instructions: [] });
     expect(result.success).toBe(false);
   });
 });
@@ -306,37 +446,139 @@ describe('ClaimRequestSchema / ClaimResponseSchema', () => {
   });
 });
 
-describe('BridgeStatusSchema', () => {
+const EVENT = {
+  at: '2026-10-01T09:00:00Z',
+  kind: 'progress',
+  source: 'agent',
+  message: 'Pushed the first change.',
+  rail: 'claude-code',
+  stage: 'pushed',
+};
+
+describe('BridgeStatusSchema / BridgeEventSchema', () => {
   it('accepts every declared bridge stage', () => {
-    const stages = [
-      'claimed',
-      'agent_working',
-      'ready_to_submit',
-      'in_checks',
-      'in_review',
-      'shipping',
-      'shipped',
-    ] as const;
-    for (const stage of stages) {
-      const result = BridgeStatusSchema.safeParse({ taskId: 1, stage, detail: 'x' });
+    for (const stage of BRIDGE_STAGES) {
+      const result = BridgeStatusSchema.safeParse({ taskId: 1, stage, detail: 'x', events: [] });
       expect(result.success).toBe(true);
     }
   });
 
-  it('accepts checksPassed/checksTotal when present', () => {
+  it('requires the events list', () => {
+    expect(BridgeStatusSchema.safeParse({ taskId: 1, stage: 'claimed', detail: 'x' }).success).toBe(false);
+  });
+
+  it('accepts every optional field when present', () => {
     const result = BridgeStatusSchema.safeParse({
       taskId: 1,
       stage: 'in_checks',
       detail: '2 of 5 checks need another pass',
+      events: [EVENT, { at: EVENT.at, kind: 'claimed', source: 'forge', message: 'Claimed.' }],
+      holder: 'maya',
+      leaseEndsAt: '2026-10-03T09:00:00Z',
+      rail: 'jules',
+      sessionUrl: 'https://jules.google.com/session/abc',
+      prUrl: 'https://github.com/verastd/forge-app/pull/12',
+      compareUrl: 'https://github.com/verastd/forge-app/compare/main...maya:task/1-x',
       checksPassed: 2,
       checksTotal: 5,
     });
     expect(result.success).toBe(true);
   });
 
-  it('rejects an unknown stage', () => {
-    const result = BridgeStatusSchema.safeParse({ taskId: 1, stage: 'done', detail: 'x' });
-    expect(result.success).toBe(false);
+  it('rejects an unknown stage, event kind, source or progress stage', () => {
+    expect(BridgeStatusSchema.safeParse({ taskId: 1, stage: 'done', detail: 'x', events: [] }).success).toBe(false);
+    expect(BridgeEventSchema.safeParse({ ...EVENT, kind: 'deleted' }).success).toBe(false);
+    expect(BridgeEventSchema.safeParse({ ...EVENT, source: 'user' }).success).toBe(false);
+    expect(BridgeEventSchema.safeParse({ ...EVENT, stage: 'finished' }).success).toBe(false);
+  });
+
+  it('declares the progress stages, event kinds and sources', () => {
+    expect(PROGRESS_STAGES).toEqual(['started', 'working', 'pushed', 'pr_opened', 'blocked', 'done']);
+    expect(ProgressStageSchema.options).toEqual([...PROGRESS_STAGES]);
+    expect(BRIDGE_EVENT_KINDS).toEqual(['claimed', 'dispatched', 'opened', 'progress', 'submitted', 'released', 'relayed']);
+    expect(BridgeEventKindSchema.options).toEqual([...BRIDGE_EVENT_KINDS]);
+    expect(BRIDGE_EVENT_SOURCES).toEqual(['forge', 'agent']);
+    expect(BridgeEventSourceSchema.options).toEqual([...BRIDGE_EVENT_SOURCES]);
+  });
+});
+
+describe('CheckResultsSchema / FeedbackResponseSchema / SubmitRequestSchema', () => {
+  it('accepts no pull request yet, and a failed run with its checks', () => {
+    expect(CheckResultsSchema.safeParse({ taskId: 1, state: 'no_pr', checks: [], notes: '' }).success).toBe(true);
+    const failed = CheckResultsSchema.safeParse({
+      taskId: 1,
+      state: 'failed',
+      checks: [
+        { name: 'tests', status: 'completed', conclusion: 'failure', summary: '1 failed', url: 'https://x.test' },
+        { name: 'lint', status: 'in_progress' },
+      ],
+      notes: 'gauntlet: FAIL G2.3',
+      prUrl: 'https://github.com/verastd/forge-app/pull/12',
+      headSha: 'abc123',
+    });
+    expect(failed.success).toBe(true);
+  });
+
+  it('rejects unknown check states and statuses', () => {
+    expect(CHECK_STATES).toEqual(['no_pr', 'pending', 'passed', 'failed']);
+    expect(CHECK_RUN_STATUSES).toEqual(['queued', 'in_progress', 'completed']);
+    expect(CheckStateSchema.safeParse('ok').success).toBe(false);
+    expect(CheckRunStatusSchema.safeParse('done').success).toBe(false);
+    expect(CheckRunSchema.safeParse({ name: 'lint', status: 'queued', conclusion: null }).success).toBe(false);
+  });
+
+  it('feedback carries notes and, when relayed, the rail it went to', () => {
+    expect(FeedbackResponseSchema.safeParse({ relayed: false, notes: 'Fix the test.' }).success).toBe(true);
+    expect(FeedbackResponseSchema.safeParse({ relayed: true, notes: 'n', relayedTo: 'jules' }).success).toBe(true);
+    expect(FeedbackResponseSchema.safeParse({ relayed: true, prompt: 'the old shape' }).success).toBe(false);
+  });
+
+  it('submit takes a pull request link', () => {
+    expect(SubmitRequestSchema.safeParse({ prUrl: 'https://github.com/verastd/forge-app/pull/12' }).success).toBe(true);
+    expect(SubmitRequestSchema.safeParse({}).success).toBe(false);
+  });
+});
+
+describe('saved keys and connected agents', () => {
+  it('a saved key is a hint, never the key', () => {
+    const saved = { rail: 'jules', hint: '…a1b2', savedAt: '2026-10-01T09:00:00Z' };
+    expect(SavedCredentialSchema.safeParse(saved).success).toBe(true);
+    expect(Object.keys(SavedCredentialSchema.shape)).not.toContain('key');
+    expect(SavedCredentialListSchema.safeParse({ credentials: [saved], vault: true }).success).toBe(true);
+    expect(SavedCredentialListSchema.safeParse({ credentials: [] }).success).toBe(false);
+  });
+
+  it('a connected agent names its client and where it sends you back', () => {
+    const agent = { id: 'g1', clientName: 'Claude', redirectHost: 'claude.ai', connectedAt: '2026-10-01T09:00:00Z' };
+    expect(ConnectedAgentSchema.safeParse(agent).success).toBe(true);
+    expect(ConnectedAgentListSchema.safeParse({ agents: [{ ...agent, lastUsedAt: agent.connectedAt }] }).success).toBe(true);
+    expect(ConnectedAgentSchema.safeParse({ ...agent, lastUsedAt: null }).success).toBe(false);
+  });
+});
+
+describe('OAuth consent schemas', () => {
+  const params = {
+    responseType: 'code',
+    clientId: 'client-1',
+    redirectUri: 'https://claude.ai/api/mcp/auth_callback',
+    codeChallenge: 'test-only-code-challenge',
+    codeChallengeMethod: 'S256',
+  };
+
+  it('authorize params need the five OAuth fields; state, scope and resource are optional', () => {
+    expect(AuthorizeParamsSchema.safeParse(params).success).toBe(true);
+    expect(AuthorizeParamsSchema.safeParse({ ...params, state: 's', scope: 'forge.tasks', resource: 'https://x.test/mcp' }).success).toBe(true);
+    const missing: Record<string, string> = { ...params };
+    delete missing.codeChallenge;
+    expect(AuthorizeParamsSchema.safeParse(missing).success).toBe(false);
+  });
+
+  it('check, error and decision shapes', () => {
+    expect(AuthorizeCheckSchema.safeParse({ clientName: 'Claude', redirectHost: 'claude.ai', scopes: ['forge.tasks'] }).success).toBe(true);
+    expect(AuthorizeErrorSchema.safeParse({ error: 'invalid_request' }).success).toBe(true);
+    expect(AuthorizeErrorSchema.safeParse({ error: 'access_denied', errorDescription: 'd', redirectTo: 'https://claude.ai/cb?error=access_denied' }).success).toBe(true);
+    expect(AuthorizeDecisionSchema.safeParse({ redirectTo: 'https://claude.ai/cb?code=c&state=s' }).success).toBe(true);
+    expect(AuthorizeDecisionSchema.safeParse({}).success).toBe(false);
   });
 });
 

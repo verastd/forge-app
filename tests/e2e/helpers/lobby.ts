@@ -100,7 +100,14 @@ export async function openLobby(page: Page, path = '/apps'): Promise<void> {
   await expectReady(page);
 }
 
-type FlagName = 'csv_export' | 'contribute_bridge' | 'upland_data' | 'github_signin' | 'apps_lobby';
+type FlagName =
+  | 'csv_export'
+  | 'contribute_bridge'
+  | 'upland_data'
+  | 'github_signin'
+  | 'apps_lobby'
+  | 'mcp_connector'
+  | 'agent_start';
 
 /**
  * Serves a full, schema-valid flags payload in place of the API's: every
@@ -114,6 +121,8 @@ export async function serveFlags(page: Page, overrides: Partial<Record<FlagName,
     upland_data: true,
     github_signin: true,
     apps_lobby: true,
+    mcp_connector: true,
+    agent_start: true,
     ...overrides,
   };
   await page.route('**/api/flags', (route) =>

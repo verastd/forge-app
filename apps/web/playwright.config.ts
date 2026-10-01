@@ -41,9 +41,8 @@ const SWIFTSHADER_ARGS = ['--use-angle=swiftshader', '--enable-unsafe-swiftshade
  * out of sync with the value the server it's sent to was started with.
  * `FORGE_API_URL` points at a closed local port so the BFF's upstream call
  * fails fast and deterministically (a 502) rather than hanging or reaching
- * a real service. The demo server's port is only closed between tests: the
- * BFF header test in `auth.spec.ts` briefly serves a hostile stand-in API
- * on it (no other demo test ever forwards upstream).
+ * a real service. The demo server's port is closed except while a spec's
+ * stand-in API holds it, one test at a time (`tests/e2e/helpers/standin.ts`).
  */
 export default defineConfig({
   testDir: '../../tests/e2e',

@@ -1,14 +1,16 @@
-"""Shared fixtures. Every test gets its own lease store, so nothing leaks between tests."""
+"""Shared fixtures. Every test gets its own lease store and its own empty state database,
+so nothing leaks between tests."""
 
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 
 from forge_api.main import app
-from forge_api.services import identity
+from forge_api.services import identity, state
 from forge_api.services.bridge import LeaseStore, get_lease_store
 
 #: As long as the real FORGE_API_ASSERTION_SECRET must be (32+ chars). Tests only.
@@ -18,6 +20,18 @@ ADMIN_SUB, ADMIN_LOGIN = "1002", "octo-operator"
 
 #: `auth_headers(sub, login, **mint_assertion_kwargs)` -> {"Authorization": "Bearer ..."}
 AuthHeaders = Callable[..., dict[str, str]]
+
+
+@pytest.fixture(autouse=True)
+def state_db_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[Path]:
+    """Every test gets its own state database file, empty until something opens it, and
+    never the developer's var/forge-state.db. The file lives in pytest's tmp_path, so
+    `get_state_db()` creates it (with every registered schema) on first use."""
+    path = tmp_path / "forge-state.db"
+    monkeypatch.setenv(state.PATH_ENV, str(path))
+    state.reset_state_db()
+    yield path
+    state.reset_state_db()
 
 
 class FakeClock:

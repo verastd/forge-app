@@ -9,6 +9,10 @@
  * reads the same as a switch somebody threw on purpose; that is the correct
  * live behaviour and is not masked here. The demo app forces the Bridge open
  * instead, since demonstrating it with nothing behind it is the entire job.
+ *
+ * The flags it resolved go down to the screens under it
+ * (`ContributeFlagsContext`), so "Start it for me" follows `agent_start`
+ * without fetching them again.
  */
 
 import Link from 'next/link';
@@ -16,6 +20,7 @@ import { useFlags } from '@forge/flags/react';
 import type { ReactNode } from 'react';
 
 import { DemoBanner } from '../../components/DemoBanner';
+import { ContributeFlagsContext } from '../../components/contribute/ContributeFlags';
 import { demoFlagFallback } from '../../lib/flags';
 import { isDemoMode } from '../../lib/mode';
 
@@ -60,9 +65,9 @@ export default function ContributeLayout({ children }: { children: ReactNode }) 
   }
 
   return (
-    <>
+    <ContributeFlagsContext.Provider value={flags}>
       <DemoBanner />
       {children}
-    </>
+    </ContributeFlagsContext.Provider>
   );
 }

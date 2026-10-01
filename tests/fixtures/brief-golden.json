@@ -1,0 +1,112 @@
+{
+  "cases": [
+    {
+      "name": "with login",
+      "task": {
+        "id": 1,
+        "title": "Polish the CSV export in the Data app",
+        "civilianSummary": "Let people download the Upland data they are looking at as a spreadsheet file.",
+        "url": "https://github.com/verastd/forge-app/issues/1"
+      },
+      "criteria": [
+        "GET /api/upland/export returns text/csv whose first line is the 13-column action header",
+        "Export CSV button visible on /apps/data for signed-in users (flag: csv_export)",
+        "10k-row export completes < 3s in CI fixture data"
+      ],
+      "login": "octo-contributor",
+      "branch": "task/1-polish-the-csv-export-in-the-data-app",
+      "brief": "FORGE task #1: Polish the CSV export in the Data app\n\nWhy: Let people download the Upland data they are looking at as a spreadsheet file.\n\nDone when:\n- GET /api/upland/export returns text/csv whose first line is the 13-column action header\n- Export CSV button visible on /apps/data for signed-in users (flag: csv_export)\n- 10k-row export completes < 3s in CI fixture data\n\nRules:\n- Read AGENTS.md at the repo root before you start.\n- Work in your fork, octo-contributor/forge-app, on the branch task/1-polish-the-csv-export-in-the-data-app. Create it from main if it doesn't exist.\n- Don't change .github/, the acceptance tests, or anything outside this task.\n- Run make lint and make test before you push.\n- When it's ready, open a pull request from octo-contributor:task/1-polish-the-csv-export-in-the-data-app to verastd/forge-app main, titled \"[#1] Polish the CSV export in the Data app\", with \"Closes #1\" in the description.\n\nIf you have the FORGE tools (the FORGE connector), call claim_task first, report_progress as you go, get_check_results when checks fail, and submit_task with the pull request link.\n\nTask: https://github.com/verastd/forge-app/issues/1"
+    },
+    {
+      "name": "without login",
+      "task": {
+        "id": 1,
+        "title": "Polish the CSV export in the Data app",
+        "civilianSummary": "Let people download the Upland data they are looking at as a spreadsheet file.",
+        "url": "https://github.com/verastd/forge-app/issues/1"
+      },
+      "criteria": [
+        "GET /api/upland/export returns text/csv whose first line is the 13-column action header",
+        "Export CSV button visible on /apps/data for signed-in users (flag: csv_export)",
+        "10k-row export completes < 3s in CI fixture data"
+      ],
+      "login": null,
+      "branch": "task/1-polish-the-csv-export-in-the-data-app",
+      "brief": "FORGE task #1: Polish the CSV export in the Data app\n\nWhy: Let people download the Upland data they are looking at as a spreadsheet file.\n\nDone when:\n- GET /api/upland/export returns text/csv whose first line is the 13-column action header\n- Export CSV button visible on /apps/data for signed-in users (flag: csv_export)\n- 10k-row export completes < 3s in CI fixture data\n\nRules:\n- Read AGENTS.md at the repo root before you start.\n- Work in your fork of verastd/forge-app, on the branch task/1-polish-the-csv-export-in-the-data-app. Create it from main if it doesn't exist.\n- Don't change .github/, the acceptance tests, or anything outside this task.\n- Run make lint and make test before you push.\n- When it's ready, open a pull request from your fork's task/1-polish-the-csv-export-in-the-data-app branch to verastd/forge-app main, titled \"[#1] Polish the CSV export in the Data app\", with \"Closes #1\" in the description.\n\nIf you have the FORGE tools (the FORGE connector), call claim_task first, report_progress as you go, get_check_results when checks fail, and submit_task with the pull request link.\n\nTask: https://github.com/verastd/forge-app/issues/1"
+    },
+    {
+      "name": "an invalid login is no login",
+      "task": {
+        "id": 1,
+        "title": "Polish the CSV export in the Data app",
+        "civilianSummary": "Let people download the Upland data they are looking at as a spreadsheet file.",
+        "url": "https://github.com/verastd/forge-app/issues/1"
+      },
+      "criteria": [
+        "GET /api/upland/export returns text/csv whose first line is the 13-column action header",
+        "Export CSV button visible on /apps/data for signed-in users (flag: csv_export)",
+        "10k-row export completes < 3s in CI fixture data"
+      ],
+      "login": "octo-contributor\n",
+      "branch": "task/1-polish-the-csv-export-in-the-data-app",
+      "brief": "FORGE task #1: Polish the CSV export in the Data app\n\nWhy: Let people download the Upland data they are looking at as a spreadsheet file.\n\nDone when:\n- GET /api/upland/export returns text/csv whose first line is the 13-column action header\n- Export CSV button visible on /apps/data for signed-in users (flag: csv_export)\n- 10k-row export completes < 3s in CI fixture data\n\nRules:\n- Read AGENTS.md at the repo root before you start.\n- Work in your fork of verastd/forge-app, on the branch task/1-polish-the-csv-export-in-the-data-app. Create it from main if it doesn't exist.\n- Don't change .github/, the acceptance tests, or anything outside this task.\n- Run make lint and make test before you push.\n- When it's ready, open a pull request from your fork's task/1-polish-the-csv-export-in-the-data-app branch to verastd/forge-app main, titled \"[#1] Polish the CSV export in the Data app\", with \"Closes #1\" in the description.\n\nIf you have the FORGE tools (the FORGE connector), call claim_task first, report_progress as you go, get_check_results when checks fail, and submit_task with the pull request link.\n\nTask: https://github.com/verastd/forge-app/issues/1"
+    },
+    {
+      "name": "no criteria",
+      "task": {
+        "id": 7,
+        "title": "Build the feature-flags admin page",
+        "civilianSummary": "Give the team a simple screen to switch app features on and off.",
+        "url": "https://github.com/verastd/forge-app/issues/7"
+      },
+      "criteria": [],
+      "login": "maya",
+      "branch": "task/7-build-the-feature-flags-admin-page",
+      "brief": "FORGE task #7: Build the feature-flags admin page\n\nWhy: Give the team a simple screen to switch app features on and off.\n\nRules:\n- Read AGENTS.md at the repo root before you start.\n- Work in your fork, maya/forge-app, on the branch task/7-build-the-feature-flags-admin-page. Create it from main if it doesn't exist.\n- Don't change .github/, the acceptance tests, or anything outside this task.\n- Run make lint and make test before you push.\n- When it's ready, open a pull request from maya:task/7-build-the-feature-flags-admin-page to verastd/forge-app main, titled \"[#7] Build the feature-flags admin page\", with \"Closes #7\" in the description.\n\nIf you have the FORGE tools (the FORGE connector), call claim_task first, report_progress as you go, get_check_results when checks fail, and submit_task with the pull request link.\n\nTask: https://github.com/verastd/forge-app/issues/7"
+    },
+    {
+      "name": "a title with characters that slugify away",
+      "task": {
+        "id": 42,
+        "title": "Fix the “Café” 🚀 page — 100% faster in İzmir!",
+        "civilianSummary": "Make the café page load quickly for people in Turkey.",
+        "url": "https://github.com/verastd/forge-app/issues/42"
+      },
+      "criteria": [
+        "The page loads in under 1 s on a phone",
+        "Nothing else on the page changes"
+      ],
+      "login": "maya",
+      "branch": "task/42-fix-the-caf-page-100-faster-in-i-zmir",
+      "brief": "FORGE task #42: Fix the “Café” 🚀 page — 100% faster in İzmir!\n\nWhy: Make the café page load quickly for people in Turkey.\n\nDone when:\n- The page loads in under 1 s on a phone\n- Nothing else on the page changes\n\nRules:\n- Read AGENTS.md at the repo root before you start.\n- Work in your fork, maya/forge-app, on the branch task/42-fix-the-caf-page-100-faster-in-i-zmir. Create it from main if it doesn't exist.\n- Don't change .github/, the acceptance tests, or anything outside this task.\n- Run make lint and make test before you push.\n- When it's ready, open a pull request from maya:task/42-fix-the-caf-page-100-faster-in-i-zmir to verastd/forge-app main, titled \"[#42] Fix the “Café” 🚀 page — 100% faster in İzmir!\", with \"Closes #42\" in the description.\n\nIf you have the FORGE tools (the FORGE connector), call claim_task first, report_progress as you go, get_check_results when checks fail, and submit_task with the pull request link.\n\nTask: https://github.com/verastd/forge-app/issues/42"
+    },
+    {
+      "name": "a long title is cut back to a whole word",
+      "task": {
+        "id": 43,
+        "title": "Make the contributor profile page explain survival-rate rewards in plain words",
+        "civilianSummary": "Explain how rewards unlock, without jargon.",
+        "url": "https://github.com/verastd/forge-app/issues/43"
+      },
+      "criteria": [
+        "Every reward line says when it unlocks"
+      ],
+      "login": null,
+      "branch": "task/43-make-the-contributor-profile-page-explain",
+      "brief": "FORGE task #43: Make the contributor profile page explain survival-rate rewards in plain words\n\nWhy: Explain how rewards unlock, without jargon.\n\nDone when:\n- Every reward line says when it unlocks\n\nRules:\n- Read AGENTS.md at the repo root before you start.\n- Work in your fork of verastd/forge-app, on the branch task/43-make-the-contributor-profile-page-explain. Create it from main if it doesn't exist.\n- Don't change .github/, the acceptance tests, or anything outside this task.\n- Run make lint and make test before you push.\n- When it's ready, open a pull request from your fork's task/43-make-the-contributor-profile-page-explain branch to verastd/forge-app main, titled \"[#43] Make the contributor profile page explain survival-rate rewards in plain words\", with \"Closes #43\" in the description.\n\nIf you have the FORGE tools (the FORGE connector), call claim_task first, report_progress as you go, get_check_results when checks fail, and submit_task with the pull request link.\n\nTask: https://github.com/verastd/forge-app/issues/43"
+    },
+    {
+      "name": "a title with nothing left to slug",
+      "task": {
+        "id": 44,
+        "title": "!!!",
+        "civilianSummary": "A title made only of punctuation still gets a branch.",
+        "url": "https://github.com/verastd/forge-app/issues/44"
+      },
+      "criteria": [],
+      "login": null,
+      "branch": "task/44-",
+      "brief": "FORGE task #44: !!!\n\nWhy: A title made only of punctuation still gets a branch.\n\nRules:\n- Read AGENTS.md at the repo root before you start.\n- Work in your fork of verastd/forge-app, on the branch task/44-. Create it from main if it doesn't exist.\n- Don't change .github/, the acceptance tests, or anything outside this task.\n- Run make lint and make test before you push.\n- When it's ready, open a pull request from your fork's task/44- branch to verastd/forge-app main, titled \"[#44] !!!\", with \"Closes #44\" in the description.\n\nIf you have the FORGE tools (the FORGE connector), call claim_task first, report_progress as you go, get_check_results when checks fail, and submit_task with the pull request link.\n\nTask: https://github.com/verastd/forge-app/issues/44"
+    }
+  ]
+}

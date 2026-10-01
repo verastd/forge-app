@@ -49,3 +49,26 @@
 /AGENTS.md                                     @verastd @forge-cold
 /CLAUDE.md                                     @verastd @forge-cold
 /.gemini/                                      @verastd @forge-cold
+# Agent config: a PR that repoints the FORGE connector here would phish every contributor.
+/.mcp.json                                     @verastd @forge-cold
+/.codex/                                       @verastd @forge-cold
+/.agents/                                      @verastd @forge-cold
+/.cursor/                                      @verastd @forge-cold
+/.vscode/                                      @verastd @forge-cold
+/.claude/                                      @verastd @forge-cold
+# The FORGE connector, saved agent keys and the vendor calls that use them (ADR-005).
+/apps/api/src/forge_api/services/oauth.py      @verastd @forge-cold
+/apps/api/src/forge_api/services/mcp_server.py @verastd @forge-cold
+/apps/api/src/forge_api/services/vault.py      @verastd @forge-cold
+/apps/api/src/forge_api/services/rail_adapters/ @verastd @forge-cold
+/apps/api/src/forge_api/routers/oauth.py       @verastd @forge-cold
+/apps/api/src/forge_api/routers/mcp.py         @verastd @forge-cold
+/apps/web/src/app/oauth/                       @verastd @forge-cold
+# What every contributor's agent is told, and the links that send people to an agent or a key page.
+/apps/web/src/app/connect/                     @verastd @forge-cold
+/apps/web/src/lib/launch.ts                    @verastd @forge-cold
+/packages/shared/src/brief.ts                  @verastd @forge-cold
+/packages/shared/src/rails.ts                  @verastd @forge-cold
+/apps/api/src/forge_api/services/brief.py      @verastd @forge-cold
+/apps/api/src/forge_api/services/rails.py      @verastd @forge-cold
+/apps/api/src/forge_api/services/bridge_mcp.py @verastd @forge-cold

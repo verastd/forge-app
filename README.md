@@ -35,13 +35,18 @@ machine-readable scope. Comment `/claim` (or run
 work; a PR against a task claimed by someone else is closed regardless of
 quality.
 
-If you'd rather not leave the browser, the in-app Bridge at
-[`/contribute`](apps/web/src/app/contribute) walks through the same pipeline
-from a task board — pick a task, pick an agent, watch it move through
-checks. It's a client for the same GitHub-native pipeline, not a shortcut
-around it; see
-[`docs/architecture.md`](docs/architecture.md#the-bridge) for exactly what's
-wired up today versus still a stub.
+If you'd rather not leave the browser, claim a task in the in-app Bridge at
+[`/contribute`](apps/web/src/app/contribute) and press **Start it for me**
+(FORGE starts your agent through its maker's API, on your own account) or
+**Open my agent** (your agent opens with the task already typed in).
+Connect your agent to FORGE once at
+[`/connect`](https://forge-app-eta-mocha.vercel.app/connect) and it can
+claim the task, report progress and read its check results by itself, so
+nothing needs copying and pasting. It's a client for the same GitHub-native
+pipeline, not a shortcut around it;
+[`docs/architecture.md`](docs/architecture.md#the-bridge) and
+[ADR-005](docs/adr/ADR-005-agent-handoff.md) say what's wired up today and
+what's still switched off.
 
 ## Build and run
 

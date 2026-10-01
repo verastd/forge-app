@@ -13,7 +13,7 @@ export const ASSERTION_SECRET = 'e2e-only-assertion-secret-not-for-production';
 
 /**
  * Where the demo server's BFF forwards (`FORGE_API_URL`). Closed, so every
- * forward fails fast with a 502, except while the BFF header test in
- * `auth.spec.ts` stands a hostile stand-in API up on it.
+ * forward fails fast with a 502, except while a spec stands a stand-in API up
+ * on it, one test at a time (`helpers/standin.ts`).
  */
 export const DEMO_API_PORT = 3190;

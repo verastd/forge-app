@@ -12,8 +12,12 @@ import { setSessionCookie } from '../../../lib/session';
 
 export const dynamic = 'force-dynamic';
 
-/** The form holds one short `next` path; nothing legitimate comes near this. */
-const MAX_BODY_BYTES = 4096;
+/**
+ * The form holds one `next` path of up to 2048 characters (`safeNext`'s cap,
+ * which a connector consent URL needs), form-encoded: up to three bytes a
+ * character. Nothing legitimate comes near this.
+ */
+const MAX_BODY_BYTES = 8192;
 
 export async function POST(request: NextRequest): Promise<Response> {
   if (!isDemoMode()) return jsonError(404, 'not_found');

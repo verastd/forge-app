@@ -76,6 +76,24 @@ describe('sealTransaction and openTransaction', () => {
     await expect(openTransaction(token, [SECRET], { now: NOW })).resolves.toMatchObject(attempt);
   });
 
+  it('carry the longest next safeNext accepts, sealed short enough for a browser to keep the cookie', async () => {
+    // 2048 characters, the cap (a connector consent URL is about 600). With
+    // the cookie's name and attributes, a browser keeps at most about 4 KB.
+    const next = `/${'a'.repeat(2047)}`;
+    expect(safeNext(next)).toBe(next);
+    const largest: TransactionInput[] = [
+      { ...TX, next },
+      { ...TX, next, purpose: 'agent', taskId: Number.MAX_SAFE_INTEGER, rail: `c${'a'.repeat(31)}` },
+    ];
+
+    for (const attempt of largest) {
+      const token = await sealTransaction(attempt, SECRET, { now: NOW });
+
+      expect(token.length).toBeLessThan(3800);
+      await expect(openTransaction(token, [SECRET], { now: NOW })).resolves.toMatchObject(attempt);
+    }
+  });
+
   it('seal only the attempt fields, dropping any other key', async () => {
     const token = await sealTransaction({ ...TX, extra: 1 } as TransactionInput, SECRET, { now: NOW });
     const claims = await openTransaction(token, [SECRET], { now: NOW });
@@ -229,5 +247,102 @@ describe('transaction and session tokens', () => {
 
     await expect(openTransaction(token, [SECRET], { now: NOW })).resolves.toBeNull();
     await expect(openSession(await sealTransaction(TX, SECRET, { now: NOW }), [SECRET], { now: NOW })).resolves.toBeNull();
+  });
+});
+
+describe('agent attempts (the one-time authorization that starts an agent)', () => {
+  const AGENT: TransactionInput = {
+    ...TX,
+    next: '/contribute/task/7',
+    purpose: 'agent',
+    taskId: 7,
+    rail: 'copilot',
+  };
+  const AGENT_FIELDS = { purpose: 'agent', taskId: 7, rail: 'copilot' };
+
+  it('open with their purpose, task and rail', async () => {
+    const token = await sealTransaction(AGENT, SECRET, { now: NOW });
+
+    await expect(openTransaction(token, [SECRET], { now: NOW })).resolves.toEqual({
+      ...AGENT,
+      iat: NOW,
+      exp: NOW + TRANSACTION_TTL_SECONDS,
+    });
+  });
+
+  it('a sign-in attempt still opens with no purpose, task or rail', async () => {
+    const claims = await openTransaction(await sealTransaction(TX, SECRET, { now: NOW }), [SECRET], { now: NOW });
+
+    expect(claims).not.toBeNull();
+    expect(claims?.purpose).toBeUndefined();
+    expect(Object.keys(claims ?? {})).not.toContain('taskId');
+    expect(Object.keys(claims ?? {})).not.toContain('rail');
+  });
+
+  it('seal only the attempt fields, dropping any other key', async () => {
+    const token = await sealTransaction({ ...AGENT, extra: 1 } as TransactionInput, SECRET, { now: NOW });
+    const claims = await openTransaction(token, [SECRET], { now: NOW });
+
+    expect(Object.keys(claims ?? {}).sort()).toEqual([
+      'exp',
+      'iat',
+      'next',
+      'purpose',
+      'rail',
+      'state',
+      'taskId',
+      'verifier',
+    ]);
+  });
+
+  it('accept a rail id of up to 32 characters', async () => {
+    const longest = { ...AGENT, rail: `c${'a'.repeat(31)}` };
+    const token = await sealTransaction(longest, SECRET, { now: NOW });
+
+    await expect(openTransaction(token, [SECRET], { now: NOW })).resolves.toMatchObject({ rail: longest.rail });
+  });
+
+  it.each<[string, unknown]>([
+    ['a purpose with no task', { ...TX, purpose: 'agent', rail: 'copilot' }],
+    ['a purpose with no rail', { ...TX, purpose: 'agent', taskId: 7 }],
+    ['a task with no purpose', { ...TX, taskId: 7 }],
+    ['a rail with no purpose', { ...TX, rail: 'copilot' }],
+    ['a task and rail with no purpose', { ...TX, taskId: 7, rail: 'copilot' }],
+    ['an unknown purpose', { ...AGENT, purpose: 'signin' }],
+    ['task 0', { ...AGENT, taskId: 0 }],
+    ['a negative task', { ...AGENT, taskId: -1 }],
+    ['a fractional task', { ...AGENT, taskId: 1.5 }],
+    ['a task past the safe integers', { ...AGENT, taskId: 2 ** 53 }],
+    ['a task as a string', { ...AGENT, taskId: '7' }],
+    ['an uppercase rail', { ...AGENT, rail: 'Copilot' }],
+    ['a rail with a slash', { ...AGENT, rail: 'copilot/../x' }],
+    ['a rail starting with a digit', { ...AGENT, rail: '1copilot' }],
+    ['a rail of 33 characters', { ...AGENT, rail: `c${'a'.repeat(32)}` }],
+    ['an empty rail', { ...AGENT, rail: '' }],
+    ['an agent attempt with an unsafe next', { ...AGENT, next: '//evil.com' }],
+  ])('sealTransaction throws invalid_claims for %s', async (_label, tx) => {
+    await expect(sealTransaction(tx as TransactionInput, SECRET, { now: NOW })).rejects.toMatchObject({
+      name: 'AuthError',
+      code: 'invalid_claims',
+    });
+  });
+
+  it('opens the untouched forged agent payload, so each refusal below is its own claim', async () => {
+    await expect(openTransaction(await forge(payload(AGENT_FIELDS)), [SECRET], { now: NOW })).resolves.toEqual(
+      payload(AGENT_FIELDS),
+    );
+  });
+
+  it.each<[string, Record<string, unknown>]>([
+    ['a purpose with no task or rail', { purpose: 'agent' }],
+    ['a task and rail with no purpose', { taskId: 7, rail: 'copilot' }],
+    ['an unknown purpose', { ...AGENT_FIELDS, purpose: 'admin' }],
+    ['a null purpose', { ...AGENT_FIELDS, purpose: null }],
+    ['a task as a string', { ...AGENT_FIELDS, taskId: '7' }],
+    ['task 0', { ...AGENT_FIELDS, taskId: 0 }],
+    ['a rail with a dot', { ...AGENT_FIELDS, rail: 'co.pilot' }],
+    ['a rail as a number', { ...AGENT_FIELDS, rail: 1 }],
+  ])('openTransaction refuses a forged payload with %s', async (_label, overrides) => {
+    await expect(openTransaction(await forge(payload(overrides)), [SECRET], { now: NOW })).resolves.toBeNull();
   });
 });
