@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 
-import { INITIAL_CAMERA, appAt, slotFromIndex } from '../../packages/lobby/dist/index.js';
+import { INITIAL_CAMERA, appAt, facing, slotFromIndex } from '../../packages/lobby/dist/index.js';
 import {
   DATA_LINK,
   DATA_SLOT,
@@ -294,6 +294,64 @@ test('a tap on an empty slot stays in the cave, and only says so', async ({ page
   await expect(lobbyRoot(page)).toHaveAttribute('data-lobby-state', 'ready');
 });
 
+test.describe("an empty slot's readout, and its light on the rock", () => {
+  /** The middle of the 3D view, where the crosshair is. */
+  async function viewCentre(page: Page): Promise<{ x: number; y: number }> {
+    const box = await lobbyRoot(page).locator('canvas').boundingBox();
+    if (box === null) {
+      throw new Error('the lobby has no canvas on screen');
+    }
+    return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  }
+
+  test('the mouse over an empty slot puts its readout in it and lights the rock; off it, both go', async ({ page }) => {
+    test.setTimeout(120_000);
+    // Facing the dark slot from the spawn point, so it is under the crosshair.
+    await seedCamera(page, { ...INITIAL_CAMERA, yaw: facing(DARK_SLOT) });
+    await openLobby(page);
+    const root = lobbyRoot(page);
+    await expect(root).toHaveAttribute('data-focus', `empty:${DARK_SLOT}`);
+    await expect(root).toHaveAttribute('data-hover-slot', '');
+    await expect(root).toHaveAttribute('data-hover-glow', 'off');
+
+    const centre = await viewCentre(page);
+    await page.mouse.move(centre.x, centre.y + 40, { steps: 2 });
+    await page.mouse.move(centre.x, centre.y, { steps: 2 });
+    await expect(root).toHaveAttribute('data-hover-slot', String(DARK_SLOT));
+    await expect(root).toHaveAttribute('data-hover-glow', 'on');
+
+    // Down onto the floor: nothing under the mouse, so no readout and no light.
+    await page.mouse.move(centre.x, centre.y * 1.8, { steps: 3 });
+    await expect(root).toHaveAttribute('data-hover-slot', '');
+    await expect(root).toHaveAttribute('data-hover-glow', 'off');
+
+    // Back on it, then off the 3D view altogether (onto Exit): gone again.
+    await page.mouse.move(centre.x, centre.y, { steps: 3 });
+    await expect(root).toHaveAttribute('data-hover-slot', String(DARK_SLOT));
+    await page.getByRole('link', { name: 'Exit the cave' }).hover();
+    await expect(root).toHaveAttribute('data-hover-slot', '');
+    await expect(root).toHaveAttribute('data-hover-glow', 'off');
+  });
+
+  test('a lit panel never shows one', async ({ page }) => {
+    test.setTimeout(90_000);
+    await openLobby(page);
+    const root = lobbyRoot(page);
+    await expect(root).toHaveAttribute('data-focus', 'data');
+
+    const centre = await viewCentre(page);
+    await page.mouse.move(centre.x, centre.y + 30, { steps: 2 });
+    await page.mouse.move(centre.x, centre.y, { steps: 2 });
+    // The hover was read (the Data screen takes the pointer cursor), and still no readout.
+    await expect
+      .poll(() => lobbyRoot(page).locator('canvas').evaluate((canvas) => (canvas as HTMLCanvasElement).style.cursor))
+      .toBe('pointer');
+    await page.waitForTimeout(2_000);
+    await expect(root).toHaveAttribute('data-hover-slot', '');
+    await expect(root).toHaveAttribute('data-hover-glow', 'off');
+  });
+});
+
 test.describe('reduced motion', () => {
   test('data-motion follows the preference: reduced, then full, then reduced again', async ({ page }) => {
     await gotoLobby(page);
@@ -464,14 +522,22 @@ test.describe('on a phone', () => {
     }
   });
 
-  test('a tap on an empty slot stays in the cave, and only says so', async ({ page }) => {
+  test('a tap on an empty slot stays in the cave, says so, and shows its readout for about 3 s', async ({ page }) => {
     test.setTimeout(90_000);
     expect(appAt(slotFromIndex(EMPTY_ABOVE_DATA)), `slot ${EMPTY_ABOVE_DATA} must hold no app`).toBeUndefined();
     await openLobby(page);
+    const root = lobbyRoot(page);
 
     await tapScene(page, await slotOnScreen(page, EMPTY_ABOVE_DATA), { touch: true });
+    const tapped = Date.now();
     await expect(page.getByRole('status').filter({ hasText: 'Empty slot' })).toBeVisible();
-    await page.waitForTimeout(1_500);
+    // No hover on a touch screen: the tap itself shows the readout, and the light behind it.
+    await expect(root).toHaveAttribute('data-hover-slot', String(EMPTY_ABOVE_DATA));
+    await expect(root).toHaveAttribute('data-hover-glow', 'on');
+    // ...for about three seconds.
+    await expect(root).toHaveAttribute('data-hover-slot', '', { timeout: 15_000 });
+    expect(Date.now() - tapped).toBeGreaterThanOrEqual(2_500);
+    await expect(root).toHaveAttribute('data-hover-glow', 'off');
     await expect(page).toHaveURL(/\/apps$/);
   });
 });
