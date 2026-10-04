@@ -6,9 +6,14 @@ import {
   DATA_LINK,
   DATA_SLOT,
   clickThrough,
+  directoryBlock,
+  expectInSight,
+  expectOutOfSight,
   expectReady,
   expectWebGL2,
   gotoLobby,
+  headingBlock,
+  holdFlags,
   holdKey,
   lobbyRoot,
   openLobby,
@@ -94,13 +99,32 @@ test('signed in, the lobby comes up at the centre, facing the Data screen, alone
   await expect(page.getByRole('button', { name: 'Voice unavailable' })).toBeDisabled();
 });
 
-test('the heading, the lede and the directory are unchanged, and list the Data app and the empty slots', async ({
+test('while the wall is the page the heading, the lede and the directory are out of sight, from the first render on', async ({
   page,
 }) => {
+  test.setTimeout(90_000);
+  await expectWebGL2(page);
+  // The flags answer held back: the lobby stays as the server rendered it, loading.
+  const release = await holdFlags(page);
   await gotoLobby(page);
+  const root = lobbyRoot(page);
+  await expect(root).toHaveAttribute('data-lobby-state', 'loading');
+  await expectOutOfSight(headingBlock(page));
+  await expectOutOfSight(directoryBlock(page));
 
-  await expect(page.getByRole('heading', { name: 'Apps', level: 1 })).toBeVisible();
-  await expect(page.getByText('Everything the community has built, on one wall.')).toBeVisible();
+  // Already so in the server's markup, so nothing flashes before the client takes over.
+  const html = await (await page.context().request.get('/apps')).text();
+  expect(html).toContain('data-heading="aside"');
+  expect(html).toContain('data-directory="aside"');
+
+  release();
+  await expectReady(page);
+  await expectOutOfSight(headingBlock(page));
+  await expectOutOfSight(directoryBlock(page));
+
+  // Still the page, for a screen reader: its h1, its lede, and the list of apps and empty slots.
+  await expect(page.getByRole('heading', { name: 'Apps', level: 1 })).toHaveCount(1);
+  await expect(page.getByText('Everything the community has built, on one wall.')).toHaveCount(1);
   const link = directoryLink(page);
   await expect(link).toHaveAttribute('href', '/apps/data');
   await expect(link).toHaveAttribute('data-slug', 'data');
@@ -109,23 +133,32 @@ test('the heading, the lede and the directory are unchanged, and list the Data a
     page
       .getByRole('navigation', { name: 'Apps', exact: true })
       .getByText('2879 empty slots are waiting for the next proposal.', { exact: true }),
-  ).toBeVisible();
+  ).toHaveCount(1);
 });
 
-test('with the wall on screen the directory steps out of sight, and comes back for a keyboard', async ({ page }) => {
+test('a keyboard Tab into the directory shows it, for as long as focus is in it', async ({
+  page,
+}) => {
   test.setTimeout(90_000);
   await openLobby(page);
-  const directory = lobbyRoot(page).locator('[data-directory]');
-  await expect(directory).toHaveAttribute('data-directory', 'aside');
-  // Out of sight: a clipped one-pixel box. Still in the page, so a screen reader still has the list.
-  const hidden = await directory.boundingBox();
-  expect(hidden !== null && hidden.width <= 1 && hidden.height <= 1).toBe(true);
-  await expect(page.getByRole('navigation', { name: 'Apps', exact: true })).toHaveCount(1);
-  // A keyboard user tabbing in brings it back for as long as focus is inside it.
-  await directoryLink(page).focus();
-  await expect.poll(async () => (await directory.boundingBox())?.width ?? 0).toBeGreaterThan(100);
-  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
-  await expect.poll(async () => (await directory.boundingBox())?.width ?? 0).toBeLessThanOrEqual(1);
+  const directory = directoryBlock(page);
+  await expectOutOfSight(directory);
+
+  // From the page's h1, where a keyboard user arriving from an app starts, Tab goes into the directory.
+  await page.getByRole('heading', { name: 'Apps', level: 1 }).evaluate((h1) => {
+    h1.setAttribute('tabindex', '-1');
+    (h1 as HTMLElement).focus();
+  });
+  await page.keyboard.press('Tab');
+  await expect(directoryLink(page)).toBeFocused();
+  await expectInSight(directory);
+  // The heading block never shows on the wall.
+  await expectOutOfSight(headingBlock(page));
+
+  // On out of it, and it steps out of sight again.
+  await page.keyboard.press('Tab');
+  await expect(directoryLink(page)).not.toBeFocused();
+  await expectOutOfSight(directory);
 });
 
 test.describe('signed out, the lobby asks for a sign-in first', () => {
@@ -218,14 +251,31 @@ test('a round trip to the Data app comes back to the spot it left from', async (
 
   await clickThrough(page.getByRole('link', { name: 'Back to the lobby' }), /\/apps\?from=data$/);
   await expectReady(page);
-  // Back from an app, focus goes to that app's directory link, not the h1, so Tab carries on from there.
-  await expect(directoryLink(page)).toBeFocused();
+  // Back from an app to the wall, focus goes to the page's h1 (SiteChrome), not into the
+  // directory, so nothing that is out of sight shows itself on arrival.
+  await expect(page.getByRole('heading', { name: 'Apps', level: 1 })).toBeFocused();
+  await expectOutOfSight(headingBlock(page));
+  await expectOutOfSight(directoryBlock(page));
 
   const back = await readCamera(page);
   for (const axis of ['x', 'y', 'z', 'yaw'] as const) {
     const off = Math.abs(back[axis] - saved[axis]);
     expect(off, `${axis}: back at ${back[axis]}, saved ${saved[axis]}`).toBeLessThanOrEqual(0.01);
   }
+
+  // From the h1 the wall answers the keyboard as before: the arrow keys turn the view.
+  const turned = await holdKey(page, 'ArrowRight', 200, (camera) => camera.yaw !== back.yaw);
+  expect(turned.yaw).not.toBe(back.yaw);
+});
+
+test('opened at /apps?from=data, the wall is the page: nothing out of sight shows, and focus stays put', async ({
+  page,
+}) => {
+  test.setTimeout(90_000);
+  await openLobby(page, '/apps?from=data');
+  await expectOutOfSight(headingBlock(page));
+  await expectOutOfSight(directoryBlock(page));
+  await expect(directoryLink(page)).not.toBeFocused();
 });
 
 test('tapping a dark slot opens /propose for that slot', async ({ page }) => {
@@ -298,10 +348,14 @@ test.describe('without the 3D view', () => {
     await expect(root).toHaveAttribute('data-lobby-state', 'unsupported');
     await expect(page.getByText("This browser can't show the 3D lobby.")).toBeVisible();
     await expect(root.locator('canvas')).toHaveCount(0);
+    // The list is the only way in now, so the page is its heading, lede and directory.
+    await expect(page.getByRole('heading', { name: 'Apps', level: 1 })).toBeVisible();
+    await expectInSight(headingBlock(page));
+    await expectInSight(directoryBlock(page));
     await clickThrough(directoryLink(page), /\/apps\/data$/);
   });
 
-  test('the apps_lobby flag off: the directory and one line saying so', async ({ page }) => {
+  test('the apps_lobby flag off: the heading, the directory and one line saying so', async ({ page }) => {
     // The practice build's fallback is every flag on, so off has to be served.
     await serveFlags(page, { apps_lobby: false });
     await gotoLobby(page);
@@ -310,7 +364,20 @@ test.describe('without the 3D view', () => {
     await expect(root).toHaveAttribute('data-lobby-state', 'off');
     await expect(page.getByText('The 3D lobby is switched off right now.')).toBeVisible();
     await expect(root.locator('canvas')).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: 'Apps', level: 1 })).toBeVisible();
+    await expect(page.getByText('Everything the community has built, on one wall.')).toBeVisible();
+    await expectInSight(directoryBlock(page));
     await expect(directoryLink(page)).toHaveAttribute('href', '/apps/data');
+  });
+
+  test('the apps_lobby flag off, back from an app: focus goes to its directory link, the way in here', async ({
+    page,
+  }) => {
+    await serveFlags(page, { apps_lobby: false });
+    await gotoLobby(page, '/apps?from=data');
+    await expect(lobbyRoot(page)).toHaveAttribute('data-lobby-state', 'off');
+    await expect(directoryLink(page)).toBeFocused();
+    await expect(directoryLink(page)).toHaveAttribute('data-arrival-focus', '');
   });
 
   test('a lost WebGL context stops the view and says so; the directory stays', async ({ page }) => {
@@ -324,6 +391,8 @@ test.describe('without the 3D view', () => {
 
     await expect(lobbyRoot(page)).toHaveAttribute('data-lobby-state', 'lost');
     await expect(page.getByText('The 3D view stopped. Reload to try again.')).toBeVisible();
+    await expectInSight(headingBlock(page));
+    await expectInSight(directoryBlock(page));
     await expect(directoryLink(page)).toHaveAttribute('href', '/apps/data');
   });
 
@@ -349,6 +418,8 @@ test.describe('without the 3D view', () => {
 
     await expect(lobbyRoot(page)).toHaveAttribute('data-lobby-state', 'lost', { timeout: 60_000 });
     await expect(page.getByText('The 3D view stopped. Reload to try again.')).toBeVisible();
+    await expectInSight(headingBlock(page));
+    await expectInSight(directoryBlock(page));
     await expect(directoryLink(page)).toHaveAttribute('href', '/apps/data');
   });
 });

@@ -7,7 +7,11 @@
  * The heading and the directory are rendered here, on the server, so the
  * page reads and works the same with no WebGL, no JavaScript, or the lobby
  * switched off: one link per lit app, and a count of the empty slots
- * waiting for proposals. In the 3D view they float over the cave.
+ * waiting for proposals. While the 3D wall is the page they are out of
+ * sight (Lobby.tsx): still the page's h1 and its list for screen readers,
+ * and the list shows while a keyboard user is in it.
+ *
+ * Signed in only: the middleware sends a signed-out visitor to /signin.
  */
 
 import { APPS, WALL } from '@forge/lobby';

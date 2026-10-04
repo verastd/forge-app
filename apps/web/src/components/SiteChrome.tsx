@@ -15,9 +15,10 @@
  * (a nav link, the AppBar's "← Lobby", a panel in the lobby) is usually gone,
  * which would drop keyboard and screen-reader users back at the top of the
  * document. So focus moves to the new page's `main h1` instead, or to the
- * element the page marks `data-arrival-focus` (the lobby marks the directory
- * link of the app you came back from), retrying for a few frames while the
- * page is still rendering it.
+ * element the page marks `data-arrival-focus` (the lobby without its 3D wall
+ * marks the directory link of the app you came back from; with the wall it
+ * marks nothing, and the h1 takes focus), retrying for a few frames while
+ * the page is still rendering it.
  */
 
 import { chromeModeFor } from '@forge/lobby';

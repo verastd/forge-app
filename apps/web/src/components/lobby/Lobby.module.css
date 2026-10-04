@@ -145,9 +145,13 @@
   max-width: min(460px, 100%);
 }
 
-/* The directory while the wall is on screen: out of sight, still read by
-   screen readers, and back in view while keyboard focus is inside it. */
-.directoryAside:not(:focus-within) {
+/* While the wall is the page: the heading and lede out of sight, still read
+   by screen readers, and the directory the same until a keyboard user is in
+   it. `:focus-visible`, not `:focus-within`, so a mouse never brings it back.
+   A browser without `:has()` drops the directory's rule and shows it, which
+   beats a keyboard user focused on something they can't see. */
+.aside,
+.directoryAside:not(:has(:focus-visible)) {
   position: absolute;
   width: 1px;
   height: 1px;

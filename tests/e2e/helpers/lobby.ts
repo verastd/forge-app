@@ -96,6 +96,36 @@ export async function expectReady(page: Page, timeout = READY_TIMEOUT): Promise<
   await expect(lobbyRoot(page)).toHaveAttribute('data-lobby-state', 'ready', { timeout });
 }
 
+/** The page's heading block (the h1 and its lede) and its directory, as Lobby.tsx wraps them. */
+export function headingBlock(page: Page): Locator {
+  return lobbyRoot(page).locator('[data-heading]');
+}
+
+export function directoryBlock(page: Page): Locator {
+  return lobbyRoot(page).locator('[data-directory]');
+}
+
+/**
+ * Out of sight the way a visually hidden element is: in the page (so in the
+ * accessibility tree) but clipped to a box of a pixel at most. Playwright's
+ * own `toBeVisible` counts a 1 px box as visible, so this reads the box.
+ */
+export async function expectOutOfSight(locator: Locator): Promise<void> {
+  await expect(locator).toHaveCount(1);
+  await expect
+    .poll(async () => {
+      const box = await locator.boundingBox();
+      return box === null ? 0 : Math.max(box.width, box.height);
+    })
+    .toBeLessThanOrEqual(1);
+}
+
+/** On screen: visible, and a real box, not a clipped pixel. */
+export async function expectInSight(locator: Locator): Promise<void> {
+  await expect(locator).toBeVisible();
+  await expect.poll(async () => (await locator.boundingBox())?.width ?? 0).toBeGreaterThan(40);
+}
+
 /** `path` as a pattern for the end of a URL, every regex character escaped. */
 export function urlEndingWith(path: string): RegExp {
   return new RegExp(`${path.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}$`);
@@ -124,7 +154,7 @@ export async function openLobby(page: Page, path = '/apps'): Promise<void> {
   await expectReady(page);
 }
 
-type FlagName =
+export type FlagName =
   | 'csv_export'
   | 'contribute_bridge'
   | 'upland_data'
@@ -140,7 +170,14 @@ type FlagName =
  * read every missing flag as off, `apps_lobby` included.
  */
 export async function serveFlags(page: Page, overrides: Partial<Record<FlagName, boolean>> = {}): Promise<void> {
-  const flags = {
+  const flags = allFlags(overrides);
+  await page.route('**/api/flags', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(flags) }),
+  );
+}
+
+function allFlags(overrides: Partial<Record<FlagName, boolean>> = {}): Record<FlagName, boolean> {
+  return {
     csv_export: true,
     contribute_bridge: true,
     upland_data: true,
@@ -151,9 +188,24 @@ export async function serveFlags(page: Page, overrides: Partial<Record<FlagName,
     proposals: true,
     ...overrides,
   };
-  await page.route('**/api/flags', (route) =>
-    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(flags) }),
-  );
+}
+
+/**
+ * Holds the flags answer until the returned function is called, then serves
+ * every flag on: until then the lobby stays where the server's first render
+ * left it, `loading`. Release it within 8 s, the flag client's own timeout
+ * (packages/flags), or the lobby goes on without the answer.
+ */
+export async function holdFlags(page: Page): Promise<() => void> {
+  let release: () => void = () => undefined;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route('**/api/flags', async (route) => {
+    await held;
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(allFlags()) });
+  });
+  return release;
 }
 
 /** The practice account, signed in through the real `/signin` page, landing on `/apps`. */
