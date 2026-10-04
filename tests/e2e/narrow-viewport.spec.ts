@@ -39,7 +39,7 @@ for (const path of ['/', '/propose']) {
 
 test('/apps, signed in (it needs a sign-in), fits the screen, its nav folded into a Menu button', async ({ page }) => {
   await gotoLobby(page);
-  const menu = page.getByRole('button', { name: 'Menu' });
+  const menu = page.getByRole('button', { name: 'Menu', exact: true });
   await expect(menu).toBeVisible();
   await expectNoSideScroll(page);
   // Hydrated: the nav knows it is on a narrow screen.

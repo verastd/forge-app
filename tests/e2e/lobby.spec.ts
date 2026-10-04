@@ -5,6 +5,7 @@ import { INITIAL_CAMERA, appAt, slotFromIndex } from '../../packages/lobby/dist/
 import {
   DATA_LINK,
   DATA_SLOT,
+  EMPTY_ABOVE_DATA,
   clickThrough,
   directoryBlock,
   expectInSight,
@@ -24,6 +25,7 @@ import {
   serveFlags,
   signInToLobby,
   slotOnScreen,
+  tapScene,
   tapThrough,
 } from './helpers/lobby';
 import { demoSignIn, signInAs } from './helpers/session';
@@ -278,28 +280,18 @@ test('opened at /apps?from=data, the wall is the page: nothing out of sight show
   await expect(directoryLink(page)).not.toBeFocused();
 });
 
-test('tapping a dark slot opens /propose for that slot', async ({ page }) => {
+test('a tap on an empty slot stays in the cave, and only says so', async ({ page }) => {
   test.setTimeout(90_000);
   expect(appAt(slotFromIndex(DARK_SLOT)), `slot ${DARK_SLOT} must hold no app`).toBeUndefined();
   await openLobby(page);
 
-  await tapThrough(page, await slotOnScreen(page, DARK_SLOT), new RegExp(`/propose\\?slot=${DARK_SLOT}$`));
-  await expect(page.getByText(`Slot ${DARK_SLOT} is free.`)).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Propose', level: 1 })).toBeFocused();
-});
-
-test("/propose?slot= puts its note after the heading and lede, so a reader starting at the focused h1 reaches it", async ({
-  page,
-}) => {
-  await page.goto(`/propose?slot=${DARK_SLOT}`);
-  await expect(page.getByText(`Slot ${DARK_SLOT} is free.`)).toBeVisible();
-
-  const texts = await page.locator('main').evaluate((main) => [...main.querySelectorAll('h1, p')].map((el) => el.textContent ?? ''));
-  expect(texts.slice(0, 3)).toEqual([
-    'Propose',
-    'Where FORGE decides what to build next. A member brings an idea, another seconds it, and the floor decides it together, in the open.',
-    `Slot ${DARK_SLOT} is free. Bring a proposal to fill it.`,
-  ]);
+  await tapScene(page, await slotOnScreen(page, DARK_SLOT));
+  await expect(page.getByRole('status').filter({ hasText: 'Empty slot' })).toBeVisible();
+  await expect(lobbyRoot(page)).toHaveAttribute('data-focus', `empty:${DARK_SLOT}`);
+  // Nowhere to go: still the lobby a moment later, still up.
+  await page.waitForTimeout(1_500);
+  await expect(page).toHaveURL(/\/apps$/);
+  await expect(lobbyRoot(page)).toHaveAttribute('data-lobby-state', 'ready');
 });
 
 test.describe('reduced motion', () => {
@@ -470,6 +462,17 @@ test.describe('on a phone', () => {
     } finally {
       await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
     }
+  });
+
+  test('a tap on an empty slot stays in the cave, and only says so', async ({ page }) => {
+    test.setTimeout(90_000);
+    expect(appAt(slotFromIndex(EMPTY_ABOVE_DATA)), `slot ${EMPTY_ABOVE_DATA} must hold no app`).toBeUndefined();
+    await openLobby(page);
+
+    await tapScene(page, await slotOnScreen(page, EMPTY_ABOVE_DATA), { touch: true });
+    await expect(page.getByRole('status').filter({ hasText: 'Empty slot' })).toBeVisible();
+    await page.waitForTimeout(1_500);
+    await expect(page).toHaveURL(/\/apps$/);
   });
 });
 

@@ -20,15 +20,18 @@
  *   button, and "Rejoin here" after the lobby was opened in another tab or
  *   device, are the only other things that talk to it. The button shows the
  *   feed's own word on the mic, which a reconnect can turn off.
- * - Opening: a tap on a lit panel saves the camera and opens the app; a tap
- *   on an empty slot opens /propose for that slot. Any visit to /apps starts
+ * - The cave is its own experience: a tap on a lit panel saves the camera and
+ *   opens the app; a tap on an empty slot stays in the cave and only says so
+ *   (the toast). Exit, top left whenever the wall is the page, is the other
+ *   way out: home, to `/`, which unmounts all of this, the presence and
+ *   voice feed with it, as any navigation does. Any visit to /apps starts
  *   from the camera this tab saved, if it saved one; otherwise at the
  *   centre, facing the app named by `?from=<slug>`. Coming back from an app
  *   (`?from=<slug>`) to the page without its wall puts keyboard focus on
  *   that app's directory link; with the wall, SiteChrome's arrival focus on
  *   the page's h1 stands (see ArrivalFocus).
  * - The veil, the hint, the toast, the touch stick and the lift buttons,
- *   as in the prototype.
+ *   as in the prototype, and Exit.
  *
  * The root carries `data-lobby` and the state attributes e2e reads:
  * `data-lobby-state`, `data-focus`, `data-motion`, `data-peers`,
@@ -48,6 +51,7 @@ import {
 } from '@forge/lobby';
 import type { CameraState } from '@forge/lobby';
 import dynamic from 'next/dynamic';
+import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Component, Suspense, useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { ReactNode, RefObject } from 'react';
@@ -323,19 +327,19 @@ export function Lobby({ heading, directory }: { heading: ReactNode; directory: R
   // The chrome around the lobby (SiteChrome's lobby nav) follows its state.
   useEffect(() => () => publishLobbyState('none'), []);
 
+  /** The cave is its own experience: nothing in it leaves but a lit app and Exit. */
   const open = (hit: Hit, pose: CameraState): void => {
-    saveCamera(pose);
-    if (hit.lit) {
-      const app = appBySlug(hit.slug);
-      if (!app) {
-        return;
-      }
-      say(`Opening ${app.title}`);
-      router.push(app.route);
-    } else {
-      say('Empty slot. Propose something for it.');
-      router.push(`/propose?slot=${hit.slot}`);
+    if (!hit.lit) {
+      say('Empty slot');
+      return;
     }
+    const app = appBySlug(hit.slug);
+    if (!app) {
+      return;
+    }
+    saveCamera(pose);
+    say(`Opening ${app.title}`);
+    router.push(app.route);
   };
 
   const events: SceneEvents = {
@@ -446,6 +450,13 @@ export function Lobby({ heading, directory }: { heading: ReactNode; directory: R
 
       <div className={styles.overlay}>
         <div className={styles.intro}>
+          {/* The way out of the cave, while the wall is the page: home. Without the
+              wall the page is a normal page, with the site nav, so it has none. */}
+          {!fallback && (
+            <Link href="/" className={styles.exit} aria-label="Exit the cave">
+              Exit
+            </Link>
+          )}
           {/* While the wall is the page, from the server's first render on, the wall is
               the heading and the directory: both step out of sight but stay in the page
               for screen readers (the h1 is still the page's heading), and the directory

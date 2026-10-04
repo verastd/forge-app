@@ -1,11 +1,22 @@
 import { expect, test } from '@playwright/test';
 import type { Locator, Page } from '@playwright/test';
 
-import { expectReady, expectWebGL2, gotoLobby, holdFlags, lobbyRoot, openLobby } from './helpers/lobby';
+import {
+  EMPTY_ABOVE_DATA,
+  expectReady,
+  expectWebGL2,
+  gotoLobby,
+  holdFlags,
+  lobbyRoot,
+  openLobby,
+  slotOnScreen,
+  tapScene,
+} from './helpers/lobby';
 
 /**
  * The page chrome around the 3D lobby at /apps (project `chromium-demo`):
- * the site nav, which steps out of the cave's way (LobbyNav.tsx).
+ * the site nav, which steps out of the cave's way (LobbyNav.tsx), and the
+ * cave's own way out, Exit (Lobby.tsx).
  *
  * - A desktop: the bar is there on arrival, slides up once the wall is up,
  *   and comes back while the pointer is in a strip along the top edge or on
@@ -13,6 +24,9 @@ import { expectReady, expectWebGL2, gotoLobby, holdFlags, lobbyRoot, openLobby }
  * - A phone: a "Menu" button in the top left corner, which opens the nav as
  *   a panel.
  * - Every other page keeps the normal nav.
+ * - Exit is on screen while the wall is the page, by keyboard too, goes
+ *   home and leaves nothing of the cave running; it and the menu button
+ *   keep clear of the HUD on a desktop and a phone either way up.
  *
  * playwright.config.ts asks every test for reduced motion, so the bar
  * appears and disappears without sliding here unless a test opts out.
@@ -28,6 +42,24 @@ function mainNav(page: Page): Locator {
 
 function account(page: Page): Locator {
   return page.getByRole('button', { name: 'Account: you' });
+}
+
+function exit(page: Page): Locator {
+  return page.getByRole('link', { name: 'Exit the cave' });
+}
+
+type Box = { x: number; y: number; width: number; height: number };
+
+async function boxOf(locator: Locator, what: string): Promise<Box> {
+  const box = await locator.boundingBox();
+  if (box === null) {
+    throw new Error(`${what} has no box on screen`);
+  }
+  return box;
+}
+
+function overlap(a: Box, b: Box): boolean {
+  return a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
 }
 
 test.describe('on a desktop', () => {
@@ -182,7 +214,7 @@ test.describe('on a phone', () => {
     await gotoLobby(page);
     const header = lobbyHeader(page);
     await expect(header).toHaveAttribute('data-nav-mode', 'menu');
-    const button = page.getByRole('button', { name: 'Menu' });
+    const button = page.getByRole('button', { name: 'Menu', exact: true });
     await expect(button).toBeVisible();
     const box = await button.boundingBox();
     expect(box?.width ?? 0).toBeGreaterThanOrEqual(44);
@@ -218,7 +250,7 @@ test.describe('on a phone', () => {
   test('a tap outside closes it and goes no further; a link in it goes where it points', async ({ page }) => {
     test.setTimeout(90_000);
     await openLobby(page);
-    const button = page.getByRole('button', { name: 'Menu' });
+    const button = page.getByRole('button', { name: 'Menu', exact: true });
 
     await button.tap();
     await expect(button).toHaveAttribute('aria-expanded', 'true');
@@ -239,7 +271,113 @@ test('every other page keeps the normal nav: no menu button, no strip, nothing t
     await page.goto(path);
     await expect(mainNav(page)).toBeVisible();
     await expect(page.locator('header[data-chrome]')).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Menu' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Menu', exact: true })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Show the site menu' })).toHaveCount(0);
+  }
+});
+
+test.describe('Exit', () => {
+  test('is on screen from arrival on, reachable by keyboard, and goes home, leaving nothing of the cave running', async ({
+    page,
+  }) => {
+    test.setTimeout(90_000);
+    // Every BroadcastChannel the page opens (the practice build's presence feed is one), until closed.
+    await page.addInitScript(() => {
+      const open = new Set<BroadcastChannel>();
+      const Native = window.BroadcastChannel;
+      class Tracked extends Native {
+        constructor(name: string) {
+          super(name);
+          open.add(this);
+        }
+
+        close(): void {
+          open.delete(this);
+          super.close();
+        }
+      }
+      Object.assign(window, { BroadcastChannel: Tracked, __openChannels: open });
+    });
+    const openChannels = (): Promise<number> =>
+      page.evaluate(() => (window as unknown as { __openChannels: Set<unknown> }).__openChannels.size);
+
+    await expectWebGL2(page);
+    const release = await holdFlags(page);
+    await gotoLobby(page);
+    await expect(exit(page)).toBeVisible();
+    await expect(exit(page)).toHaveText('Exit');
+    await expect(exit(page)).toHaveAttribute('href', '/');
+    release();
+    await expectReady(page);
+    await expect(exit(page)).toBeVisible();
+
+    // In the cave: the presence feed up, the scene's canvas with its context.
+    await expect(lobbyRoot(page)).toHaveAttribute('data-feed', 'local');
+    expect(await openChannels()).toBe(1);
+    const canvas = await lobbyRoot(page).locator('canvas').elementHandle();
+
+    // By keyboard: the stop just before the page's h1, where arrival focus puts a keyboard user.
+    await page.getByRole('heading', { name: 'Apps', level: 1 }).evaluate((h1) => {
+      h1.setAttribute('tabindex', '-1');
+      (h1 as HTMLElement).focus();
+    });
+    await page.keyboard.press('Shift+Tab');
+    await expect(exit(page)).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(page).toHaveURL(/:\d+\/$/);
+    await expect(page.locator('[data-lobby]')).toHaveCount(0);
+
+    // Nothing left running: the feed's channel closed, the canvas gone and its context released.
+    expect(await openChannels()).toBe(0);
+    expect(
+      await canvas?.evaluate((element) => ({
+        connected: element.isConnected,
+        lost: (element as HTMLCanvasElement).getContext('webgl2')?.isContextLost() ?? true,
+      })),
+    ).toEqual({ connected: false, lost: true });
+  });
+
+  for (const { width, height, touch } of [
+    { width: 1280, height: 720, touch: false },
+    { width: 390, height: 844, touch: true },
+    { width: 844, height: 390, touch: true },
+  ]) {
+    test.describe(`at ${width}×${height}${touch ? ', touch' : ''}`, () => {
+      test.use({ viewport: { width, height }, hasTouch: touch, isMobile: touch });
+
+      test('Exit and the menu button keep clear of the stick, the lift buttons, the people panel and the toast', async ({
+        page,
+      }) => {
+        test.setTimeout(90_000);
+        await openLobby(page);
+        // The toast, as a tap on an empty slot brings it.
+        await tapScene(page, await slotOnScreen(page, EMPTY_ABOVE_DATA), { touch });
+        const toast = page.getByRole('status').filter({ hasText: 'Empty slot' });
+        await expect(toast).toBeVisible();
+
+        const corner: Record<string, Box> = { Exit: await boxOf(exit(page), 'Exit') };
+        const hud: Record<string, Box> = {
+          'the people panel': await boxOf(page.getByRole('complementary', { name: 'People nearby' }), 'the people panel'),
+          'the toast': await boxOf(toast, 'the toast'),
+        };
+        if (touch) {
+          corner['the menu button'] = await boxOf(page.getByRole('button', { name: 'Menu', exact: true }), 'the menu button');
+          hud['the stick'] = await boxOf(lobbyRoot(page).locator('[class*="stick"]'), 'the stick');
+          hud['Rise'] = await boxOf(page.getByRole('button', { name: 'Rise' }), 'Rise');
+          hud['Fall'] = await boxOf(page.getByRole('button', { name: 'Fall' }), 'Fall');
+          expect(overlap(corner.Exit as Box, corner['the menu button'] as Box), 'Exit overlaps the menu button').toBe(false);
+        } else {
+          await expect(page.getByRole('button', { name: 'Menu', exact: true })).toBeHidden();
+        }
+        for (const [name, box] of Object.entries(corner)) {
+          expect(box.x >= 0 && box.y >= 0 && box.x + box.width <= width && box.y + box.height <= height, `${name} is on screen`).toBe(
+            true,
+          );
+          for (const [other, otherBox] of Object.entries(hud)) {
+            expect(overlap(box, otherBox), `${name} overlaps ${other}`).toBe(false);
+          }
+        }
+      });
+    });
   }
 });

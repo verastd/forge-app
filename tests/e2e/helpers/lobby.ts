@@ -54,6 +54,12 @@ if (data === undefined) {
 /** The Data app's slot on the wall: 0, the bottom panel straight ahead of the spawn point. */
 export const DATA_SLOT = slotIndex(data.slot);
 
+/**
+ * An empty slot in view from the spawn point on any screen, a phone held
+ * upright included: the panel straight above Data's (column 0, row 1).
+ */
+export const EMPTY_ABOVE_DATA = slotIndex({ col: data.slot.col, row: data.slot.row + 1 });
+
 /** The scene camera's vertical field of view, in degrees (createCave.ts's PerspectiveCamera). */
 const FOV_DEGREES = 60;
 
@@ -264,14 +270,19 @@ export async function slotOnScreen(page: Page, index: number, pitch = INITIAL_CA
 
 /**
  * A tap on the 3D view: press and release on one pixel (controls.ts counts
- * anything under 8 px of travel as a tap, not a drag). Checks first that
- * the canvas itself is what's under the point, so a heading or panel
- * floating over the view fails the test by name instead of eating the tap.
+ * anything under 8 px of travel as a tap, not a drag), with the mouse, or a
+ * finger with `touch` (the page needs `hasTouch`). Checks first that the
+ * canvas itself is what's under the point, so a heading or panel floating
+ * over the view fails the test by name instead of eating the tap.
  */
-export async function tapScene(page: Page, point: Point): Promise<void> {
+export async function tapScene(page: Page, point: Point, { touch = false } = {}): Promise<void> {
   const under = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.tagName ?? 'nothing', point);
   expect(under, `the tap at (${point.x.toFixed(0)}, ${point.y.toFixed(0)}) must land on the 3D view`).toBe('CANVAS');
-  await page.mouse.click(point.x, point.y);
+  if (touch) {
+    await page.touchscreen.tap(point.x, point.y);
+  } else {
+    await page.mouse.click(point.x, point.y);
+  }
 }
 
 /**

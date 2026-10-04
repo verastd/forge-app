@@ -24,7 +24,8 @@
 .message,
 .chat,
 .hint,
-.toast {
+.toast,
+.exit {
   font-family: var(--font-mono);
 }
 
@@ -143,6 +144,53 @@
   align-items: flex-start;
   gap: 14px;
   max-width: min(460px, 100%);
+}
+
+/*
+ * The way out of the cave, in its own look: the mic button's mono type,
+ * lines and square corners. Top left, where the heading was, while the wall
+ * is the page: first in the overlay, so it is the page's first stop after
+ * the nav, and the directory, when a keyboard user brings it back, opens
+ * under it. Clear of the people panel (top right, or bottom left at 640 px
+ * and under), the hint, the touch stick, the lift buttons and the toast.
+ */
+.exit {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  height: 44px;
+  padding: 0 16px 0 12px;
+  border: 1px solid rgba(200, 255, 106, 0.35);
+  border-radius: 0;
+  background: rgba(10, 14, 6, 0.6);
+  color: #d8ffb0;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.exit::before {
+  content: '';
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-left: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: translateX(2px) rotate(45deg);
+}
+
+.exit:hover {
+  border-color: #c8ff6a;
+  color: #eaffc4;
+}
+
+.exit:focus-visible {
+  outline: 2px solid #c4ff4a;
+  outline-offset: 2px;
 }
 
 /* While the wall is the page: the heading and lede out of sight, still read
@@ -463,6 +511,13 @@
   /* Clear of the stick and the lift buttons. */
   .toast {
     bottom: 232px;
+  }
+}
+
+/* A touch screen or a narrow one: the site nav is a 44 px menu button in this corner (LobbyNav.module.css), so Exit sits right of it. */
+@media (pointer: coarse), (max-width: 640px) {
+  .exit {
+    margin-left: 52px;
   }
 }
 

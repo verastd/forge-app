@@ -1,9 +1,0 @@
-/* A gold callout: this slot is yours to propose for. */
-.note {
-  padding: 10px 14px;
-  border: 1px solid var(--accent-line);
-  border-radius: var(--radius-sm);
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-weight: 650;
-}
