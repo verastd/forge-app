@@ -1,8 +1,14 @@
 """Saved agent keys (contract §7): what lets "Start it for me" be one click next time.
 
 `FORGE_VAULT_KEY` is the base64 of 32 random bytes (`openssl rand -base64 32`). When it
-is unset or malformed the vault is off: nothing is saved, nothing saved is read or
-listed, and dispatch still works with a key pasted for that one start.
+is unset or malformed the vault is off: nothing is saved and nothing saved is opened, and
+dispatch still works with a key pasted for that one start. Saved keys are still listed
+(hints only) and can still be removed, so their owners can always see and delete them.
+A key that no longer opens (FORGE_VAULT_KEY changed) counts as not saved everywhere, but
+no read ever deletes it: a FORGE_VAULT_KEY set wrong by mistake must not destroy anyone's
+keys. It stays stored until its owner saves a new key for that rail, which replaces it,
+or removes it. Deleting or replacing a key also clears the database's write-ahead log, so
+the old sealed copy doesn't linger there.
 
 Each credential ({key, orgId?, routineUrl?}) is sealed with AES-256-GCM under a per-user
 key, HKDF-SHA256(master, info="forge-vault:v1:<sub>"), with a fresh random 96-bit nonce
@@ -20,6 +26,7 @@ import logging
 import os
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
+from typing import Any
 
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives import hashes
@@ -92,9 +99,10 @@ def hint_for(key: str) -> str:
 
 
 class Vault:
-    """The saved credentials of every user, sealed per user. `enabled` is False when
-    the master key is missing, and then every method behaves as if nothing were saved
-    (except `delete`, which still removes a row)."""
+    """The saved credentials of every user, sealed per user. `enabled` is False when the
+    master key is missing: then nothing is saved or opened, but `list_saved` still shows
+    the hints and `delete` still removes a row. A row that doesn't open under the current
+    master key counts as not saved; only `save` (replacing it) and `delete` remove it."""
 
     def __init__(
         self,
@@ -151,24 +159,16 @@ class Vault:
             "saved_at = excluded.saved_at, last_used_at = NULL",
             (sub, rail, nonce, sealed, hint, saved_at),
         )
+        self._db.checkpoint()  # a key this replaced must not linger in the log
         return SavedCredential(rail=rail, hint=hint, savedAt=saved_at)
 
-    def load(self, sub: str, rail: StartRail) -> RailCredential | None:
-        """The saved credential, or None when there is none, the vault is off, or the
-        row no longer opens (another master key, or tampering)."""
-        if not self.enabled or rail not in SAVABLE_RAILS:
-            return None
-        row = self._db.query_one(
-            "SELECT nonce, ciphertext FROM vault_credentials WHERE sub = ? AND rail = ?",
-            (sub, rail),
-        )
-        if row is None:
-            return None
+    def _open(self, sub: str, rail: str, row: Mapping[str, Any]) -> RailCredential | None:
+        """The credential sealed in `row`, or None when the row no longer opens (another
+        master key, or tampering) or holds no key."""
         try:
             plain = self._aead(sub).decrypt(row["nonce"], row["ciphertext"], self._aad(sub, rail))
             payload = json.loads(plain.decode())
         except (InvalidTag, ValueError, UnicodeDecodeError, TypeError):
-            logger.warning("a saved %s credential could not be opened; ignoring it", rail)
             return None
         key = payload.get("key") if isinstance(payload, dict) else None
         if not isinstance(key, str) or not key:
@@ -181,6 +181,23 @@ class Vault:
             routine_url=url if isinstance(url, str) else None,
         )
 
+    def load(self, sub: str, rail: StartRail) -> RailCredential | None:
+        """The saved credential, or None when there is none, the vault is off, or the row
+        no longer opens (another master key, or tampering). Such a row is kept, as on
+        every read, and reads as none."""
+        if not self.enabled or rail not in SAVABLE_RAILS:
+            return None
+        row = self._db.query_one(
+            "SELECT nonce, ciphertext FROM vault_credentials WHERE sub = ? AND rail = ?",
+            (sub, rail),
+        )
+        if row is None:
+            return None
+        credential = self._open(sub, rail, row)
+        if credential is None:
+            logger.warning("a saved %s credential could not be opened; ignoring it", rail)
+        return credential
+
     def mark_used(self, sub: str, rail: StartRail) -> None:
         self._db.execute(
             "UPDATE vault_credentials SET last_used_at = ? WHERE sub = ? AND rail = ?",
@@ -188,26 +205,41 @@ class Vault:
         )
 
     def delete(self, sub: str, rail: str) -> bool:
-        """Remove the saved credential for (sub, rail). True when one was there."""
+        """Remove the saved credential for (sub, rail); the master key isn't needed. True
+        when one was there."""
         result = self._db.execute(
             "DELETE FROM vault_credentials WHERE sub = ? AND rail = ?", (sub, rail)
         )
+        if result.rowcount > 0:
+            self._db.checkpoint()  # nor may the removed key linger in the log
         return result.rowcount > 0
 
+    def _rows(self, sub: str) -> list[dict[str, Any]]:
+        """The caller's rows on rails that save. With the vault on, only rows that still
+        open; the others are skipped, never deleted on a read."""
+        rows = [
+            row
+            for row in self._db.query_all(
+                "SELECT rail, nonce, ciphertext, hint, saved_at, last_used_at "
+                "FROM vault_credentials WHERE sub = ?",
+                (sub,),
+            )
+            if row["rail"] in SAVABLE_RAILS
+        ]
+        if not self.enabled:
+            return rows
+        return [row for row in rows if self._open(sub, row["rail"], row) is not None]
+
     def saved_rails(self, sub: str) -> set[str]:
+        """The rails with a saved credential FORGE can use: none while the vault is off."""
         if not self.enabled:
             return set()
-        rows = self._db.query_all("SELECT rail FROM vault_credentials WHERE sub = ?", (sub,))
-        return {str(row["rail"]) for row in rows}
+        return {str(row["rail"]) for row in self._rows(sub)}
 
     def list_saved(self, sub: str) -> list[SavedCredential]:
-        """The caller's saved credentials, hints only, in the registry's rail order."""
-        if not self.enabled:
-            return []
-        rows = self._db.query_all(
-            "SELECT rail, hint, saved_at, last_used_at FROM vault_credentials WHERE sub = ?",
-            (sub,),
-        )
+        """The caller's saved credentials, hints only, in the registry's rail order. While
+        the vault is off they are listed all the same: FORGE can't use them then, but
+        their owner can still see and remove them."""
         order: dict[str, int] = {rail: index for index, rail in enumerate(START_RAILS)}
         listed = [
             SavedCredential(
@@ -216,7 +248,6 @@ class Vault:
                 savedAt=row["saved_at"],
                 lastUsedAt=row["last_used_at"],
             )
-            for row in rows
-            if row["rail"] in SAVABLE_RAILS
+            for row in self._rows(sub)
         ]
         return sorted(listed, key=lambda saved: order.get(saved.rail, len(order)))

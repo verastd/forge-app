@@ -1,38 +1,54 @@
 """The start-rail adapters (services/rail_adapters/): the exact request each vendor gets,
 how its answers map, and that a credential never leaks into an error, a log line or a
-redirect. Every vendor is a stand-in on httpx.MockTransport; nothing reaches a network."""
+redirect. Every vendor is a stand-in on httpx.MockTransport; nothing reaches a network
+(the one test that needs a real socket uses a Unix socket in a temporary folder)."""
 
+import base64
 import json
 import logging
+import shutil
+import socket
+import tempfile
+import threading
+import time
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
 import httpx
 import pytest
+from fastapi.testclient import TestClient
 
 from forge_api.models import StartRail
 from forge_api.services.bridge import FixtureTaskSource
 from forge_api.services.brief import branch_name, compile_brief
 from forge_api.services.rail_adapters import ADAPTERS, adapter_for
+from forge_api.services.rail_adapters import base as base_module
 from forge_api.services.rail_adapters.base import (
+    MAX_JSON_DEPTH,
     MAX_RESPONSE_BYTES,
     AdapterError,
     AdapterRequest,
     AdapterResult,
+    JSONTooDeep,
     OutboundCall,
     RailCredential,
     TransportFailure,
     VendorResponse,
     bounded_send,
     https_url,
+    json_body,
     log_failure,
     make_client,
+    parse_json,
     scrub,
+    secret_forms,
     session_ref,
     strip_controls,
     vendor_message,
 )
+from forge_api.services.state import get_state_db
 
 from .bridge_helpers import (
     CURSOR_KEY,
@@ -43,10 +59,13 @@ from .bridge_helpers import (
     OPENHANDS_KEY,
     ROUTINE_TOKEN,
     ROUTINE_URL,
+    BridgeEnv,
     FakeVendor,
+    install_bridge,
     json_response,
     vendor_ok,
 )
+from .conftest import FakeClock
 
 LOGIN = "octo-contributor"
 FORK_URL = f"https://github.com/{LOGIN}/forge-app"
@@ -387,10 +406,93 @@ def test_a_redirect_is_never_followed(rail: StartRail) -> None:
     assert all(request.url.host != "evil.example" for request in vendor.requests)
 
 
+#: 2xx bodies that carry no JSON object FORGE can read (CR-6). The deep one is the
+#: review's probe: 100,000 nested arrays made the parser raise RecursionError, a 500.
+UNREADABLE_SUCCESSES = {
+    "html": b"<html>",
+    "nested 100,000 deep": b"[" * 100_000 + b"]" * 100_000,
+    "nested 33 deep": b'{"agent": ' * 33 + b"{}" + b"}" * 33,
+    "not an object": b'["https://cursor.com/agents/bc-1"]',
+    "not UTF-8": b'{"url": "\xff"}',
+}
+
+
+@pytest.mark.parametrize("body", UNREADABLE_SUCCESSES.values(), ids=list(UNREADABLE_SUCCESSES))
 @pytest.mark.parametrize("rail", RAILS)
-def test_a_non_json_success_is_rail_failed(rail: StartRail) -> None:
-    error = start(rail, on_start(rail, lambda request: httpx.Response(200, content=b"<html>")))
-    assert isinstance(error, AdapterError) and (error.code, error.status) == ("rail_failed", 502)
+def test_a_success_without_readable_json_is_started_without_a_link(
+    rail: StartRail, body: bytes
+) -> None:
+    """The vendor said 2xx, so the session started: calling it a failure would have the
+    contributor start a second one. It just has no link (CR-6)."""
+    vendor = on_start(rail, lambda request: httpx.Response(201, content=body))
+    assert start(rail, vendor) == AdapterResult(None, None)
+
+
+def test_json_deeper_than_the_limit_is_refused_before_it_is_parsed() -> None:
+    nested: Any = parse_json("[" * MAX_JSON_DEPTH + "]" * MAX_JSON_DEPTH)
+    for _ in range(MAX_JSON_DEPTH - 1):
+        nested = nested[0]
+    assert nested == []
+    with pytest.raises(JSONTooDeep):
+        parse_json("[" * (MAX_JSON_DEPTH + 1) + "]" * (MAX_JSON_DEPTH + 1))
+    # Brackets inside strings, escaped quotes included, aren't nesting.
+    assert parse_json(b'{"a": "[[[[\\"{{{{", "b": [1]}') == {"a": '[[[["{{{{', "b": [1]}
+    deep = VendorResponse(200, UNREADABLE_SUCCESSES["nested 100,000 deep"])
+    with pytest.raises(ValueError):
+        deep.json()
+    assert deep.json_object() == {}
+    with pytest.raises(AdapterError) as caught:
+        json_body(deep, vendor="Cursor")
+    assert (caught.value.code, caught.value.status) == ("rail_failed", 502)
+    error = VendorResponse(400, b'{"errors": ' + b"[" * 50_000 + b"]" * 50_000 + b"}")
+    assert vendor_message(error).startswith('{"errors": [[[')  # the raw text, no crash
+
+
+def test_counting_the_depth_stays_linear_on_hostile_text() -> None:
+    # An unterminated string full of escaped quotes: each quote would start a fresh scan
+    # to the end if the pattern needed a closing quote, which is quadratic.
+    hostile = '"' + '\\"' * 300_000
+    started = time.monotonic()
+    with pytest.raises(ValueError):
+        parse_json(hostile)
+    assert time.monotonic() - started < 2.0
+
+
+@pytest.fixture
+def env(monkeypatch: pytest.MonkeyPatch, clock: FakeClock) -> BridgeEnv:
+    return install_bridge(monkeypatch, clock)
+
+
+def test_through_the_bridge_an_unreadable_success_is_a_start_without_a_link(
+    client: TestClient, env: BridgeEnv, user_headers: dict[str, str]
+) -> None:
+    """The review's probe P5 (CR-6): a 201 of 100,000 nested arrays was a 500 after the
+    vendor had started the session; the dispatch stayed `pending` (counting toward the
+    hourly limit), no event was written, and the key the person asked to keep wasn't."""
+    env.vault_on()
+    env.start_rails("cursor")
+    deep = UNREADABLE_SUCCESSES["nested 100,000 deep"]
+    env.vendor.respond = lambda request: httpx.Response(
+        201, content=deep, headers={"content-type": "application/json"}
+    )
+    claimed = client.post("/api/bridge/claim", json={"taskId": 1}, headers=user_headers)
+    assert claimed.status_code == 200, claimed.text
+    started = client.post(
+        "/api/bridge/dispatch",
+        json={
+            "taskId": 1,
+            "rail": "cursor",
+            "credential": {"key": CURSOR_KEY},
+            "saveCredential": True,
+        },
+        headers=user_headers,
+    )
+    assert started.status_code == 200, started.text
+    assert "sessionUrl" not in started.json() and started.json()["credentialSaved"] is True
+    rows = get_state_db().query_all("SELECT rail, mode, outcome FROM bridge_dispatches")
+    assert rows == [{"rail": "cursor", "mode": "start", "outcome": "started"}]
+    status = client.get("/api/bridge/status/1", headers=user_headers).json()
+    assert status["stage"] == "agent_working" and "sessionUrl" not in status
 
 
 @pytest.mark.parametrize("rail", RAILS)
@@ -410,6 +512,68 @@ def test_the_credential_never_reaches_an_error_or_a_log(
     assert len(error.detail) <= 200
     assert "‮" not in error.detail and "\n" not in error.detail
     assert repr(CREDENTIALS[rail]).count(key) == 0  # dataclass repr hides the key
+
+
+@pytest.mark.parametrize("rail", RAILS)
+def test_an_outbound_calls_repr_never_shows_its_credential(rail: StartRail) -> None:
+    """A log line, traceback or error report that shows a call shows no key (CR-11)."""
+    key = CREDENTIALS[rail].key
+    for planned in adapter_for(rail, make_client()).plan(request_for(rail)):
+        shown = repr(planned)
+        assert key not in shown
+        assert "<credential>" in shown and planned.url in shown
+
+
+def test_scrub_removes_every_spelling_of_a_key() -> None:
+    """A key may hold a quote, a backslash or a slash (any printable ASCII is accepted),
+    and a vendor may echo it re-encoded: JSON-escaped and base64 too (CR-11)."""
+    key = 'test-only-quote"back\\slash/0123456789'
+    escaped = json.dumps(key)[1:-1]
+    forms = {
+        "as sent": key,
+        "URL-encoded": quote(key, safe=""),
+        "JSON-escaped": escaped,
+        "JSON-escaped, slash too": escaped.replace("/", "\\/"),
+        "base64": base64.b64encode(key.encode()).decode(),
+        "base64 without padding": base64.b64encode(key.encode()).decode().rstrip("="),
+        "URL-safe base64": base64.urlsafe_b64encode(key.encode()).decode(),
+        "HTTP Basic user name": base64.b64encode(f"{key}:".encode()).decode(),
+    }
+    for name, form in forms.items():
+        assert scrub(f"refused {form} here", [key]) == "refused [redacted] here", name
+    assert set(forms.values()) <= secret_forms(key)
+
+
+def test_a_key_echoed_in_a_vendor_error_list_is_redacted(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The review's probe P1b (CR-11): vendor_message re-encodes an `errors` list with
+    json.dumps, so a key holding a quote or a backslash came out JSON-escaped, a form
+    scrub() didn't look for, and was logged."""
+    key = 'test-only-quote"in\\key-0123456789'
+    body = {"errors": [{"field": "key", "value": key}]}
+    vendor = FakeVendor(respond=lambda request: json_response(400, body))
+    error = start("jules", vendor, RailCredential(key=key))
+    assert isinstance(error, AdapterError)
+    with caplog.at_level(logging.DEBUG):
+        log_failure("jules", "start", error)
+    for text in (error.detail, caplog.text):
+        assert json.dumps(key)[1:-1] not in text and key not in text
+    assert "[redacted]" in error.detail
+
+
+def test_a_key_is_redacted_whole_wherever_it_sits_in_a_long_vendor_error() -> None:
+    """vendor_message used to cut a re-encoded list at 400 characters before scrub() ran:
+    a key across the cut was left half there, and the whitespace folded in front of it
+    pulled that half into the 200 characters that get logged."""
+    key = "test-only-cut-across-the-old-limit-0123456789"
+    body = {"detail": [{"msg": " " * 360, "input": key}]}
+    vendor = on_start("cursor", lambda request: json_response(422, body))
+    error = start("cursor", vendor, RailCredential(key=key))
+    assert isinstance(error, AdapterError) and error.code == "rail_failed"
+    pieces = {key[index : index + 8] for index in range(len(key) - 7)}
+    assert not any(piece in error.detail for piece in pieces), error.detail
+    assert "[redacted]" in error.detail
 
 
 # --- follow-up notes ----------------------------------------------------------------------
@@ -598,6 +762,174 @@ def test_make_client_settings() -> None:
     assert client.timeout.read == 20.0
 
 
+def test_bounded_send_asks_for_an_uncompressed_answer_and_refuses_a_compressed_one() -> None:
+    """A gzip answer under the 1 MB cap could inflate to about 1 GB before the cap was
+    checked (CR-7): FORGE asks for identity, and refuses anything else unread."""
+    sent: list[httpx.Request] = []
+
+    def answering(encoding: str) -> httpx.Client:
+        def handler(request: httpx.Request) -> httpx.Response:
+            sent.append(request)
+            headers = {"content-encoding": encoding} if encoding else {}
+            return httpx.Response(200, content=iter([b"{}"]), headers=headers)
+
+        return httpx.Client(transport=httpx.MockTransport(handler))
+
+    asks_gzip = OutboundCall(
+        method="GET", url="https://vendor.example/x", headers={"accept-encoding": "gzip, br"}
+    )
+    with pytest.raises(TransportFailure) as caught:
+        bounded_send(answering("gzip"), asks_gzip)
+    assert (caught.value.status, caught.value.reason) == (502, "compressed response refused")
+    assert sent[-1].headers.get_list("accept-encoding") == ["identity"]
+    assert bounded_send(answering("identity"), call()).body == b"{}"
+    assert bounded_send(answering(""), call()).body == b"{}"
+    assert sent[-1].headers.get_list("accept-encoding") == ["identity"]
+
+
+@pytest.mark.skipif(not hasattr(socket, "AF_UNIX"), reason="needs Unix sockets")
+def test_the_budget_covers_a_status_line_and_headers_sent_slowly() -> None:
+    """The review's slow-headers probe (CR-7), through httpx's own transport and a real
+    socket: a server sending its status line and headers a byte at a time beats every
+    per-read timeout, so only a deadline over the whole exchange stops it."""
+    folder = tempfile.mkdtemp()  # short: a Unix socket's path is limited to ~100 bytes
+    path = str(Path(folder) / "v.sock")
+    head = (
+        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nX-Pad: "
+        + b"a" * 60
+        + b"\r\nContent-Length: 2\r\n\r\n{}"
+    )
+    stop = threading.Event()
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    server.bind(path)
+    server.listen(1)
+
+    def dribble() -> None:
+        try:
+            connection, _ = server.accept()
+        except OSError:
+            return
+        with connection:
+            connection.recv(65_536)
+            for byte in head:  # about 25 s in all
+                if stop.wait(0.2):
+                    return
+                try:
+                    connection.sendall(bytes([byte]))
+                except OSError:
+                    return
+
+    thread = threading.Thread(target=dribble, daemon=True)
+    thread.start()
+    client = httpx.Client(transport=httpx.HTTPTransport(uds=path))
+    started = time.monotonic()
+    try:
+        with pytest.raises(TransportFailure) as caught:
+            bounded_send(client, call("http://vendor.test/"), total_timeout=1.0)
+        elapsed = time.monotonic() - started
+    finally:
+        stop.set()
+        client.close()
+        server.close()
+        thread.join(5)
+        shutil.rmtree(folder, ignore_errors=True)
+    assert (caught.value.status, caught.value.reason) == (504, "timed out")
+    assert elapsed < 3.0
+
+
+class _FakeStream:
+    def __init__(self, waits: list[tuple[str, float | None]]) -> None:
+        self.waits = waits
+
+    def read(self, max_bytes: int, timeout: float | None = None) -> bytes:
+        self.waits.append(("read", timeout))
+        return b"x"
+
+    def write(self, buffer: bytes, timeout: float | None = None) -> None:
+        self.waits.append(("write", timeout))
+
+    def close(self) -> None:
+        self.waits.append(("close", None))
+
+    def start_tls(
+        self, ssl_context: Any, server_hostname: str | None = None, timeout: float | None = None
+    ) -> "_FakeStream":
+        self.waits.append(("tls", timeout))
+        return self
+
+    def get_extra_info(self, info: str) -> str:
+        return f"info:{info}"
+
+
+class _FakeBackend:
+    def __init__(self) -> None:
+        self.waits: list[tuple[str, float | None]] = []
+        self.slept: list[float] = []
+
+    def connect_tcp(
+        self,
+        host: str,
+        port: int,
+        timeout: float | None = None,
+        local_address: str | None = None,
+        socket_options: Any = None,
+    ) -> _FakeStream:
+        self.waits.append(("tcp", timeout))
+        return _FakeStream(self.waits)
+
+    def connect_unix_socket(
+        self, path: str, timeout: float | None = None, socket_options: Any = None
+    ) -> _FakeStream:
+        self.waits.append(("unix", timeout))
+        return _FakeStream(self.waits)
+
+    def sleep(self, seconds: float) -> None:
+        self.slept.append(seconds)
+
+
+def test_every_socket_wait_is_cut_to_what_is_left_of_the_budget() -> None:
+    fake = _FakeBackend()
+    backend = base_module._DeadlineBackend(fake)
+    backend.connect_tcp("vendor.example", 443, timeout=5.0).read(10, timeout=20.0)
+    assert fake.waits == [("tcp", 5.0), ("read", 20.0)]  # outside a call: untouched
+    fake.waits.clear()
+    budget = base_module._call_deadline.set(time.monotonic() + 0.5)
+    try:
+        stream = backend.connect_tcp("vendor.example", 443, timeout=5.0)
+        tls = stream.start_tls(None, "vendor.example", timeout=5.0)
+        tls.write(b"GET / HTTP/1.1", timeout=20.0)
+        assert tls.read(10, timeout=None) == b"x"
+        backend.connect_unix_socket("/run/v.sock", timeout=5.0).close()
+        assert tls.get_extra_info("socket") == "info:socket"
+        backend.sleep(0.25)
+    finally:
+        base_module._call_deadline.reset(budget)
+    timed = [timeout for kind, timeout in fake.waits if kind != "close"]
+    assert len(timed) == 5 and all(t is not None and 0 < t <= 0.5 for t in timed)
+    assert fake.slept == [0.25]
+    budget = base_module._call_deadline.set(time.monotonic() - 1)  # already spent
+    try:
+        stream.read(10, timeout=20.0)
+    finally:
+        base_module._call_deadline.reset(budget)
+    assert fake.waits[-1] == ("read", 0.001)
+
+
+def test_bounded_send_arms_any_client_once_proxies_included() -> None:
+    client = httpx.Client(proxy="http://127.0.0.1:3128")  # never contacted
+    transports: list[Any] = [client._transport, *client._mounts.values()]
+    pools = [transport._pool for transport in transports]
+    assert len(pools) == 2  # the direct pool and the proxy's
+    base_module._deadline_bound(client)
+    base_module._deadline_bound(client)
+    for pool in pools:
+        assert isinstance(pool._network_backend, base_module._DeadlineBackend)
+        assert not isinstance(pool._network_backend._backend, base_module._DeadlineBackend)
+    mocked = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200)))
+    base_module._deadline_bound(mocked)  # nothing to arm, nothing breaks
+    assert bounded_send(mocked, call()).status == 200
+
+
 def test_scrub_and_vendor_messages() -> None:
     secret = "test-only-s3cret/+value"
     text = f"a {secret} b {quote(secret, safe='')} c {quote(secret)}\x00​"
@@ -636,6 +968,80 @@ def test_session_links_and_refs_are_checked() -> None:
     assert session_ref(42) == "42"
     for bad in ("../x", "a/../b", "", " x", True, None, "x" * 300):
         assert session_ref(bad) is None
+
+
+@pytest.mark.parametrize(
+    "link",
+    [
+        "https://evil.example\\@cursor.com/agents/1",  # a browser reads "\" as "/"
+        "https://evil.example\\.cursor.com/agents/1",
+        "https://cursor.com\\@evil.example/agents/1",
+        "https://evil.example\t.cursor.com/agents/1",  # a browser drops tabs and newlines
+        "https://cursor.com/agents/\n1",
+        "https://cursor.com/agents/1 x",
+        "https://cursor.com/agents/\x7f",
+        "https://cursor.com/agents/ä",
+        "https://cürsor.com/agents/1",
+        "https://user@cursor.com/agents/1",
+        "https://user:pass@cursor.com/agents/1",
+        "https://cursor.com@evil.example/agents/1",
+        "https://cursor.com:8443/agents/1",
+        "https://cursor.com:0443/agents/1",
+        "https://cursor.com./agents/1",
+        "https://cursor%2Ecom/agents/1",
+        "https:cursor.com/agents/1",
+        "https:///cursor.com/agents/1",
+        "https://evil.example#.cursor.com",
+        "https://evil.example?.cursor.com",
+    ],
+)
+def test_a_session_link_is_checked_as_the_browser_will_read_it(link: str) -> None:
+    """CR-2: the host the check sees must be the host the browser opens."""
+    assert https_url(link, host_suffixes=("cursor.com",)) is None
+
+
+def test_plain_vendor_session_links_still_pass() -> None:
+    hosts = ("cursor.com",)
+    for good in (
+        "https://cursor.com",
+        "https://cursor.com/agents/bc-1?tab=log#@note",
+        "https://www.cursor.com:443/agents/1",
+        "https://CURSOR.com/agents/1",
+    ):
+        assert https_url(good, host_suffixes=hosts) == good
+
+
+@pytest.mark.parametrize(
+    ("rail", "field_path", "link"),
+    [
+        ("jules", ("url",), "https://evil.example\\@jules.google.com/session/1"),
+        ("cursor", ("agent", "url"), "https://evil.example\\.cursor.com/agents/bc-1"),
+        ("copilot", ("html_url",), "https://evil.example\\@github.com/o/forge-app/agents/1"),
+        ("devin", ("url",), "https://evil.example\\@app.devin.ai/sessions/devin-77"),
+        (
+            "claude-routine",
+            ("claude_code_session_url",),
+            "https://evil.example\\@claude.ai/code/session_01Test",
+        ),
+    ],
+)
+def test_a_vendor_link_that_would_open_another_site_is_never_kept(
+    rail: StartRail, field_path: tuple[str, ...], link: str
+) -> None:
+    """The review's probe P10 (CR-2): the vendor's answer carried the backslash link and
+    FORGE stored it as the session link behind "Watch it work"."""
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        body = json.loads(vendor_ok(request).content)
+        target = body
+        for name in field_path[:-1]:
+            target = target[name]
+        target[field_path[-1]] = link
+        return json_response(201, body)
+
+    result = start(rail, on_start(rail, answer))
+    assert isinstance(result, AdapterResult)
+    assert result.session_url is None or result.session_url == SESSIONS[rail].session_url
 
 
 def test_masked_headers_keep_the_scheme() -> None:

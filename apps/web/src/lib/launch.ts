@@ -145,6 +145,11 @@ function cursorApp({ taskId, brief }: LaunchInput): Launch {
   };
 }
 
+/**
+ * Antigravity reads the task through the FORGE connector, which a fork has
+ * in `.agents/mcp_config.json` only once it is in step with forge-app
+ * (October 2026 on), and which asks for a one-time sign-in (/connect).
+ */
 function antigravity({ taskId }: LaunchInput): Launch {
   return {
     rail: 'antigravity',
@@ -152,8 +157,9 @@ function antigravity({ taskId }: LaunchInput): Launch {
     kind: 'steps',
     shortened: false,
     steps: [
-      'Open your fork in Antigravity.',
-      'The FORGE connector is already set up in the repo.',
+      "If your fork is older than October 2026, press Sync fork on GitHub first so it has FORGE's connector settings.",
+      'Open your fork in Antigravity. The FORGE connector is already set up in the repo.',
+      'The first time, sign in to FORGE: in Settings → Customizations, press Authenticate next to forge, then paste the code your browser shows and press Submit.',
       `Ask it: ${startTaskAsk(taskId)}`,
     ],
   };

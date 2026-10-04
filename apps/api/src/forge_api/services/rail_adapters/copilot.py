@@ -40,8 +40,8 @@ from forge_api.services.rail_adapters.base import (
     SetupCheck,
     VendorResponse,
     https_url,
-    json_body,
     session_ref,
+    started_body,
 )
 
 API_URL = "https://api.github.com"
@@ -106,7 +106,7 @@ class CopilotAdapter(RailAdapter):
             setup_needed=self._setup_needed(request),
             rejected_statuses=frozenset({401}),
         )
-        body = json_body(response, vendor=self.vendor)
+        body = started_body(response)
         return AdapterResult(
             session_url=https_url(body.get("html_url"), host_suffixes=("github.com",)),
             session_ref=session_ref(body.get("id")),

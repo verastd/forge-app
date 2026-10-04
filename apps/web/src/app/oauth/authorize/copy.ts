@@ -47,6 +47,20 @@ export const NOTICES = {
 
 export type NoticeKind = keyof typeof NOTICES;
 
+/**
+ * A request the API refused but may tell the app about: the page says why
+ * and offers the way back. Nothing sends the visitor there unasked, so a link
+ * to FORGE can't bounce anyone to another site on its own.
+ */
+export const CANT_GO_AHEAD = 'This connection request can’t go ahead';
+export const RETURN_NOTE = 'Nothing was connected. Going back tells the app that asked why.';
+
+/** "This connection request can’t go ahead: <why>." (or just the first part when the API gave no why). */
+export function cantGoAhead(why: string): string {
+  const reason = why.replace(/[\s.]+$/u, '');
+  return reason === '' ? `${CANT_GO_AHEAD}.` : `${CANT_GO_AHEAD}: ${reason}.`;
+}
+
 /** What a connected agent may do (scope `forge.tasks`), in the words the consent screen uses. */
 export const CAN = [
   'See FORGE tasks',

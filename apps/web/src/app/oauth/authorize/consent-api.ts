@@ -36,8 +36,12 @@ export type ConsentFailure =
 
 export type CheckOutcome =
   | { kind: 'consent'; check: AuthorizeCheck }
-  /** A 400 whose `redirectTo` passed `clientRedirect`: the client is told, not the visitor. */
-  | { kind: 'redirect'; to: string }
+  /**
+   * A 400 whose `redirectTo` passed `clientRedirect`: the client may be told,
+   * but only if the visitor chooses to go back (a button, never an automatic
+   * redirect), so this page can't bounce anyone anywhere unasked.
+   */
+  | { kind: 'return'; to: string; description?: string }
   | ConsentFailure;
 
 export type DecisionOutcome = { kind: 'redirect'; to: string } | ConsentFailure;
@@ -70,12 +74,17 @@ async function readText(response: Response, limit: number): Promise<string | nul
   return chunks.map((chunk) => decoder.decode(chunk, { stream: true })).join('') + decoder.decode();
 }
 
-/** POST `params` as JSON to the API, or null if it could not be reached in time. */
+/**
+ * POST `params` as JSON to the API, or null if it could not be reached in
+ * time, or there is no https API to send it to (`apiUrl`).
+ */
 async function post(path: string, params: AuthorizeParams, authorization?: string): Promise<ApiAnswer | null> {
+  const base = apiUrl();
+  if (base === null) return null;
   const headers: Record<string, string> = { 'content-type': 'application/json', accept: 'application/json' };
   if (authorization !== undefined) headers.authorization = authorization;
   try {
-    const response = await fetch(`${apiUrl()}${path}`, {
+    const response = await fetch(`${base}${path}`, {
       method: 'POST',
       headers,
       body: JSON.stringify(params),
@@ -117,8 +126,9 @@ function failure(answer: ApiAnswer | null): ConsentFailure {
 
 /**
  * Asks the API whether `params` is a request worth showing a consent screen
- * for. A 400 with a `redirectTo` that passes `clientRedirect` sends the
- * browser back to the client with the error; one without stays here.
+ * for. A 400 with a `redirectTo` that passes `clientRedirect` offers the
+ * visitor a way back to the client with the error (`return`); one without
+ * stays here.
  */
 export async function checkAuthorization(params: AuthorizeParams): Promise<CheckOutcome> {
   const answer = await post('/api/oauth/authorize/check', params);
@@ -129,7 +139,10 @@ export async function checkAuthorization(params: AuthorizeParams): Promise<Check
   if (answer?.status === 400) {
     const error = AuthorizeErrorSchema.safeParse(answer.body);
     const to = error.success ? clientRedirect(error.data.redirectTo) : null;
-    if (to !== null) return { kind: 'redirect', to };
+    if (error.success && to !== null) {
+      const { errorDescription } = error.data;
+      return { kind: 'return', to, ...(errorDescription === undefined ? {} : { description: errorDescription }) };
+    }
   }
   return failure(answer);
 }

@@ -3,9 +3,10 @@
  * started with the contributor's own GitHub authorization, so this asks
  * GitHub for a one-time one: a fresh state and PKCE pair, sealed into the
  * transaction cookie as an `agent` attempt for this task and rail, then off to
- * GitHub's authorize page exactly as sign-in goes. The callback
- * (`/auth/callback`) spends the token on one start through the API and drops
- * it; nothing stores it.
+ * GitHub's authorize page exactly as sign-in goes (GitHub may not show a page
+ * to someone who approved FORGE before). The callback (`/auth/callback`)
+ * spends the token on one start through the API, then revokes it; nothing
+ * stores it.
  *
  * Refused unless the form comes from a page on this origin (403), and for
  * anyone who is not signed in with GitHub: signed out goes to /signin and

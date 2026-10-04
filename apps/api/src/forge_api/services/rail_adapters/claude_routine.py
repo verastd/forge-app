@@ -41,8 +41,8 @@ from forge_api.services.rail_adapters.base import (
     RailCredential,
     VendorResponse,
     https_url,
-    json_body,
     session_ref,
+    started_body,
 )
 
 API_URL = "https://api.anthropic.com/v1/claude_code/routines"
@@ -116,7 +116,7 @@ class ClaudeRoutineAdapter(RailAdapter):
         response = self.call(
             self._fire_call(request), request.credential, setup_needed=_setup_needed
         )
-        body = json_body(response, vendor=self.vendor)
+        body = started_body(response)
         return AdapterResult(
             session_url=https_url(
                 body.get("claude_code_session_url"), host_suffixes=("claude.ai",)

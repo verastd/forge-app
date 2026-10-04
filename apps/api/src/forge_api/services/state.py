@@ -95,7 +95,8 @@ def _dict_row(cursor: sqlite3.Cursor, row: tuple[Any, ...]) -> dict[str, Any]:
 
 
 class StateDB:
-    """A thread-safe wrapper around one SQLite connection (WAL, foreign keys on)."""
+    """A thread-safe wrapper around one SQLite connection (WAL, foreign keys and secure
+    delete on)."""
 
     def __init__(self, path: Path | str) -> None:
         self.path = Path(path)
@@ -117,7 +118,11 @@ class StateDB:
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA synchronous=NORMAL")
         self._conn.execute("PRAGMA foreign_keys=ON")
+        # Deleted content is overwritten with zeros, not only unlinked: some SQLite builds
+        # do that by default, others don't, and a removed key must not linger in the file.
+        self._conn.execute("PRAGMA secure_delete=ON")
         self._depth = 0  # transaction nesting; only touched while holding the lock
+        self._checkpoint_due = False  # checkpoint() was asked for inside a transaction
         self._applied: set[str] = set()
         self._closed = False
 
@@ -173,6 +178,8 @@ class StateDB:
             except BaseException:
                 self._depth = depth
                 self._rollback(depth)
+                if depth == 0:
+                    self._checkpoint_due = False  # nothing it was asked for was kept
                 raise
             self._depth = depth
             if depth > 0:
@@ -182,7 +189,25 @@ class StateDB:
                 self._conn.execute("COMMIT")
             except BaseException:
                 self._rollback(0)
+                self._checkpoint_due = False
                 raise
+            if self._checkpoint_due:
+                self._truncate_wal()
+
+    def checkpoint(self) -> None:
+        """Copy the write-ahead log into the database file and empty it, so content just
+        deleted or overwritten (a removed key) lingers in neither file. SQLite refuses
+        this inside a transaction, so there it runs once the outermost one commits."""
+        with self._lock:
+            self._check_open()
+            if self._depth > 0:
+                self._checkpoint_due = True
+                return
+            self._truncate_wal()
+
+    def _truncate_wal(self) -> None:
+        self._checkpoint_due = False
+        self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").close()
 
     def apply_schemas(self, schemas: Mapping[str, Sequence[str]] | None = None) -> None:
         """Apply each schema not yet applied on this connection, one transaction per

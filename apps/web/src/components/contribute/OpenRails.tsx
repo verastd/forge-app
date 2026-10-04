@@ -8,7 +8,9 @@
  * opened after an `await` would be blocked. The click also notes the hand-off
  * with a fire-and-forget request that can never hold the link up.
  *
- * Google Antigravity has no link at all, so its button shows the steps.
+ * Google Antigravity has no link at all, so its button shows the steps. It
+ * only works through the FORGE connector, so it is offered only while the
+ * connector is on (`mcp_connector`); so is the line about connecting once.
  */
 
 import Link from 'next/link';
@@ -22,11 +24,15 @@ import { CONNECT_PATH } from '../../lib/handoff';
 import { launchLinks } from '../../lib/launch';
 import styles from './contribute.module.css';
 
+/** Open rails that can only work through the FORGE connector. */
+const CONNECTOR_ONLY: ReadonlySet<OpenRail> = new Set(['antigravity']);
+
 export function OpenRails({
   taskId,
   brief,
   login,
   appSlug,
+  connector,
   onOpened,
 }: {
   taskId: number;
@@ -34,9 +40,15 @@ export function OpenRails({
   /** The signed-in GitHub login; null for the practice account. */
   login: string | null;
   appSlug: string | null;
+  /** The `mcp_connector` flag: the FORGE connector is on. */
+  connector: boolean;
   onOpened: (rail: OpenRail) => void;
 }) {
-  const launches = useMemo(() => launchLinks({ taskId, brief, login, apiBase }), [taskId, brief, login]);
+  const launches = useMemo(
+    () =>
+      launchLinks({ taskId, brief, login, apiBase }).filter((launch) => connector || !CONNECTOR_ONLY.has(launch.rail)),
+    [taskId, brief, login, connector],
+  );
   const [stepsOpen, setStepsOpen] = useState<OpenRail | null>(null);
 
   return (
@@ -103,18 +115,20 @@ export function OpenRails({
               {launch.note !== undefined && <p className={styles.note}>{launch.note}</p>}
               <details className={styles.firstTime}>
                 <summary>First time with {meta.label}?</summary>
-                <SetupSteps meta={meta} vault={false} appSlug={appSlug} />
+                <SetupSteps meta={meta} vault={false} appSlug={appSlug} connector={connector} />
               </details>
             </li>
           );
         })}
       </ul>
-      <p className="muted">
-        <Link href={CONNECT_PATH} className={styles.inlineLink}>
-          Connect your agent to FORGE once
-        </Link>{' '}
-        and it can report progress and read check results by itself.
-      </p>
+      {connector && (
+        <p className="muted">
+          <Link href={CONNECT_PATH} className={styles.inlineLink}>
+            Connect your agent to FORGE once
+          </Link>{' '}
+          and it can report progress and read check results by itself.
+        </p>
+      )}
     </div>
   );
 }

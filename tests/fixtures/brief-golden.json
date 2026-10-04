@@ -107,6 +107,21 @@
       "login": null,
       "branch": "task/44-",
       "brief": "FORGE task #44: !!!\n\nWhy: A title made only of punctuation still gets a branch.\n\nRules:\n- Read AGENTS.md at the repo root before you start.\n- Work in your fork of verastd/forge-app, on the branch task/44-. Create it from main if it doesn't exist.\n- Don't change .github/, the acceptance tests, or anything outside this task.\n- Run make lint and make test before you push.\n- When it's ready, open a pull request from your fork's task/44- branch to verastd/forge-app main, titled \"[#44] !!!\", with \"Closes #44\" in the description.\n\nIf you have the FORGE tools (the FORGE connector), call claim_task first, report_progress as you go, get_check_results when checks fail, and submit_task with the pull request link.\n\nTask: https://github.com/verastd/forge-app/issues/44"
+    },
+    {
+      "name": "a title with double quotes",
+      "task": {
+        "id": 45,
+        "title": "Rename the \"Export CSV\" button to \"Download\"",
+        "civilianSummary": "Make the download button say what it does.",
+        "url": "https://github.com/verastd/forge-app/issues/45"
+      },
+      "criteria": [
+        "The button reads \"Download\""
+      ],
+      "login": "octo-contributor",
+      "branch": "task/45-rename-the-export-csv-button-to-download",
+      "brief": "FORGE task #45: Rename the \"Export CSV\" button to \"Download\"\n\nWhy: Make the download button say what it does.\n\nDone when:\n- The button reads \"Download\"\n\nRules:\n- Read AGENTS.md at the repo root before you start.\n- Work in your fork, octo-contributor/forge-app, on the branch task/45-rename-the-export-csv-button-to-download. Create it from main if it doesn't exist.\n- Don't change .github/, the acceptance tests, or anything outside this task.\n- Run make lint and make test before you push.\n- When it's ready, open a pull request from octo-contributor:task/45-rename-the-export-csv-button-to-download to verastd/forge-app main, titled \"[#45] Rename the 'Export CSV' button to 'Download'\", with \"Closes #45\" in the description.\n\nIf you have the FORGE tools (the FORGE connector), call claim_task first, report_progress as you go, get_check_results when checks fail, and submit_task with the pull request link.\n\nTask: https://github.com/verastd/forge-app/issues/45"
     }
   ]
 }

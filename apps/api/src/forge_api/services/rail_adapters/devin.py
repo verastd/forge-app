@@ -40,6 +40,7 @@ from forge_api.services.rail_adapters.base import (
     https_url,
     json_body,
     session_ref,
+    started_body,
 )
 
 BASE_URL = "https://api.devin.ai/v3"
@@ -111,7 +112,7 @@ class DevinAdapter(RailAdapter):
         response = self.call(
             self._session_call(request), request.credential, setup_needed=setup_needed
         )
-        body = json_body(response, vendor=self.vendor)
+        body = started_body(response)
         return AdapterResult(
             session_url=https_url(body.get("url"), host_suffixes=("devin.ai",)),
             session_ref=session_ref(body.get("session_id")),

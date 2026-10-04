@@ -6,6 +6,7 @@ import base64
 import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
@@ -14,7 +15,7 @@ import pytest
 
 from forge_api.services import bridge as bridge_service
 from forge_api.services import vault as vault_service
-from forge_api.services.bridge import LeaseStore
+from forge_api.services.bridge import FixtureTaskSource, LeaseStore
 from forge_api.services.github_reads import GitHubReads
 from forge_api.services.identity import Identity
 
@@ -42,11 +43,18 @@ BRIDGE_ENV = (
     "FORGE_START_RAILS",
     "FORGE_VAULT_KEY",
     "FORGE_GITHUB_READ_TOKEN",
-    "FORGE_TASK_SOURCE",
     "FORGE_MAX_ACTIVE_CLAIMS",
     "FORGE_FLAGS_JSON",
     "FORGE_FLAGS_PATH",
 )
+
+#: GitHub user ids of the test accounts (a pull request is matched to its holder by id).
+GITHUB_IDS = {"octo-contributor": 1001, "octo-operator": 1002, "other-dev": 1003}
+
+
+def github_time(moment: datetime) -> str:
+    """A time as GitHub writes it: whole seconds, Z."""
+    return moment.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def vault_key(master: bytes = TEST_VAULT_MASTER) -> str:
@@ -67,12 +75,18 @@ class FakeGitHub:
     pulls: list[dict[str, Any]] = field(default_factory=list)
     checks: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     repos: dict[str, dict[str, Any]] = field(default_factory=dict)
-    issues: list[dict[str, Any]] = field(default_factory=list)
     requests: list[httpx.Request] = field(default_factory=list)
     #: When set, every request is answered with this status (or raises, for "timeout").
     fail: int | str | None = None
     #: When set, only requests whose path contains this text fail (with a 500).
     fail_on: str | None = None
+    #: The clock new pull requests are opened by (install_bridge sets the test's clock).
+    now: Callable[[], datetime] | None = None
+    #: GitHub user ids by login; unknown logins get a fresh one.
+    ids: dict[str, int] = field(default_factory=lambda: dict(GITHUB_IDS))
+
+    def user_id(self, login: str) -> int:
+        return self.ids.setdefault(login.lower(), 5000 + len(self.ids))
 
     def add_pull(
         self,
@@ -83,19 +97,35 @@ class FakeGitHub:
         state: str = "open",
         merged: bool = False,
         sha: str | None = None,
+        title: str | None = None,
+        body: str | None = None,
+        created_at: str | None = None,
+        owner_id: int | None = None,
+        base: str = "verastd/forge-app",
     ) -> dict[str, Any]:
+        """A pull request from `login`'s fork, opened now (by `now`) unless `created_at`
+        says otherwise. A merged or closed one closed when it was opened."""
+        opened = created_at or (
+            github_time(self.now()) if self.now is not None else "2026-08-10T09:00:00Z"
+        )
+        user = {"login": login, "id": owner_id or self.user_id(login)}
         pull = {
             "number": number,
             "html_url": f"https://github.com/verastd/forge-app/pull/{number}",
             "state": state,
-            "title": f"Pull request {number}",
+            "title": title if title is not None else f"Pull request {number}",
+            "body": body,
+            "user": user,
+            "created_at": opened,
+            "closed_at": opened if state == "closed" or merged else None,
             "merged": merged,
-            "merged_at": "2026-08-11T09:00:00Z" if merged else None,
+            "merged_at": opened if merged else None,
+            "base": {"ref": "main", "repo": {"full_name": base}},
             "head": {
                 "ref": branch,
                 "sha": sha or f"{number:040x}",
-                "repo": {"full_name": f"{login}/forge-app", "owner": {"login": login}},
-                "user": {"login": login},
+                "repo": {"full_name": f"{login}/forge-app", "owner": dict(user)},
+                "user": dict(user),
             },
         }
         self.pulls.insert(0, pull)
@@ -152,16 +182,41 @@ class FakeGitHub:
             sha = path.split("/")[5]
             runs = self.checks.get(sha, [])
             return json_response(200, {"total_count": len(runs), "check_runs": runs})
-        if path == "/repos/verastd/forge-app/issues":
-            page = int(query.get("page", ["1"])[0])
-            size = int(query.get("per_page", ["30"])[0])
-            return json_response(200, self.issues[(page - 1) * size : page * size])
+        if path == "/search/issues":
+            return json_response(200, self.search(query.get("q", [""])[0]))
         if path.startswith("/repos/"):
             repo = self.repos.get(path.removeprefix("/repos/").lower())
             return (
                 json_response(200, repo) if repo else json_response(404, {"message": "Not Found"})
             )
         return json_response(404, {"message": "Not Found"})
+
+    def search(self, q: str) -> dict[str, Any]:
+        """GET /search/issues for `repo:verastd/forge-app is:pr author:<login>
+        created:>=<time>`: issue-shaped hits, newest first, without head or base."""
+        terms = dict(term.split(":", 1) for term in q.split() if ":" in term)
+        since = terms.get("created", "").removeprefix(">=")
+        items = [
+            {
+                "number": pull["number"],
+                "title": pull["title"],
+                "body": pull["body"],
+                "state": pull["state"],
+                "created_at": pull["created_at"],
+                "user": dict(pull["user"]),
+                "pull_request": {"html_url": pull["html_url"]},
+            }
+            for pull in self.pulls
+            if terms.get("repo") == "verastd/forge-app"
+            and terms.get("is") == "pr"
+            and pull["user"]["login"].lower() == terms.get("author", "").lower()
+            and (
+                not since
+                or datetime.fromisoformat(pull["created_at"]) >= datetime.fromisoformat(since)
+            )
+        ]
+        items.sort(key=lambda item: item["created_at"], reverse=True)
+        return {"total_count": len(items), "incomplete_results": False, "items": items}
 
     def client(self) -> httpx.Client:
         return httpx.Client(transport=httpx.MockTransport(self.handler), follow_redirects=False)
@@ -304,13 +359,13 @@ def install_bridge(monkeypatch: pytest.MonkeyPatch, clock: FakeClock) -> BridgeE
         monkeypatch.delenv(name, raising=False)
     vault_service._decode_master.cache_clear()
     store = LeaseStore(now_fn=clock)
-    github = FakeGitHub()
+    github = FakeGitHub(now=clock)
     vendor = FakeVendor(respond=vendor_ok)
     monkeypatch.setattr(bridge_service, "_store", store)
     # GitHub answers are cached against the same fake clock, so `advance(61)` expires them.
     monkeypatch.setattr(bridge_service, "_github", github.reads(lambda: clock().timestamp()))
     monkeypatch.setattr(bridge_service, "_rail_client", vendor.client())
-    monkeypatch.setattr(bridge_service, "_sources", {})
+    monkeypatch.setattr(bridge_service, "_source", FixtureTaskSource())
     return BridgeEnv(
         clock=clock, store=store, github=github, vendor=vendor, monkeypatch=monkeypatch
     )

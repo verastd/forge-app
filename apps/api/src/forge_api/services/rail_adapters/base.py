@@ -8,25 +8,32 @@ outbound call follows, here and in services/github_reads.py:
 - The `httpx.Client` is injected (tests pass one built on `httpx.MockTransport`), and a
   redirect is never followed: a vendor answering 3xx is a failure, not a hop elsewhere
   with the key attached.
-- 5 s to connect and 20 s for the whole call, body included; at most 1 MB of response
-  is read.
+- 5 s to connect and 20 s for the whole exchange, the status line and headers included
+  (bounded_send cuts every socket wait to what is left of the budget); at most 1 MB of
+  response is read. Answers are asked for uncompressed, and a compressed one is refused
+  rather than inflated in memory.
+- JSON is parsed only when it nests at most 32 deep. A 2xx answer to a start that
+  carries no readable JSON object still means the session started, just without a link.
 - A vendor 401/403 is `credential_rejected` (the Bridge deletes a saved credential that
   was rejected); "your repository isn't connected" is `rail_setup_needed` with one plain
   sentence telling the contributor what to connect; anything else is `rail_failed` with
   the HTTP status.
 - Vendor error text is only ever logged or printed after `scrub()`: control characters
-  removed, every credential value replaced, cut to 200 characters.
+  removed, every credential value replaced (also URL-encoded, JSON-escaped or base64),
+  cut to 200 characters.
 """
 
+import base64
 import json
 import logging
 import re
 import time
 import unicodedata
 from collections.abc import Callable, Iterable, Mapping
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, Literal
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 import httpx
 
@@ -38,6 +45,12 @@ CONNECT_TIMEOUT_SECONDS = 5.0
 TOTAL_TIMEOUT_SECONDS = 20.0
 MAX_RESPONSE_BYTES = 1_000_000
 MAX_ERROR_TEXT = 200
+#: scrub() replaces credentials in the whole text, then cleans only this much of it:
+#: what it returns is cut to MAX_ERROR_TEXT anyway.
+SCRUB_WINDOW = 4_000
+#: The deepest a vendor's (or GitHub's) JSON may nest. Real answers stay under 10; a
+#: deeper one is not parsed at all, so it can never exhaust the parser's recursion.
+MAX_JSON_DEPTH = 32
 USER_AGENT = "forge-api (+https://github.com/verastd/forge-app)"
 
 #: Every fork keeps the upstream's name (contract §4: `<login>/forge-app`).
@@ -52,6 +65,40 @@ STATUS_BAD_GATEWAY = 502
 
 #: A session id or reference FORGE stores and later puts back into a vendor URL path.
 SESSION_REF = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:/-]{0,199}")
+
+#: The start of an https link as a browser (WHATWG) and urlsplit both read it alike: a
+#: plain ASCII DNS name whose last label starts with a letter (the host rule of the
+#: connector's redirect URIs in services/oauth.py), no user info, no port but 443.
+_HTTPS_START = re.compile(
+    r"https://(?P<host>(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*"
+    r"[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?)(?::443)?(?=[/?#]|\Z)",
+    re.IGNORECASE,
+)
+
+#: One JSON string (its closing quote optional, so an unterminated one is consumed in a
+#: single pass) or one bracket; parse_json counts the brackets outside strings.
+_JSON_TOKEN = re.compile(r'"[^"\\]*(?:\\.[^"\\]*)*"?|[\[\]{}]', re.DOTALL)
+
+
+class JSONTooDeep(ValueError):
+    """JSON nested deeper than parse_json allows (a ValueError like any other bad JSON)."""
+
+
+def parse_json(raw: bytes | str, *, max_depth: int = MAX_JSON_DEPTH) -> Any:
+    """`raw` (UTF-8) parsed as JSON. Raises ValueError when it isn't JSON, JSONTooDeep when
+    it nests deeper than `max_depth`: the depth is counted before parsing, because the
+    parser itself answers a deeply nested body with RecursionError."""
+    text = raw.decode("utf-8") if isinstance(raw, bytes) else raw
+    depth = 0
+    for match in _JSON_TOKEN.finditer(text):
+        token = match.group()
+        if token in ("[", "{"):
+            depth += 1
+            if depth > max_depth:
+                raise JSONTooDeep(f"JSON nested deeper than {max_depth}")
+        elif token in ("]", "}"):
+            depth -= 1
+    return json.loads(text)
 
 
 class AdapterError(Exception):
@@ -151,6 +198,15 @@ class OutboundCall:
             masked[name] = f"{scheme} {mask}" if rest and scheme in ("Bearer", "Basic") else mask
         return masked
 
+    def __repr__(self) -> str:
+        # Not the dataclass repr, which would print the credential headers in full into
+        # any log line, traceback or error report that shows this call.
+        return (
+            f"OutboundCall(method={self.method!r}, url={self.url!r}, "
+            f"headers={self.masked_headers()!r}, body={self.body!r}, params={self.params!r}, "
+            f"secret_headers={self.secret_headers!r}, purpose={self.purpose!r})"
+        )
+
 
 @dataclass(frozen=True)
 class VendorResponse:
@@ -164,8 +220,9 @@ class VendorResponse:
         return 200 <= self.status < 300
 
     def json(self) -> Any:
-        """The parsed body. Raises ValueError when it is not JSON."""
-        return json.loads(self.body.decode("utf-8"))
+        """The parsed body. Raises ValueError when it is not JSON or nests deeper than
+        MAX_JSON_DEPTH."""
+        return parse_json(self.body)
 
     def json_object(self) -> dict[str, Any]:
         """The parsed body when it is a JSON object, else {}."""
@@ -188,6 +245,97 @@ class TransportFailure(Exception):
         self.reason = reason
 
 
+#: When the call this thread is sending must be over (time.monotonic()); bounded_send
+#: sets it, and _DeadlineStream reads it before every socket wait.
+_call_deadline: ContextVar[float | None] = ContextVar("forge_call_deadline", default=None)
+
+
+def _within_deadline(timeout: float | None) -> float | None:
+    """`timeout`, a socket wait httpx asked for, cut to what is left of the current call's
+    budget: at least a millisecond, so a spent budget times the wait out instead of
+    making the socket non-blocking."""
+    deadline = _call_deadline.get()
+    if deadline is None:
+        return timeout
+    left = max(deadline - time.monotonic(), 0.001)
+    return left if timeout is None else min(timeout, left)
+
+
+class _DeadlineStream:
+    """One connection whose every socket wait ends by the call's deadline. httpx's read
+    timeout starts again with each byte that arrives, so on its own a server dribbling
+    its status line and headers could hold a call, and a worker thread, for hours."""
+
+    def __init__(self, stream: Any) -> None:
+        self._stream = stream
+
+    def read(self, max_bytes: int, timeout: float | None = None) -> bytes:
+        data: bytes = self._stream.read(max_bytes, _within_deadline(timeout))
+        return data
+
+    def write(self, buffer: bytes, timeout: float | None = None) -> None:
+        self._stream.write(buffer, _within_deadline(timeout))
+
+    def close(self) -> None:
+        self._stream.close()
+
+    def start_tls(
+        self, ssl_context: Any, server_hostname: str | None = None, timeout: float | None = None
+    ) -> "_DeadlineStream":
+        return _DeadlineStream(
+            self._stream.start_tls(ssl_context, server_hostname, _within_deadline(timeout))
+        )
+
+    def get_extra_info(self, info: str) -> Any:
+        return self._stream.get_extra_info(info)
+
+
+class _DeadlineBackend:
+    """httpcore's network backend, handing out _DeadlineStream connections."""
+
+    def __init__(self, backend: Any) -> None:
+        self._backend = backend
+
+    def connect_tcp(
+        self,
+        host: str,
+        port: int,
+        timeout: float | None = None,
+        local_address: str | None = None,
+        socket_options: Any = None,
+    ) -> _DeadlineStream:
+        return _DeadlineStream(
+            self._backend.connect_tcp(
+                host, port, _within_deadline(timeout), local_address, socket_options
+            )
+        )
+
+    def connect_unix_socket(
+        self, path: str, timeout: float | None = None, socket_options: Any = None
+    ) -> _DeadlineStream:
+        return _DeadlineStream(
+            self._backend.connect_unix_socket(path, _within_deadline(timeout), socket_options)
+        )
+
+    def sleep(self, seconds: float) -> None:
+        self._backend.sleep(seconds)
+
+
+def _deadline_bound(client: httpx.Client) -> None:
+    """Hold every connection `client` opens from now on (through a proxy from the
+    environment too) to the deadline of the bounded_send call using it; outside such a
+    call nothing changes. httpx has no public hook for a network backend, so this swaps
+    the backend of each connection pool the client built, once (tests prove the effect
+    against a real socket). Transports without a pool, such as httpx.MockTransport, are
+    left alone."""
+    mounts: dict[Any, Any] = getattr(client, "_mounts", {})
+    for transport in (getattr(client, "_transport", None), *mounts.values()):
+        pool: Any = getattr(transport, "_pool", None)
+        backend = getattr(pool, "_network_backend", None)
+        if backend is not None and not isinstance(backend, _DeadlineBackend):
+            pool._network_backend = _DeadlineBackend(backend)
+
+
 def make_client() -> httpx.Client:
     """The production client for vendor and GitHub calls."""
     return httpx.Client(
@@ -207,26 +355,42 @@ def bounded_send(
 ) -> VendorResponse:
     """Send `call` and read at most `limit` bytes of the answer within `total_timeout`.
 
-    Never follows a redirect, whatever the client was built with. Raises
+    The budget covers the whole exchange: connecting, sending, the status line and
+    headers, and the body (every socket wait on the client's connections is cut to what
+    is left of it, and the body is checked here too). Never follows a redirect, whatever
+    the client was built with. Asks for an uncompressed answer and refuses a compressed
+    one, which could expand far past `limit` in memory before being counted. Raises
     TransportFailure (504 for a timeout, 502 for anything else) instead of returning a
     response that was cut off.
     """
     deadline = clock() + total_timeout
+    headers = {
+        name: value for name, value in call.headers.items() if name.lower() != "accept-encoding"
+    }
+    headers["Accept-Encoding"] = "identity"
+    _deadline_bound(client)
+    budget = _call_deadline.set(time.monotonic() + total_timeout)
     try:
         with client.stream(
             call.method,
             call.url,
-            headers=dict(call.headers),
+            headers=headers,
             json=dict(call.body) if call.body is not None else None,
             params=dict(call.params) if call.params is not None else None,
             follow_redirects=False,
+            timeout=httpx.Timeout(
+                total_timeout, connect=min(CONNECT_TIMEOUT_SECONDS, total_timeout)
+            ),
         ) as response:
+            encoding = response.headers.get("content-encoding", "").strip().lower()
+            if encoding not in ("", "identity"):
+                raise TransportFailure(STATUS_BAD_GATEWAY, "compressed response refused")
             declared = response.headers.get("content-length", "")
             if declared.isdigit() and int(declared) > limit:
                 raise TransportFailure(STATUS_BAD_GATEWAY, "response too large")
             chunks: list[bytes] = []
             size = 0
-            for chunk in response.iter_bytes():
+            for chunk in response.iter_bytes():  # no decoding: encoded answers are refused
                 size += len(chunk)
                 if size > limit:
                     raise TransportFailure(STATUS_BAD_GATEWAY, "response too large")
@@ -238,6 +402,8 @@ def bounded_send(
         raise TransportFailure(STATUS_TIMEOUT, "timed out") from None
     except httpx.HTTPError as exc:
         raise TransportFailure(STATUS_BAD_GATEWAY, type(exc).__name__) from None
+    finally:
+        _call_deadline.reset(budget)
 
 
 _CONTROL = re.compile(r"\s+")
@@ -254,16 +420,28 @@ def strip_controls(text: str) -> str:
     return _CONTROL.sub(" ", kept).strip()
 
 
+def secret_forms(secret: str) -> set[str]:
+    """Every spelling of `secret` that vendor text may carry: as sent, URL-encoded,
+    JSON-escaped (vendor_message re-encodes lists with json.dumps; other encoders also
+    write "/" as "\\/"), and base64, alone or as the user name of HTTP Basic auth."""
+    escaped = json.dumps(secret)[1:-1]
+    forms = {secret, quote(secret, safe=""), quote(secret), escaped, escaped.replace("/", "\\/")}
+    for raw in (secret.encode(), f"{secret}:".encode()):
+        for encoded in (base64.b64encode(raw).decode(), base64.urlsafe_b64encode(raw).decode()):
+            forms.update({encoded, encoded.rstrip("=")})
+    return forms
+
+
 def scrub(text: str, secrets: Iterable[str], limit: int = MAX_ERROR_TEXT) -> str:
-    """Vendor text made safe to log or print: no credential, no control characters,
-    at most `limit` characters."""
+    """Vendor text made safe to log or print: no credential in any of its forms, no
+    control characters, at most `limit` characters."""
     cleaned = text
     for secret in secrets:
         if len(secret) < 4:
             continue
-        for form in {secret, quote(secret, safe=""), quote(secret)}:
+        for form in sorted(secret_forms(secret), key=len, reverse=True):
             cleaned = cleaned.replace(form, "[redacted]")
-    cleaned = strip_controls(cleaned)
+    cleaned = strip_controls(cleaned[:SCRUB_WINDOW])
     return cleaned[:limit]
 
 
@@ -286,9 +464,11 @@ def vendor_message(response: VendorResponse) -> str:
         if isinstance(value, str):
             parts.append(value)
         elif name == "detail" and isinstance(value, list):
-            parts.append(json.dumps(value)[:400])
+            # Whole, never cut: a cut could split a credential that scrub() then can't
+            # recognise. scrub() shortens the text once every credential is replaced.
+            parts.append(json.dumps(value))
     if body.get("errors") is not None:
-        parts.append(json.dumps(body.get("errors"))[:400])
+        parts.append(json.dumps(body.get("errors")))
     return " ".join(parts) if parts else response.text()
 
 
@@ -359,8 +539,8 @@ def send(
 
 
 def json_body(response: VendorResponse, *, vendor: str) -> dict[str, Any]:
-    """The JSON object a 2xx answer must carry (it may be empty); `rail_failed` when the
-    body is not a JSON object at all."""
+    """The JSON object a 2xx answer to a read must carry (it may be empty); `rail_failed`
+    when the body is not a JSON object at all."""
     try:
         parsed = response.json()
     except (ValueError, UnicodeDecodeError):
@@ -375,22 +555,35 @@ def json_body(response: VendorResponse, *, vendor: str) -> dict[str, Any]:
     return parsed
 
 
+def started_body(response: VendorResponse) -> dict[str, Any]:
+    """The JSON object in a vendor's 2xx answer to a start, or {} when there is none to
+    read (not JSON, nested too deep, not an object). The vendor said the session started,
+    so the start stands, just without a link: calling it a failure would have the
+    contributor start a second session."""
+    return response.json_object()
+
+
 def https_url(value: object, *, host_suffixes: tuple[str, ...]) -> str | None:
     """`value` when it is an https URL on one of the vendor's own hosts, else None.
 
     A session link is shown to the contributor as a button; it must lead to the vendor,
-    whatever the vendor's answer said.
+    whatever the vendor's answer said. So the host is checked the way the browser will
+    read it: a browser takes "\\" for "/" and drops tabs and newlines, so a link with a
+    backslash, whitespace, a control or non-ASCII character, user info or a port other
+    than 443 is refused, and so is one whose host a strict pattern and urlsplit don't
+    both find.
     """
     if not isinstance(value, str) or len(value) > 2000:
         return None
-    try:
-        url = httpx.URL(value)
-    except (httpx.InvalidURL, TypeError, ValueError):
+    if not value.isascii() or not value.isprintable() or " " in value or "\\" in value:
         return None
-    if url.scheme != "https" or not url.host:
+    start = _HTTPS_START.match(value)
+    if start is None:
         return None
-    host = url.host.lower()
-    if any(host == suffix or host.endswith("." + suffix) for suffix in host_suffixes):
+    host = start.group("host").lower()
+    parts = urlsplit(value)  # after the pattern matched, nothing in it can make this raise
+    agreed = parts.hostname == host and parts.username is None and parts.port in (None, 443)
+    if agreed and any(host == suffix or host.endswith("." + suffix) for suffix in host_suffixes):
         return value
     return None
 

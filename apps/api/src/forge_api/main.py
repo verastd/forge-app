@@ -5,11 +5,19 @@ Every piece of behaviour worth testing lives under services/ (AGENTS.md).
 """
 
 import os
+from collections.abc import Iterable, Mapping, Sequence
+from typing import Any
 
 from fastapi import FastAPI, Request
+from fastapi.exception_handlers import (
+    http_exception_handler,
+    request_validation_exception_handler,
+)
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.datastructures import Headers, MutableHeaders
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
@@ -83,6 +91,54 @@ def allowed_origins(env: dict[str, str] | None = None) -> list[str]:
 
 ALLOWED_ORIGINS = allowed_origins()
 
+#: Routes whose every error is flat JSON, `{"error": ...}`, request validation included:
+#: the Bridge, and the consent page's calls to the OAuth server.
+FLAT_ERROR_PREFIXES = ("/api/bridge", "/api/oauth")
+#: A request body nested deeper than this is refused outright (400 invalid_request).
+MAX_BODY_DEPTH = 32
+
+
+def uses_flat_errors(path: str) -> bool:
+    return any(path == prefix or path.startswith(prefix + "/") for prefix in FLAT_ERROR_PREFIXES)
+
+
+def nested_deeper_than(value: object, limit: int) -> bool:
+    """Whether a parsed JSON value nests arrays and objects more than `limit` deep, found
+    without recursion: a hostile body is exactly what makes recursion fail."""
+    stack: list[tuple[object, int]] = [(value, 0)]
+    while stack:
+        item, depth = stack.pop()
+        children: Iterable[object]
+        if isinstance(item, dict):
+            children = item.values()
+        elif isinstance(item, list):
+            children = item
+        else:
+            continue
+        if depth >= limit:
+            return True
+        stack.extend((child, depth + 1) for child in children if isinstance(child, dict | list))
+    return False
+
+
+def invalid_fields(errors: Sequence[Any]) -> list[str]:
+    """The fields a request got wrong, named the way /dispatch names them ("taskId",
+    "credential.key"): where they came from (body, path, query) is dropped, and "body"
+    stands for a body that is missing or isn't JSON. Never the input itself."""
+    fields: set[str] = set()
+    for error in errors:
+        loc = tuple(error.get("loc") or ()) if isinstance(error, Mapping) else ()
+        if len(loc) < 2 or error.get("type") == "json_invalid":
+            fields.add("body")
+        else:
+            fields.add(".".join(str(part) for part in loc[1:]))
+    return sorted(fields)
+
+
+def invalid_request(status: int, fields: list[str]) -> JSONResponse:
+    return JSONResponse(status_code=status, content={"error": "invalid_request", "fields": fields})
+
+
 app = FastAPI(title="FORGE API", version=__version__)
 
 app.add_middleware(
@@ -100,6 +156,31 @@ app.add_middleware(ConnectorCORSMiddleware)
 async def api_error_handler(request: Request, exc: ApiError) -> JSONResponse:
     """Render service errors flat ({"error": ...}), not nested under "detail"."""
     return JSONResponse(status_code=exc.status_code, content=exc.payload, headers=exc.headers)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error_handler(request: Request, exc: RequestValidationError) -> Response:
+    """On the flat-error routes, `422 {"error": "invalid_request", "fields": [...]}` as
+    /dispatch answers, naming fields only: FastAPI's own answer echoes the input (a JSON
+    null included), and recursing through a deeply nested input to echo it was a 500. A
+    body nested deeper than MAX_BODY_DEPTH is 400. Other routes keep FastAPI's answer."""
+    if not uses_flat_errors(request.scope["path"]):
+        return await request_validation_exception_handler(request, exc)
+    if nested_deeper_than(exc.body, MAX_BODY_DEPTH):
+        return invalid_request(400, ["body"])
+    return invalid_request(422, invalid_fields(exc.errors()))
+
+
+@app.exception_handler(StarletteHTTPException)
+async def http_error_handler(request: Request, exc: StarletteHTTPException) -> Response:
+    """FastAPI answers a body it can't parse at all (nested past the JSON parser's own
+    recursion limit, or not UTF-8) with `400 {"detail": ...}`, raised from the parse
+    error; the flat-error routes say invalid_request instead. Any other HTTP error is
+    FastAPI's own answer."""
+    if exc.status_code == 400 and exc.__cause__ is not None:
+        if uses_flat_errors(request.scope["path"]):
+            return invalid_request(400, ["body"])
+    return await http_exception_handler(request, exc)
 
 
 app.include_router(health.router)

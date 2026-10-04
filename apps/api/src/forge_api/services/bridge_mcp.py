@@ -11,6 +11,7 @@ Agent-written text (progress messages) is untrusted: the Bridge stores it as pla
 control characters stripped, at most 500 characters.
 """
 
+import math
 import re
 from collections.abc import Callable
 from typing import Any, cast
@@ -18,7 +19,10 @@ from typing import Any, cast
 from forge_api.models import PROGRESS_STAGES, BridgeStatus, ProgressStage, TaskCard
 from forge_api.services import flags as flags_service
 from forge_api.services.bridge import (
+    CLAIM_RATE_LIMIT,
     MAX_MESSAGE,
+    PROGRESS_LIMIT,
+    SUBMIT_LIMIT,
     Bridge,
     TaskFixture,
     compare_url,
@@ -170,21 +174,46 @@ def _text(args: dict[str, Any], name: str, *, required: bool) -> str | None:
 # --- turning Bridge errors into sentences ----------------------------------------------
 
 
+def _wait(seconds: object) -> str:
+    """A Retry-After count of seconds, in words."""
+    if not isinstance(seconds, int) or seconds <= 3600:
+        return "in under an hour"
+    return f"in about {math.ceil(seconds / 3600)} hours"
+
+
 def _explain(exc: ApiError, task_id: int | None, login: str) -> ToolError:
     code = exc.payload.get("error")
     task = f"#{task_id}" if task_id is not None else "this task"
     number = exc.payload.get("prNumber")
     sentences: dict[str, str] = {
         "task_not_found": f"There's no FORGE task {task}. Call list_tasks to see the open ones.",
+        "tier_too_low": (
+            f"Task {task} needs contributor tier {exc.payload.get('tierFloor', 'T1')} or above, "
+            "and every FORGE account is T0 for now; it opens up as you ship work. Pick "
+            "another one with list_tasks."
+        ),
         "already_claimed": (
             f"Task {task} is already claimed by {exc.payload.get('claimedBy', 'someone else')}. "
             "Pick another one with list_tasks."
+        ),
+        "claim_cooldown": (
+            f"Your last lease on task {task} ended less than a day ago, so it can't be yours "
+            f"again yet (it can {_wait(exc.payload.get('retryAfter'))}). Pick another one "
+            "with list_tasks."
+        ),
+        "claim_rate_limit": (
+            f"You've claimed {CLAIM_RATE_LIMIT} FORGE tasks in the last 24 hours, the most "
+            "allowed. Try again later."
         ),
         "claim_limit": (
             f"You already hold {exc.payload.get('limit', 'the most')} FORGE tasks, the most at "
             "once. Finish one, or release it with release_task, first."
         ),
         "not_claimed": f"Task {task} isn't claimed by anyone. Call claim_task first.",
+        "already_shipped": (
+            f"Task {task} is already shipped: its pull request was merged, so there is "
+            "nothing left to do on it. Call list_tasks to find an open one."
+        ),
         "not_holder": (
             f"Task {task} is claimed by someone else, so only they can do that. Call "
             "list_tasks to find an open one."
@@ -198,10 +227,20 @@ def _explain(exc: ApiError, task_id: int | None, login: str) -> ToolError:
             f"Pull request #{number} doesn't come from your fork ({login}/{FORK_REPO_NAME}), "
             "so it can't be handed in for this task."
         ),
-        "github_unavailable": "FORGE couldn't reach GitHub just now. Try again in a minute.",
+        "pr_not_for_task": (
+            f"Pull request #{number} isn't this task's work. It counts when it was opened "
+            f"after you claimed task {task}, comes from the task's branch or names it ([{task}] "
+            f'in its title or "Closes {task}" in its description), and isn\'t handed in for '
+            "another task."
+        ),
+        "submit_limit": (
+            f"You've handed in {SUBMIT_LIMIT} pull requests in the last minute, the most "
+            "allowed. Wait a minute and try again."
+        ),
+        "github_unavailable": "GitHub can't be reached right now. Try again in a minute.",
         "progress_limit": (
-            "This task has had too many progress reports. Report only milestones: started, "
-            "pushed, pr_opened, blocked, done."
+            f"Task {task} has had {PROGRESS_LIMIT} progress reports in the last hour, the most "
+            "it takes. Report only milestones: started, pushed, pr_opened, blocked, done."
         ),
     }
     return ToolError(sentences.get(str(code), "FORGE couldn't do that just now. Try again."))
@@ -266,6 +305,7 @@ def _whoami(ctx: ToolContext, args: dict[str, Any]) -> ToolOutput:
 
     def act(bridge: Bridge) -> ToolOutput:
         held = bridge.store.held_by(ctx.identity.sub)
+        now = bridge.store.now()
         tasks = []
         for lease in held:
             task = bridge.source.get_task(lease.task_id)
@@ -273,7 +313,7 @@ def _whoami(ctx: ToolContext, args: dict[str, Any]) -> ToolOutput:
                 {
                     "taskId": lease.task_id,
                     "title": task.title if task is not None else "",
-                    "leaseEndsAt": iso(lease.ends_at),
+                    "leaseEndsAt": iso(lease.effective_end(now)),
                 }
             )
         lines = [f"You're signed in to FORGE as {ctx.identity.login}."]
@@ -327,11 +367,22 @@ def _lease_state(
     bridge: Bridge, task: TaskFixture, ctx: ToolContext
 ) -> tuple[dict[str, Any], str, str | None]:
     """(structured lease state, a sentence about it, the compare link when it's yours)."""
-    lease = bridge.store.active(task.id)
+    lease = bridge.store.latest(task.id)
+    now = bridge.store.now()
     branch = branch_name(task.id, task.title)
-    if lease is None:
+    if lease is not None and lease.merged:
+        mine = lease.holder_sub == ctx.identity.sub
+        return (
+            {"state": "yours" if mine else "taken", "holder": lease.holder_login},
+            "Your pull request for this task was merged; there's nothing left to do."
+            if mine
+            else f"{lease.holder_login}'s work on this task was merged; pick another one with "
+            "list_tasks.",
+            None,
+        )
+    if lease is None or not lease.is_active(now):
         return {"state": "open"}, "Nobody holds this task: call claim_task before you start.", None
-    ends = iso(lease.ends_at)
+    ends = iso(lease.effective_end(now))
     if lease.holder_sub == ctx.identity.sub:
         link = compare_url(ctx.identity.login, branch)
         return (
@@ -700,7 +751,9 @@ TOOLS: list[ToolDef] = [
         title="Hand in the pull request",
         description=(
             "Hands in the pull request for a task you hold. It must be on "
-            "verastd/forge-app and come from your own fork."
+            "verastd/forge-app, come from your own fork, be opened after you claimed "
+            "the task, and name the task: come from the task's branch, or have "
+            "[#<task id>] in its title, or 'Closes #<task id>' in its description."
         ),
         input_schema=_object(
             {"task_id": _TASK_ID_SCHEMA, "pr_url": _PR_URL_SCHEMA}, ["task_id", "pr_url"]

@@ -11,25 +11,18 @@
  * agent?" fallback. Afterwards the same screen shows where it is, from the
  * API's status, polled every 15 seconds while the tab is visible.
  *
+ * The links and the fallback carry the API's own brief (`TaskDetail.brief`,
+ * personalized for the signed-in contributor), so every rail hands over the
+ * same text; only the practice app, with nothing behind it, compiles one.
+ *
  * Signed out, everything can be browsed and the claim button is "Sign in to
  * claim". The practice app (demo builds) simulates every step locally
  * (`lib/offline.ts`) and says so; its links still open real agents.
  */
 
 import Link from 'next/link';
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { compileBrief } from '@forge/shared';
-import type {
-  BridgeStage,
-  BridgeStatus,
-  CheckResults,
-  DispatchResult,
-  OpenRail,
-  Rail,
-  RailList,
-  StartRail,
-  TaskDetail,
-} from '@forge/shared';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { BridgeStage, BridgeStatus, CheckResults, RailList, TaskDetail } from '@forge/shared';
 
 import { Chip } from '../Chip';
 import { LeaseCountdown } from '../LeaseCountdown';
@@ -42,15 +35,17 @@ import {
   ConflictError,
   claimTask,
   errorCode,
+  failureOf,
   fetchChecks,
   fetchRails,
   fetchStatus,
   fetchTaskDetail,
+  mayHaveHappened,
   releaseTask,
 } from '../../lib/api';
 import { DEMO_IDENTITY, LEASE_HOURS_BY_SIZE } from '../../lib/fixtures';
 import { SIZE_LABEL, rewardLabel, tierFloorLabel } from '../../lib/format';
-import { describeClaimError, describeTaskError } from '../../lib/handoff';
+import { describeClaimError, describeTaskError, startedSince } from '../../lib/handoff';
 import type { StartOutcome } from '../../lib/handoff';
 import { isDemoMode } from '../../lib/mode';
 
@@ -60,6 +55,13 @@ const POLL_MS = 15_000;
 const MAX_BACKOFF_MS = 5 * 60_000;
 /** After an "Open my agent" click, give the fire-and-forget note a moment before reading the status. */
 const AFTER_OPEN_MS = 1500;
+/**
+ * A `?started=copilot` (which any link can carry) is said only when the
+ * status shows FORGE started Copilot on this task this recently.
+ */
+const STARTED_WINDOW_MS = 10 * 60_000;
+/** Claim refusals that are FORGE's rules working, not something going wrong. */
+const RULES: ReadonlySet<string> = new Set(['tier_too_low', 'claim_rate_limit']);
 
 /** Stages at which a pull request exists, so its checks are worth reading. */
 const CHECKED_STAGES: ReadonlySet<BridgeStage> = new Set(['in_checks', 'in_review', 'shipping', 'shipped']);
@@ -91,7 +93,7 @@ export function TaskView({
   const signedIn = session !== null;
   /** The BFF vouches for this visitor, so reads come back personalized. */
   const identified = signedIn && !practice;
-  /** The login the brief and the links name; the practice account has no fork. */
+  /** The login the links name; the practice account has no fork. */
   const login = session !== null && !session.demo ? session.login : null;
   const validTask = Number.isSafeInteger(taskId) && taskId > 0;
 
@@ -108,9 +110,10 @@ export function TaskView({
   const [statusFailed, setStatusFailed] = useState(false);
   const [checks, setChecks] = useState<CheckResults | null>(null);
   const [refresh, setRefresh] = useState(0);
-  const [lastRail, setLastRail] = useState<Rail | null>(outcome?.kind === 'started' ? outcome.rail : null);
   /** The status said the task isn't yours any more (released elsewhere, or its time ran out). */
   const [lost, setLost] = useState(false);
+  /** A claim just landed: keyboard focus goes to the hand-off it opened. */
+  const focusHandoff = useRef(false);
 
   const holding = lease !== null;
 
@@ -164,14 +167,16 @@ export function TaskView({
         }
         setLoading(false);
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         // Live: no task, no Claim button. Offering one against a task we could
         // not read would hand out a lease nobody is holding.
         if (cancelled) {
           return;
         }
         setDetail(null);
-        setFailed(true);
+        // A task the API doesn't have (any more) is an answer, not a hiccup:
+        // the not-found view, with no "Try again" that can never work.
+        setFailed(errorCode(error) !== 'task_not_found');
         setLoading(false);
       });
     return () => {
@@ -297,10 +302,19 @@ export function TaskView({
     };
   }, [holding, wantsChecks, taskId, identified, status]);
 
+  // After a claim, keyboard and screen-reader users land on what it opened.
+  useEffect(() => {
+    if (lease !== null && focusHandoff.current) {
+      focusHandoff.current = false;
+      document.getElementById('handoff-title')?.focus();
+    }
+  }, [lease]);
+
   const onClaim = useCallback(() => {
     setClaiming(true);
     void claimTask(taskId)
       .then((result) => {
+        focusHandoff.current = true;
         setLease({ leaseEndsAt: result.data.leaseEndsAt, leaseHours: result.data.leaseHours, practice: result.degraded });
         setTakenBy(null);
         setLost(false);
@@ -317,9 +331,17 @@ export function TaskView({
           toast.push(describeClaimError('already_claimed'), 'warn');
           return;
         }
+        if (mayHaveHappened(error)) {
+          // No answer is not a "no": the claim may have landed. The task, read
+          // again, says whether it is yours.
+          toast.push(describeClaimError('upstream_timeout'), 'warn');
+          setAttempt((current) => current + 1);
+          return;
+        }
         // No lease, no countdown, no agents: the claim did not happen and
         // there is nothing anywhere that will finish it later.
-        toast.push(describeClaimError(errorCode(error)), error instanceof ConflictError ? 'warn' : 'danger');
+        const expected = error instanceof ConflictError || RULES.has(errorCode(error));
+        toast.push(describeClaimError(failureOf(error)), expected ? 'warn' : 'danger');
       })
       .finally(() => {
         setClaiming(false);
@@ -334,33 +356,30 @@ export function TaskView({
       setStatusFailed(false);
       setChecks(null);
       setRails(null);
-      setLastRail(null);
       toast.push(result.degraded ? 'Practice: released. Nothing was saved.' : 'Released. The task is back on the board.', 'ok');
       setAttempt((current) => current + 1);
       return true;
     } catch (error) {
-      toast.push(describeTaskError(errorCode(error)), 'danger');
+      if (mayHaveHappened(error)) {
+        // No answer is not a "no": the release may have gone through. The
+        // status, read again now, says whether the task is still yours.
+        toast.push(describeTaskError('upstream_timeout', taskId), 'warn');
+        setRefresh((current) => current + 1);
+        return false;
+      }
+      toast.push(describeTaskError(failureOf(error), taskId), 'danger');
       return false;
     }
   }, [taskId, toast]);
 
-  const onStarted = useCallback((rail: StartRail, result: DispatchResult) => {
-    void result;
-    setLastRail(rail);
+  /** Read the status again now (after a start, say), rather than at the next poll. */
+  const readStatusNow = useCallback(() => {
     setRefresh((current) => current + 1);
   }, []);
 
-  const onOpened = useCallback((rail: OpenRail) => {
-    setLastRail(rail);
-    setTimeout(() => {
-      setRefresh((current) => current + 1);
-    }, AFTER_OPEN_MS);
-  }, []);
-
-  const brief = useMemo(
-    () => (detail === null ? '' : compileBrief(detail.task, detail.acceptanceCriteria, login)),
-    [detail, login],
-  );
+  const onOpened = useCallback(() => {
+    setTimeout(readStatusNow, AFTER_OPEN_MS);
+  }, [readStatusNow]);
 
   const retry = useCallback(() => {
     setAttempt((current) => current + 1);
@@ -407,8 +426,8 @@ export function TaskView({
   if (detail === null) {
     return (
       <main className="page stack">
-        <h1 className="page-title">We could not find that task</h1>
-        <p className="muted">It may have shipped already.</p>
+        <h1 className="page-title">This task doesn&apos;t exist (any more)</h1>
+        <p className="muted">It may have shipped already, or the link has a typo in it.</p>
         <p>
           <Link href="/contribute" className="btn">
             Back to the task list
@@ -418,11 +437,18 @@ export function TaskView({
     );
   }
 
-  const { task, acceptanceCriteria } = detail;
+  const { task, acceptanceCriteria, brief } = detail;
   const reward = rewardLabel(task.rewardClass, task.rewardUsd);
   const signInHref = `/signin?${new URLSearchParams({ next: `/contribute/task/${task.id}` }).toString()}`;
   const startRails = (rails?.rails ?? []).filter((rail) => rail.mode === 'start' && rail.enabled);
   const agentStart = flags?.agent_start === true;
+  // Anyone can link here with `?started=copilot`: it is said only when the status backs it up.
+  const shownOutcome =
+    outcome === null || outcome.kind === 'error'
+      ? outcome
+      : status !== null && startedSince(status, outcome.rail, Date.now() - STARTED_WINDOW_MS)
+        ? outcome
+        : null;
 
   return (
     <main className="page stack-lg">
@@ -464,7 +490,7 @@ export function TaskView({
       {lease === null ? (
         <section className="card stack" aria-labelledby="take-title">
           <h2 id="take-title">Take it on</h2>
-          {outcome !== null && <CallbackOutcome outcome={outcome} />}
+          {shownOutcome !== null && <CallbackOutcome outcome={shownOutcome} appSlug={appSlug} />}
           {lost && (
             <p className="muted" role="status">
               This task isn&apos;t yours any more: it was released, or its time ran out. Anything your
@@ -520,12 +546,14 @@ export function TaskView({
           appSlug={appSlug}
           practice={practice || lease.practice}
           agentStart={agentStart}
+          connector={flags?.mcp_connector === true}
           startRails={startRails}
           vault={rails?.vault ?? false}
           railsLoaded={rails !== null}
           railsFailed={railsFailed}
-          outcome={outcome}
-          onStarted={onStarted}
+          outcome={shownOutcome}
+          onStarted={readStatusNow}
+          onCheck={readStatusNow}
           onOpened={onOpened}
         />
       )}
@@ -536,9 +564,9 @@ export function TaskView({
           status={status}
           statusFailed={statusFailed}
           checks={checks}
-          rail={lastRail}
           practice={practice || lease.practice}
           onRelease={onRelease}
+          onChange={readStatusNow}
         />
       )}
     </main>

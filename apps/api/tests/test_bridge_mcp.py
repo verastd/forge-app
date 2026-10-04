@@ -182,12 +182,12 @@ def test_list_tasks_filters(env: BridgeEnv) -> None:
     everything = call("list_tasks")
     assert everything.structured is not None and len(everything.structured["tasks"]) == 8
     assert "Call get_task" in everything.text
-    call("claim_task", {"task_id": 2})
+    call("claim_task", {"task_id": 6})
     call("claim_task", {"task_id": 3}, who=OTHER)
     open_ids = [task["id"] for task in call("list_tasks", {"filter": "open"}).structured["tasks"]]  # type: ignore[index]
-    assert open_ids == [1, 4, 5, 6, 7, 8]
+    assert open_ids == [1, 2, 4, 5, 7, 8]
     mine = call("list_tasks", {"filter": "mine"})
-    assert [task["id"] for task in mine.structured["tasks"]] == [2]  # type: ignore[index]
+    assert [task["id"] for task in mine.structured["tasks"]] == [6]  # type: ignore[index]
     assert f"claimed by {USER.login}" in mine.text
     assert len(call("list_tasks", {"filter": "all"}).structured["tasks"]) == 8  # type: ignore[index]
     assert (
@@ -240,7 +240,7 @@ def test_claim_task(env: BridgeEnv) -> None:
     assert CSV_BRANCH in first.text and "report_progress" in first.text
     assert call("claim_task", {"task_id": 1}).structured == first.structured  # idempotent
     assert f"already claimed by {USER.login}" in fails("claim_task", {"task_id": 1}, who=OTHER)
-    call("claim_task", {"task_id": 2})
+    call("claim_task", {"task_id": 6})
     assert "You already hold 2 FORGE tasks" in fails("claim_task", {"task_id": 3})
 
 
@@ -303,7 +303,7 @@ def test_report_progress_checks_its_arguments(env: BridgeEnv) -> None:
 
 def test_a_reported_pull_request_moves_the_task_to_checks(env: BridgeEnv) -> None:
     call("claim_task", {"task_id": 1})
-    env.github.add_pull(12, USER.login, "agent-branch", sha="9" * 40)
+    env.github.add_pull(12, USER.login, "agent-branch", sha="9" * 40, body="Closes #1")
     output = call(
         "report_progress",
         {"task_id": 1, "stage": "pr_opened", "message": "Opened it", "pr_url": PR_12},
@@ -336,6 +336,7 @@ def test_submit_task(env: BridgeEnv, client: TestClient, user_headers: dict[str,
     )
     assert "doesn't exist" in fails("submit_task", {"task_id": 1, "pr_url": PR_12})
     env.github.add_pull(12, "someone-else", "x")
+    env.clock.advance(61)  # GitHub's "no such pull request" is cached for a minute
     assert f"doesn't come from your fork ({USER.login}/forge-app)" in fails(
         "submit_task", {"task_id": 1, "pr_url": PR_12}
     )
@@ -355,7 +356,7 @@ def test_submit_task(env: BridgeEnv, client: TestClient, user_headers: dict[str,
         fails(
             "submit_task", {"task_id": 1, "pr_url": "https://github.com/verastd/forge-app/pull/14"}
         )
-        == "FORGE couldn't reach GitHub just now. Try again in a minute."
+        == "GitHub can't be reached right now. Try again in a minute."
     )
 
 
@@ -378,6 +379,28 @@ def test_an_unexpected_bridge_error_is_a_plain_sentence(env: BridgeEnv) -> None:
 
     error = bridge_mcp._explain(ApiError(418, {"error": "teapot"}), 1, USER.login)
     assert str(error) == "FORGE couldn't do that just now. Try again."
+
+
+@pytest.mark.parametrize(
+    ("payload", "says"),
+    [
+        ({"error": "tier_too_low", "tierFloor": "T2"}, "needs contributor tier T2"),
+        ({"error": "claim_cooldown", "retryAfter": 7200}, "again yet (it can in about 2 hours)"),
+        ({"error": "claim_cooldown", "retryAfter": 60}, "(it can in under an hour)"),
+        ({"error": "claim_rate_limit", "limit": 20}, "claimed 20 FORGE tasks"),
+        ({"error": "submit_limit", "limit": 10}, "handed in 10 pull requests"),
+        ({"error": "pr_not_for_task", "prNumber": 51}, '"Closes #4" in its description'),
+        ({"error": "progress_limit", "limit": 30}, "30 progress reports in the last hour"),
+    ],
+)
+def test_the_new_refusals_are_plain_sentences(payload: dict[str, Any], says: str) -> None:
+    """The contract's new error codes, as the connector tells an agent about them."""
+    from forge_api.services.errors import ApiError
+
+    message = str(bridge_mcp._explain(ApiError(400, payload), 4, USER.login))
+    assert says in message
+    assert message.endswith(".") and len(message) < 400
+    assert "FORGE couldn't do that" not in message
 
 
 # --- the prompt -----------------------------------------------------------------------------

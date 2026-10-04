@@ -162,6 +162,17 @@ export function clientRedirect(value: unknown): string | null {
   return url.href;
 }
 
+/**
+ * Where an address that passed {@link clientRedirect} sends the browser, for
+ * the "Return to …" button: its host (with a port that isn't the scheme's
+ * default), or "the app <scheme>" for an app's `scheme:/path`, which names no
+ * host, as the API's `redirectHost` says it. Never the address itself.
+ */
+export function returnTarget(to: string): string {
+  const url = new URL(to);
+  return url.host !== '' ? url.host : `the app ${url.protocol.slice(0, -1)}`;
+}
+
 /** Whether `host` (an API-reported redirect host, port or not) is this computer. */
 export function isLoopbackHost(host: string): boolean {
   const lower = host.toLowerCase();

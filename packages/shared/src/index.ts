@@ -287,6 +287,11 @@ export const BridgeStatusSchema = z.object({
   compareUrl: z.string().optional(),
   checksPassed: z.number().int().optional(),
   checksTotal: z.number().int().optional(),
+  /**
+   * Holder only: POST /feedback would really send the notes on (the last start
+   * went to a rail that takes follow-ups, with the same saved credential).
+   */
+  canRelay: z.boolean().optional(),
 });
 export type BridgeStatus = z.infer<typeof BridgeStatusSchema>;
 

@@ -482,6 +482,10 @@
       "checksTotal": {
         "type": "integer",
         "optional": true
+      },
+      "canRelay": {
+        "type": "boolean",
+        "optional": true
       }
     },
     "CheckRun": {

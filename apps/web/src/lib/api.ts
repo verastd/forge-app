@@ -84,8 +84,20 @@ const BFF_BRIDGE = '/bff/bridge';
 const BFF_GRANTS = '/bff/oauth/grants';
 
 const TIMEOUT_MS = 8000;
-/** Starting an agent waits on the vendor's own API. */
-const START_TIMEOUT_MS = 45_000;
+/**
+ * Starting an agent, or sending it the notes, waits on the vendor's own API.
+ * Longer than the BFF's own 45 s (`START_TIMEOUT_MS` in ./bff-forward), so
+ * the page hears the BFF's answer, a 504 `upstream_timeout` included, rather
+ * than giving up first.
+ */
+export const START_TIMEOUT_MS = 60_000;
+/**
+ * Claiming, releasing and handing in a pull request wait on GitHub behind the
+ * API. Longer than the BFF's own 25 s (`READ_TIMEOUT_MS` in ./bff-forward),
+ * so here too the page hears the BFF's 504 `upstream_timeout` rather than
+ * giving up first.
+ */
+export const WRITE_TIMEOUT_MS = 30_000;
 /** A practice start pauses this long, so it reads as a start rather than a no-op. */
 const PRACTICE_START_MS = 700;
 
@@ -95,15 +107,21 @@ export interface Loaded<T> {
   degraded: boolean;
 }
 
-/** The server said no, on purpose (409). Carries the API's error code verbatim. */
+/**
+ * The server said no, on purpose (409). Carries the API's error code
+ * verbatim, and what came with it (`claim_cooldown`'s wait, `already_started`'s
+ * session link).
+ */
 export class ConflictError extends Error {
   readonly code: string;
   readonly claimedBy?: string;
+  readonly extra: ApiErrorExtra;
 
-  constructor(code: string, claimedBy?: string) {
+  constructor(code: string, claimedBy?: string, extra: ApiErrorExtra = {}) {
     super(`API conflict: ${code}`);
     this.name = 'ConflictError';
     this.code = code;
+    this.extra = extra;
     if (claimedBy !== undefined) {
       this.claimedBy = claimedBy;
     }
@@ -138,8 +156,10 @@ export interface ApiErrorExtra {
   fields?: readonly string[];
   /** `dispatch_limit`'s `limit`: starts allowed an hour. */
   limit?: number;
-  /** The `Retry-After` header, in seconds. */
+  /** The `Retry-After` header, or the body's `retryAfter`, in seconds. */
   retryAfterSeconds?: number;
+  /** `already_started`'s `sessionUrl`, unchecked: the UI shows it only through `sessionLink`. */
+  sessionUrl?: string;
 }
 
 /** A refusal with a code the API (or the BFF) named: `{"error": "<code>", ...}`. */
@@ -172,19 +192,36 @@ function errorExtra(body: Record<string, unknown>, retryAfter: string | null): A
     typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
   const upstreamStatus = whole(body.status);
   const limit = whole(body.limit);
-  const retry = retryAfter !== null && /^[0-9]{1,6}$/.test(retryAfter.trim()) ? Number(retryAfter.trim()) : undefined;
+  const header = retryAfter !== null && /^[0-9]{1,6}$/.test(retryAfter.trim()) ? Number(retryAfter.trim()) : undefined;
+  const retry = header ?? whole(body.retryAfter);
   return {
     ...(typeof body.message === 'string' ? { detail: body.message } : {}),
     ...(upstreamStatus === undefined ? {} : { upstreamStatus }),
     ...(fields.length === 0 ? {} : { fields }),
     ...(limit === undefined ? {} : { limit }),
     ...(retry === undefined ? {} : { retryAfterSeconds: retry }),
+    ...(typeof body.sessionUrl === 'string' ? { sessionUrl: body.sessionUrl } : {}),
   };
 }
 
 /** The failure behind `error`, for `describeStartError` and friends (`./handoff`). */
 export function failureOf(error: unknown): { code: string } & ApiErrorExtra {
-  return error instanceof ApiError ? { code: error.code, ...error.extra } : { code: errorCode(error) };
+  return error instanceof ApiError || error instanceof ConflictError
+    ? { code: error.code, ...error.extra }
+    : { code: errorCode(error) };
+}
+
+/**
+ * Whether a write that failed (a claim, a start, a relay, a release, a pull
+ * request handed in) may still have happened: no answer reached the page (it
+ * gave up waiting, the network dropped, or what came back wasn't the answer
+ * it expects), or the BFF stopped waiting on the API (504 `upstream_timeout`).
+ * Either way the API may have it, so the page must read the task again rather
+ * than say that nothing changed.
+ */
+export function mayHaveHappened(error: unknown): boolean {
+  if (error instanceof ApiError) return error.code === 'upstream_timeout';
+  return error instanceof RequestError && error.status === undefined;
 }
 
 /**
@@ -236,11 +273,12 @@ async function request(url: string, init: RequestInit = {}, timeoutMs = TIMEOUT_
     if (!response.ok) {
       const body = record(await response.json().catch(() => null));
       const code = typeof body.error === 'string' ? body.error : null;
+      const extra = errorExtra(body, response.headers.get('retry-after'));
       if (response.status === 409) {
-        throw new ConflictError(code ?? 'conflict', typeof body.claimedBy === 'string' ? body.claimedBy : undefined);
+        throw new ConflictError(code ?? 'conflict', typeof body.claimedBy === 'string' ? body.claimedBy : undefined, extra);
       }
       if (code !== null) {
-        throw new ApiError(url, response.status, code, errorExtra(body, response.headers.get('retry-after')));
+        throw new ApiError(url, response.status, code, extra);
       }
       throw new RequestError(url, `responded with ${response.status}`, response.status);
     }
@@ -367,11 +405,17 @@ export async function fetchProfile(): Promise<Loaded<ContributorProfile>> {
  */
 export async function claimTask(taskId: number): Promise<Loaded<ClaimResponse>> {
   if (isDemoMode()) {
-    const { claim, practice } = localClaim(requireTask(taskId));
+    const task = requireTask(taskId);
+    // As the API answers: every account is T0 for now.
+    if (task.tierFloor !== 'T0') throw new ApiError(`practice task ${taskId}`, 403, 'tier_too_low');
+    const { claim, practice } = localClaim(task);
     practiceTasks.set(taskId, practice);
     return degradedResult(claim);
   }
-  return { data: await call(`${BFF_BRIDGE}/claim`, ClaimResponseSchema, postJson({ taskId })), degraded: false };
+  return {
+    data: await call(`${BFF_BRIDGE}/claim`, ClaimResponseSchema, postJson({ taskId }), WRITE_TIMEOUT_MS),
+    degraded: false,
+  };
 }
 
 /** Hand the task back. */
@@ -381,7 +425,10 @@ export async function releaseTask(taskId: number): Promise<Loaded<BridgeStatus>>
     practiceTasks.delete(taskId);
     return degradedResult(released);
   }
-  return { data: await call(`${BFF_BRIDGE}/release/${taskId}`, BridgeStatusSchema, postJson({})), degraded: false };
+  return {
+    data: await call(`${BFF_BRIDGE}/release/${taskId}`, BridgeStatusSchema, postJson({}), WRITE_TIMEOUT_MS),
+    degraded: false,
+  };
 }
 
 export interface StartRequest {
@@ -443,7 +490,25 @@ export async function sendNotes(taskId: number): Promise<Loaded<FeedbackResponse
     practiceTasks.set(taskId, practice);
     return degradedResult(result);
   }
-  return { data: await call(`${BFF_BRIDGE}/feedback/${taskId}`, FeedbackResponseSchema, postJson({})), degraded: false };
+  return {
+    data: await call(`${BFF_BRIDGE}/feedback/${taskId}`, FeedbackResponseSchema, postJson({}), START_TIMEOUT_MS),
+    degraded: false,
+  };
+}
+
+/**
+ * Hand in a pull request FORGE couldn't find by itself (one on another
+ * branch, say): the API checks it is this task's, from the caller's fork.
+ * The practice account has no fork, so it has nothing to hand in.
+ */
+export async function submitPullRequest(taskId: number, prUrl: string): Promise<Loaded<BridgeStatus>> {
+  if (isDemoMode()) {
+    throw new ApiError(`practice task ${taskId}`, 403, 'practice_session');
+  }
+  return {
+    data: await call(`${BFF_BRIDGE}/submit/${taskId}`, BridgeStatusSchema, postJson({ prUrl }), WRITE_TIMEOUT_MS),
+    degraded: false,
+  };
 }
 
 /* --- your agent keys and connected agents (/me) ------------------------------------ */

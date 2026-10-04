@@ -22,17 +22,24 @@ What is stored, and what isn't:
   opaque random strings with a readable prefix, stored only as SHA-256.
 - A grant is one person's connection of one client: what "Connected agents" lists and
   what DELETE revokes, together with every token in it. Presenting a used code again
-  revokes the whole grant, and so does a rotated refresh token presented again more than
-  30 seconds after it was rotated. Inside those 30 seconds it is a retry (the client lost
-  the response, or two of its sessions refreshed at once) and gets a fresh pair.
+  revokes the whole grant. A rotated refresh token presented again within 30 seconds of
+  its rotation is a retry (the client lost the response, or two of its sessions refreshed
+  at once) and gets a fresh pair, once: a second presentation, or any after 30 seconds,
+  revokes the whole grant. A grant holds at most 5 live refresh tokens; minting a sixth
+  revokes the oldest.
 
 Redirect URIs (contract §9): exact string match, except that an `http` loopback URI
 (127.0.0.1, localhost, [::1]) matches on any port (RFC 8252 §7.3; Claude Code and Codex
-pick the port at sign-in). No fragments; `javascript:`, `data:`, `file:`, `vbscript:`,
-`about:` and `blob:` are refused, and so is plain `http:` to anything but loopback.
-Private-use schemes (`cursor://...`) are accepted. Every error about the client or the
-redirect URI stays on FORGE's page; every other authorization error goes back to the
-client with `error`, `error_description`, `state` and `iss` (RFC 9207).
+pick the port at sign-in). Accepted: `https`, `http` to loopback, and an app's own scheme
+(`scheme://host/...` or `scheme:/path`) when it is a known MCP client's (APP_SCHEMES) or
+reverse-domain (`com.example.app`). Refused: fragments, backslashes, `javascript:` and
+the other REFUSED_SCHEMES, schemes that open a browser on an address they carry
+(`microsoft-edge:`, `web+...` and the rest of WRAPPER_SCHEMES), and any http(s) host a
+browser could read differently from Python (percent-encoding, a trailing dot, numeric
+shorthand). The host the consent page shows comes from that same parse. Every error
+about the client or the redirect URI stays on FORGE's page; every other authorization
+error goes back to the client with `error`, `error_description`, `state` and `iss`
+(RFC 9207).
 
 Nothing here logs a token, code, verifier or client secret.
 """
@@ -42,6 +49,7 @@ import binascii
 import functools
 import hashlib
 import hmac
+import ipaddress
 import json
 import logging
 import os
@@ -68,7 +76,7 @@ from forge_api.models import (
 )
 from forge_api.services import flags as flags_service
 from forge_api.services.errors import ApiError
-from forge_api.services.identity import Identity
+from forge_api.services.identity import SIGNIN_FLAG, Identity
 from forge_api.services.state import StateDB, register_schema
 
 logger = logging.getLogger(__name__)
@@ -108,8 +116,12 @@ ACCESS_TTL: Final = 60 * 60
 REFRESH_TTL: Final = 30 * 24 * 60 * 60
 #: A rotated refresh token presented again within this many seconds of its rotation is a
 #: retry (a lost response, or two sessions refreshing at once): it gets a fresh pair in
-#: the same grant. Later, it is a replay and revokes the grant.
+#: the same grant, once. A second presentation, or a later one, is a replay and revokes
+#: the grant.
 REFRESH_REUSE_GRACE: Final = 30
+#: Live (unused, unrevoked) refresh tokens a grant may hold; minting another revokes the
+#: oldest, so retries and reconnections can't fork a grant into ever more token families.
+MAX_LIVE_REFRESH_TOKENS: Final = 5
 #: A grant's "last used" moves at most once a minute, so an MCP call is not always a write.
 LAST_USED_RESOLUTION: Final = 60
 PURGE_INTERVAL: Final = 10 * 60
@@ -127,12 +139,35 @@ GRANT_TYPES: Final = ("authorization_code", "refresh_token")
 MAX_REDIRECT_URIS: Final = 10
 MAX_REDIRECT_URI_LENGTH: Final = 512
 MAX_CLIENT_NAME_LENGTH: Final = 64
+#: Combining marks kept on one character of a client name: enough for any script's
+#: accents, too few to stack marks over the text around it.
+MAX_COMBINING_MARKS: Final = 2
 MAX_CLIENT_ID_LENGTH: Final = 8192
 MAX_STATE_LENGTH: Final = 2048
 MAX_FORM_BYTES: Final = 16 * 1024
 DEFAULT_CLIENT_NAME: Final = "Unnamed agent"
 
 REFUSED_SCHEMES: Final = frozenset({"javascript", "data", "file", "vbscript", "about", "blob"})
+#: The known MCP clients' own schemes (RFC 8252 §7.1). Any other app scheme must be
+#: reverse-domain (`com.example.app`), as RFC 8252 asks.
+APP_SCHEMES: Final = frozenset(
+    {
+        "cursor",
+        "vscode",
+        "vscode-insiders",
+        "windsurf",
+        "antigravity",
+        "claude",
+        "codex",
+        "zed",
+        "kiro",
+    }
+)
+#: Schemes that open a browser on an address they carry, or that any web page may claim
+#: (`web+`): the code would land somewhere the consent page never named. Refused even in a
+#: reverse-domain spelling.
+WRAPPER_SCHEMES: Final = frozenset({"microsoft-edge", "firefox", "brave", "intent"})
+WRAPPER_SCHEME_PREFIXES: Final = ("x-safari-", "googlechrome", "opera", "web+", "ms-")
 #: As `urlsplit(...).hostname` gives them: lowercase, IPv6 without brackets.
 LOOPBACK_HOSTS: Final = frozenset({"127.0.0.1", "localhost", "::1"})
 
@@ -145,6 +180,19 @@ _CHALLENGE = re.compile(r"[A-Za-z0-9_-]{43}")  # BASE64URL(SHA-256) is always 43
 _VERIFIER = re.compile(r"[A-Za-z0-9._~-]{43,128}")  # RFC 7636 §4.1
 _TOKEN_SHAPE = re.compile(r"[A-Za-z0-9_-]{1,256}")
 _B64URL = re.compile(r"[A-Za-z0-9_-]*")
+#: A redirect URI's host and port, as FORGE accepts them: a DNS name in ASCII (an IDN in
+#: its xn-- form) whose last label starts with a letter, a dotted-quad IPv4 address or a
+#: bracketed IPv6 one, and a port without leading zeros. Nothing a browser reads
+#: differently from Python: no backslash, percent-encoding, userinfo, trailing dot or
+#: numeric shorthand (`127.1`, `0x7f000001`), which a browser turns into another host.
+_AUTHORITY = re.compile(
+    r"(?P<host>(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?"
+    r"|(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.){3}"
+    r"(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])"
+    r"|\[[0-9a-f:.]+\])"
+    r"(?::(?P<port>[1-9][0-9]{0,4}))?",
+    re.IGNORECASE,
+)
 #: Unicode categories a self-declared client name may not carry: controls, format
 #: characters (bidi overrides, zero-width joiners), surrogates, private use, unassigned.
 _HIDDEN_CATEGORIES: Final = frozenset({"Cc", "Cf", "Cs", "Co", "Cn"})
@@ -178,6 +226,7 @@ register_schema(
             created_at INTEGER NOT NULL,
             expires_at INTEGER NOT NULL,
             used_at INTEGER,
+            grace_used_at INTEGER,
             revoked_at INTEGER
         )
         """,
@@ -290,9 +339,10 @@ def load_config(env: Mapping[str, str] | None = None) -> ConnectorConfig | None:
 
 
 def require_connector() -> ConnectorConfig:
-    """Router dependency for every connector route: 404 while `mcp_connector` is off, then
-    503 while the public origin or the OAuth secret is missing."""
-    if not flags_service.is_enabled(FLAG):
+    """Router dependency for every connector route: 404 while `mcp_connector` or
+    `github_signin` is off (the connector acts for signed-in people, so it closes with
+    sign-in), then 503 while the public origin or the OAuth secret is missing."""
+    if not flags_service.is_enabled(FLAG) or not flags_service.is_enabled(SIGNIN_FLAG):
         raise ApiError(404, {"error": "connector-disabled"})
     config = load_config()
     if config is None:
@@ -397,34 +447,16 @@ async def read_form_body(request: Request) -> bytes:
 # --- redirect URIs ---------------------------------------------------------------------
 
 
+class RedirectUriRefused(ValueError):
+    """A redirect URI FORGE refuses; the message says why ("must not contain ...")."""
+
+
 def redirect_uri_problem(uri: str) -> str | None:
     """Why `uri` can't be registered as a redirect URI, or None when it can."""
-    if not uri:
-        return "is empty"
-    if len(uri) > MAX_REDIRECT_URI_LENGTH:
-        return f"is longer than {MAX_REDIRECT_URI_LENGTH} characters"
-    if any(not 0x21 <= ord(char) <= 0x7E for char in uri):
-        return "must be printable ASCII without spaces"
-    if "#" in uri:
-        return "must not contain a fragment"
-    scheme, colon, rest = uri.partition(":")
-    if not colon or not _SCHEME.fullmatch(scheme) or not rest:
-        return "must be an absolute URI"
-    scheme = scheme.lower()
-    if scheme in REFUSED_SCHEMES:
-        return f"must not use the {scheme}: scheme"
     try:
-        parts = urlsplit(uri)
-        _ = parts.port  # raises ValueError for a malformed port
-    except ValueError:
-        return "is not a valid URI"
-    if scheme in ("http", "https"):
-        if not parts.hostname:
-            return "must name a host"
-        if parts.username is not None or parts.password is not None:
-            return "must not contain user information"
-        if scheme == "http" and parts.hostname not in LOOPBACK_HOSTS:
-            return "must use https unless it is a loopback address (127.0.0.1, localhost, [::1])"
+        redirect_host(uri)
+    except RedirectUriRefused as refused:
+        return str(refused)
     return None
 
 
@@ -447,16 +479,109 @@ def _loopback_key(uri: str) -> tuple[str, str, str] | None:
 
 
 def redirect_host(uri: str) -> str:
-    """Where a redirect URI sends the person, for the consent page and the agents list:
-    the host for http(s) (with a non-default https port; never a loopback port, which
-    changes per sign-in), `scheme://authority` for a private-use scheme."""
-    parts = urlsplit(uri)
-    scheme = parts.scheme.lower()
+    """Where a redirect URI sends the person, for the consent page and the agents list,
+    from the parse that accepts it (RedirectUriRefused for a URI FORGE refuses): the host
+    for http(s), in lowercase ASCII (an IDN in its xn-- form), with a non-default https
+    port (never a loopback port, which changes per sign-in); `scheme://authority` for an
+    app's scheme; "the app <scheme>" for `scheme:/path`, which names no host."""
+    if not uri:
+        raise RedirectUriRefused("is empty")
+    if len(uri) > MAX_REDIRECT_URI_LENGTH:
+        raise RedirectUriRefused(f"is longer than {MAX_REDIRECT_URI_LENGTH} characters")
+    if any(not 0x21 <= ord(char) <= 0x7E for char in uri):
+        raise RedirectUriRefused("must be printable ASCII without spaces")
+    if "\\" in uri:
+        # A browser reads `\` as `/` in an http(s) URL and Python doesn't, so the host
+        # shown would not be the host the code goes to.
+        raise RedirectUriRefused("must not contain a backslash")
+    if "#" in uri:
+        raise RedirectUriRefused("must not contain a fragment")
+    scheme, colon, rest = uri.partition(":")
+    if not colon or not _SCHEME.fullmatch(scheme) or not rest:
+        raise RedirectUriRefused("must be an absolute URI")
+    scheme = scheme.lower()
+    if (
+        scheme in REFUSED_SCHEMES
+        or scheme in WRAPPER_SCHEMES
+        or scheme.startswith(WRAPPER_SCHEME_PREFIXES)
+    ):
+        raise RedirectUriRefused(f"must not use the {scheme}: scheme")
     if scheme in ("http", "https"):
-        host = _bracketed(parts.hostname or "")
-        port = parts.port
-        return f"{host}:{port}" if scheme == "https" and port not in (None, 443) else host
-    return f"{scheme}://{parts.netloc}" if parts.netloc else f"{scheme}:"
+        return _web_redirect_host(uri, scheme, rest)
+    if scheme not in APP_SCHEMES and "." not in scheme:
+        raise RedirectUriRefused(
+            "must use https, http to a loopback address, or an app's own scheme "
+            "(a known MCP client's, or a reverse-domain one like com.example.app)"
+        )
+    if rest.startswith("//"):
+        authority = re.split(r"[/?]", rest[2:], maxsplit=1)[0]
+        if _strict_authority(authority) is not None:
+            return f"{scheme}://{authority}"
+    elif rest.startswith("/"):
+        return f"the app {scheme}"
+    raise RedirectUriRefused(
+        "must be scheme://host/... or scheme:/path (an app's scheme can't carry another address)"
+    )
+
+
+def _web_redirect_host(uri: str, scheme: str, rest: str) -> str:
+    """An http(s) redirect URI's host, when Python and a strict, browser-compatible
+    reading of its authority agree on it."""
+    try:
+        parts = urlsplit(uri)
+        port = parts.port  # raises ValueError for a malformed port
+    except ValueError:
+        raise RedirectUriRefused("is not a valid URI") from None
+    if not parts.hostname or not rest.startswith("//"):
+        raise RedirectUriRefused("must name a host")
+    if parts.username is not None or parts.password is not None:
+        raise RedirectUriRefused("must not contain user information")
+    if parts.hostname.endswith("."):
+        raise RedirectUriRefused("must not end its host with a dot")
+    if "%" in parts.netloc:
+        raise RedirectUriRefused("must not percent-encode its host")
+    authority = re.split(r"[/?]", rest[2:], maxsplit=1)[0]
+    strict = _strict_authority(authority)
+    if strict is None:
+        raise RedirectUriRefused(
+            "must name its host plainly (a DNS name, a dotted IPv4 address or a bracketed "
+            "IPv6 one) and its port without leading zeros"
+        )
+    host, strict_port = strict
+    if authority != parts.netloc or host != _bracketed(parts.hostname) or strict_port != port:
+        raise RedirectUriRefused("is not a valid URI")  # the two readings disagree
+    if scheme == "http" and parts.hostname not in LOOPBACK_HOSTS:
+        raise RedirectUriRefused(
+            "must use https unless it is a loopback address (127.0.0.1, localhost, [::1])"
+        )
+    return f"{host}:{port}" if scheme == "https" and port not in (None, 443) else host
+
+
+def _strict_authority(authority: str) -> tuple[str, int | None] | None:
+    """(lowercase host, port) for an authority `_AUTHORITY` accepts with a real port and,
+    for IPv6, the canonical spelling a browser would show; None for anything else."""
+    match = _AUTHORITY.fullmatch(authority)
+    if match is None:
+        return None
+    host = match["host"].lower()
+    port = None if match["port"] is None else int(match["port"])
+    if port is not None and port > 65535:
+        return None
+    if host.startswith("[") and not _canonical_ipv6(host[1:-1]):
+        return None
+    return host, port
+
+
+def _canonical_ipv6(text: str) -> bool:
+    # A browser writes an embedded IPv4 part in hex (`::ffff:7f00:1`), while Python's own
+    # spelling of such an address differs between 3.12 patch releases, so a dotted IPv6
+    # literal is never one a browser shows as written: refuse it outright.
+    if "." in text:
+        return False
+    try:
+        return ipaddress.IPv6Address(text).compressed == text
+    except ValueError:
+        return False
 
 
 def _with_params(uri: str, params: Mapping[str, str | None]) -> str:
@@ -592,18 +717,39 @@ def client_secret(config: ConnectorConfig, client_id: str) -> str:
 
 
 def sanitize_client_name(raw: str) -> str:
-    """A self-declared client name made safe to show: NFKC, no control or invisible
-    characters, whitespace collapsed, at most 64 characters (… marks a cut)."""
+    """A self-declared client name made safe to show: NFKC, no control, invisible or
+    variation-selector characters, at most two combining marks on a character (no
+    "Zalgo" stacks), whitespace collapsed, at most 64 characters (… marks a cut)."""
     text = unicodedata.normalize("NFKC", raw)
-    visible = "".join(
-        " " if char.isspace() else char
-        for char in text
-        if char.isspace() or unicodedata.category(char) not in _HIDDEN_CATEGORIES
-    )
-    name = " ".join(visible.split())
+    kept: list[str] = []
+    marks = 0  # combining marks kept since the last other character
+    for char in text:
+        if char.isspace():
+            kept.append(" ")
+            marks = 0
+            continue
+        category = unicodedata.category(char)
+        if category in _HIDDEN_CATEGORIES or _is_variation_selector(char):
+            continue
+        if category.startswith("M"):
+            marks += 1
+            if marks > MAX_COMBINING_MARKS:
+                continue
+        else:
+            marks = 0
+        kept.append(char)
+    name = " ".join("".join(kept).split())
     if len(name) > MAX_CLIENT_NAME_LENGTH:
         name = name[: MAX_CLIENT_NAME_LENGTH - 1].rstrip() + "…"
     return name or DEFAULT_CLIENT_NAME
+
+
+def _is_variation_selector(char: str) -> bool:
+    """Unicode's Variation_Selector characters (Mongolian free variation selectors,
+    VS1-VS16, VS17-VS256): invisible, and able to carry hidden data. (U+180E, inside the
+    first range, is a format character, removed anyway.)"""
+    code = ord(char)
+    return 0x180B <= code <= 0x180F or 0xFE00 <= code <= 0xFE0F or 0xE0100 <= code <= 0xE01EF
 
 
 def register_client(config: ConnectorConfig, body: bytes, *, now: int) -> dict[str, Any]:
@@ -977,7 +1123,7 @@ def _refresh(
         row = (
             db.query_one(
                 "SELECT t.token_hash, t.grant_id, t.resource, t.expires_at, t.used_at, "
-                "t.revoked_at, g.client_key, g.revoked_at AS grant_revoked_at "
+                "t.grace_used_at, t.revoked_at, g.client_key, g.revoked_at AS grant_revoked_at "
                 "FROM oauth_tokens AS t JOIN oauth_grants AS g ON g.id = t.grant_id "
                 "WHERE t.token_hash = ? AND t.kind = 'refresh'",
                 (_sha256(presented),),
@@ -988,11 +1134,15 @@ def _refresh(
         if row is None or row["client_key"] != client.key:
             raise _invalid_grant("The refresh token is not valid.")
         used_at = row["used_at"]
-        retry = used_at is not None and now - int(used_at) < REFRESH_REUSE_GRACE
+        retry = (
+            used_at is not None
+            and row["grace_used_at"] is None
+            and now - int(used_at) < REFRESH_REUSE_GRACE
+        )
         if used_at is not None and not retry:
             # Rotation's reuse detection: the old token came back after the grace window,
-            # so two parties hold the grant. Revoke all of it; the rightful client signs in
-            # again.
+            # or a second time inside it, so two parties hold the grant. Revoke all of it;
+            # the rightful client signs in again.
             replayed = str(row["grant_id"])
             _revoke_grant(db, replayed, now)
         else:
@@ -1007,7 +1157,12 @@ def _refresh(
                 # reconnect instead of refreshing in a loop.
                 raise _invalid_grant("The connection was made for another FORGE address.")
             if retry:
-                # Not marked again: the window runs from the rotation, not from a retry.
+                # Its one retry: presented again, it revokes the grant. `used_at` stays, so
+                # the window runs from the rotation, not from the retry.
+                db.execute(
+                    "UPDATE oauth_tokens SET grace_used_at = ? WHERE token_hash = ?",
+                    (now, row["token_hash"]),
+                )
                 retried = str(row["grant_id"])
             else:
                 db.execute(
@@ -1070,6 +1225,14 @@ def _issue_tokens(db: StateDB, grant_id: str, resource: str, now: int) -> dict[s
             "expires_at) VALUES (?, ?, ?, ?, ?, ?)",
             (_sha256(value), kind, grant_id, resource, now, now + ttl),
         )
+    # Past MAX_LIVE_REFRESH_TOKENS live refresh tokens in the grant, the oldest go.
+    db.execute(
+        "UPDATE oauth_tokens SET revoked_at = ? WHERE token_hash IN ("
+        "SELECT token_hash FROM oauth_tokens WHERE grant_id = ? AND kind = 'refresh' "
+        "AND used_at IS NULL AND revoked_at IS NULL AND expires_at > ? "
+        "ORDER BY created_at DESC, rowid DESC LIMIT -1 OFFSET ?)",
+        (now, grant_id, now, MAX_LIVE_REFRESH_TOKENS),
+    )
     db.execute(
         "UPDATE oauth_grants SET expires_at = MAX(expires_at, ?) WHERE id = ?",
         (now + REFRESH_TTL, grant_id),
@@ -1170,12 +1333,22 @@ def revoke_token(
 # --- the resource server's side --------------------------------------------------------
 
 
+@dataclass(frozen=True)
+class AccessGrant:
+    """Who a live access token acts for, and the grant it belongs to. /mcp's rate limit
+    is per grant, so refreshing (a new token in the same grant) buys no fresh budget."""
+
+    identity: Identity
+    grant_id: str
+
+
 def verify_access_token(
     db: StateDB, token: str, resource: str, *, now: int | None = None
-) -> Identity:
-    """The person a live access token for `resource` acts for. Raises InvalidToken for
-    anything else: unknown, expired, revoked (alone or with its grant), or issued for
-    another resource (RFC 8707: a token is good only where it was meant to be used)."""
+) -> AccessGrant:
+    """The person a live access token for `resource` acts for, and its grant. Raises
+    InvalidToken for anything else: unknown, expired, revoked (alone or with its grant),
+    or issued for another resource (RFC 8707: a token is good only where it was meant to
+    be used)."""
     if not token.startswith(ACCESS_TOKEN_PREFIX) or not _TOKEN_SHAPE.fullmatch(token):
         raise InvalidToken("not a FORGE access token")
     moment = int(time.time()) if now is None else now
@@ -1199,12 +1372,8 @@ def verify_access_token(
         db.execute(
             "UPDATE oauth_grants SET last_used_at = ? WHERE id = ?", (moment, row["grant_id"])
         )
-    return Identity(sub=str(row["sub"]), login=str(row["login"]))
-
-
-def token_key(token: str) -> str:
-    """A stable, non-secret key for a token (its SHA-256), e.g. for rate limiting."""
-    return _sha256(token)
+    identity = Identity(sub=str(row["sub"]), login=str(row["login"]))
+    return AccessGrant(identity=identity, grant_id=str(row["grant_id"]))
 
 
 # --- connected agents ------------------------------------------------------------------

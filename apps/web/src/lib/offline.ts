@@ -184,6 +184,17 @@ function agentEvents(practice: PracticeTask, nowMs: number): BridgeEvent[] {
   }));
 }
 
+/** The last rail the practice run "started" (not just opened), if any. */
+function lastStarted(practice: PracticeTask): Rail | undefined {
+  return practice.events.filter((event) => event.kind === 'dispatched').at(-1)?.rail;
+}
+
+/** Whether a practice relay would "send" the notes: the API's `canRelay`, with a pretend key. */
+function practiceCanRelay(practice: PracticeTask): boolean {
+  const rail = lastStarted(practice);
+  return rail !== undefined && isStartRail(rail) && canRelayNotes(rail);
+}
+
 /** GET /api/bridge/status/{id}. */
 export function localStatus(taskId: number, practice: PracticeTask | undefined, nowMs = Date.now()): BridgeStatus {
   const stage = stageFor(practice, nowMs);
@@ -200,6 +211,7 @@ export function localStatus(taskId: number, practice: PracticeTask | undefined, 
       : {
           holder: DEMO_IDENTITY,
           leaseEndsAt: isoOf(practice.claimedAtMs + practice.leaseHours * 60 * 60 * 1000),
+          ...(practiceCanRelay(practice) ? { canRelay: true } : {}),
         }),
     ...(practice?.rail === undefined ? {} : { rail: practice.rail }),
     ...(stage === 'in_checks' ? { checksPassed: CHECKS_PASSED, checksTotal: CHECKS_TOTAL } : {}),
@@ -241,8 +253,9 @@ export function localChecks(task: TaskFixture, practice: PracticeTask | undefine
 }
 
 /**
- * POST /api/bridge/feedback/{id}: a start rail whose vendor takes follow-ups
- * (Jules, Cursor, Devin) would get the notes; anything else reads them itself.
+ * POST /api/bridge/feedback/{id}: the last start rail, when its vendor takes
+ * follow-ups (Jules, Cursor, Devin), would get the notes; anything else reads
+ * them itself.
  */
 export function localFeedback(
   task: TaskFixture,
@@ -250,8 +263,8 @@ export function localFeedback(
   nowMs = Date.now(),
 ): { result: FeedbackResponse; practice: PracticeTask } {
   const notes = practiceNotes(task);
-  const rail = practice.rail;
-  if (rail === undefined || !isStartRail(rail) || !canRelayNotes(rail)) {
+  const rail = lastStarted(practice);
+  if (rail === undefined || !practiceCanRelay(practice)) {
     return { result: { relayed: false, notes }, practice };
   }
   const label = railMeta(rail).label;

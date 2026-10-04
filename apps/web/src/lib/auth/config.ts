@@ -3,10 +3,13 @@
  * module load, so one build serves whatever each server is configured with.
  *
  * Edge-safe on purpose: the middleware imports this module, so it may import
- * nothing but `@forge/auth` (no `@forge/flags`, no `node:` built-ins).
+ * nothing but `@forge/auth` and the dependency-free `./api-url` (no
+ * `@forge/flags`, no `node:` built-ins).
  */
 import { MIN_SECRET_LENGTH, resolveSessionKeys } from '@forge/auth';
 import type { SessionKeys } from '@forge/auth';
+
+import { usableApiBase } from './api-url';
 
 /** Production picks the `__Host-` cookies and `Secure`. */
 export function isProduction(): boolean {
@@ -101,11 +104,24 @@ export function apiAssertionSecret(): string | null {
   return strong(process.env.FORGE_API_ASSERTION_SECRET);
 }
 
+const WARNED_INSECURE_API = Symbol.for('forge.auth.warnedInsecureApiUrl');
+
 /**
  * Where the BFF forwards to. A server-side setting first, since the API may
- * sit on a private address the browser never sees.
+ * sit on a private address the browser never sees. Null when that address is
+ * not https (plain http only to this computer: `usableApiBase`): pasted keys,
+ * the Copilot token and assertions never cross a network in the clear, so
+ * callers answer `not_configured` instead, and the server says why once.
  */
-export function apiUrl(): string {
-  const base = process.env.FORGE_API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-  return base.replace(/\/+$/, '');
+export function apiUrl(): string | null {
+  const base = usableApiBase(process.env.FORGE_API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000');
+  const processState = globalThis as unknown as Record<symbol, boolean | undefined>;
+  if (base === null && !processState[WARNED_INSECURE_API]) {
+    processState[WARNED_INSECURE_API] = true;
+    // Never the value itself: it is configuration, and may carry more than a host.
+    console.error(
+      'FORGE_API_URL is not an https URL (plain http only to localhost, 127.0.0.1 or ::1) without credentials, query or fragment, so FORGE sends nothing to the API',
+    );
+  }
+  return base;
 }

@@ -32,6 +32,7 @@ from forge_api.models import (
     TaskDetail,
     TaskList,
 )
+from forge_api.services import bridge as bridge_service
 
 from .bridge_helpers import JULES_KEY, OTHER, USER, BridgeEnv, has_null, install_bridge
 from .conftest import AuthHeaders, FakeClock
@@ -141,6 +142,59 @@ def test_error_bodies_are_flat_and_null_free(
         assert response.status_code >= 400
         assert isinstance(body.get("error"), str), body
         assert not has_null(body)
+
+
+def test_the_phase_4_review_error_codes_are_flat_and_null_free(
+    client: TestClient, env: BridgeEnv, auth_headers: AuthHeaders
+) -> None:
+    """tier_too_low, claim_cooldown, claim_rate_limit, already_started, submit_limit and
+    pr_not_for_task: flat JSON, and a Retry-After header where the contract says so."""
+    me = auth_headers(USER.sub, USER.login)
+    env.start_rails("jules")
+    env.monkeypatch.setattr(bridge_service, "CLAIM_RATE_LIMIT", 2)  # the third claim is refused
+
+    def claim(task_id: int) -> httpx.Response:
+        return client.post("/api/bridge/claim", json={"taskId": task_id}, headers=me)
+
+    def submit(number: int) -> httpx.Response:
+        return client.post(
+            "/api/bridge/submit/3",
+            json={"prUrl": f"https://github.com/verastd/forge-app/pull/{number}"},
+            headers=me,
+        )
+
+    seen: dict[str, httpx.Response] = {"tier_too_low": claim(2)}
+    ok(claim(1))
+    ok(client.post("/api/bridge/release/1", headers=me))
+    seen["claim_cooldown"] = claim(1)
+    ok(claim(3))
+    jules = {"taskId": 3, "rail": "jules", "credential": {"key": JULES_KEY}}
+    ok(client.post("/api/bridge/dispatch", json=jules, headers=me))
+    seen["already_started"] = client.post("/api/bridge/dispatch", json=jules, headers=me)
+    seen["claim_rate_limit"] = claim(6)
+    env.github.add_pull(40, USER.login, "unrelated")
+    seen["pr_not_for_task"] = submit(40)
+    for number in range(41, 51):
+        submit(number)
+    seen["submit_limit"] = submit(51)
+
+    statuses = {code: response.status_code for code, response in seen.items()}
+    assert statuses == {
+        "tier_too_low": 403,
+        "claim_cooldown": 409,
+        "already_started": 409,
+        "claim_rate_limit": 429,
+        "pr_not_for_task": 400,
+        "submit_limit": 429,
+    }
+    for code, response in seen.items():
+        body = response.json()
+        assert body["error"] == code and not has_null(body), body
+    assert seen["tier_too_low"].json() == {"error": "tier_too_low", "tierFloor": "T1"}
+    assert seen["claim_cooldown"].json()["retryAfter"] == 86400
+    assert seen["already_started"].json()["sessionUrl"].startswith("https://jules.google.com/")
+    for code in ("claim_cooldown", "claim_rate_limit", "submit_limit"):
+        assert seen[code].headers["retry-after"].isdigit(), code
 
 
 def test_required_fields_are_always_present(

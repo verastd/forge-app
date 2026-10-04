@@ -18,7 +18,11 @@
  *   adds stay behind;
  * - request bodies are JSON and at most 16 KB, read by the stream rather than
  *   by trusting Content-Length;
- * - state-changing methods must come from a page on this origin.
+ * - state-changing methods must come from a page on this origin;
+ * - nothing goes to an API that isn't https (`apiUrl`): 503 `not_configured`;
+ * - a request the API took but didn't answer in time is 504
+ *   `upstream_timeout`, not `service_unreachable`: a start or a relay may
+ *   still be happening behind it, so nobody may be told that nothing changed.
  *
  * Nothing here logs a request or response body: a dispatch body carries the
  * contributor's agent key.
@@ -34,7 +38,11 @@ import { getSession } from './session';
 export const MAX_BODY_BYTES = 16 * 1024;
 /** Until upstream answers with headers. */
 export const READ_TIMEOUT_MS = 25_000;
-/** A start waits on the vendor's API behind the API (20 s there, plus our own work). */
+/**
+ * A start waits on the vendor's API behind the API (20 s there, plus our own
+ * work). The browser waits longer than this (lib/api.ts), so it hears this
+ * server's 504 rather than giving up first.
+ */
 export const START_TIMEOUT_MS = 45_000;
 
 /** Statuses a Response may not carry a body with. */
@@ -95,6 +103,8 @@ export async function forward(request: NextRequest, spec: ForwardSpec): Promise<
   if (spec.method !== 'GET' && !isSameOrigin(request)) return bffError(403, 'bad_origin');
   // Keys anyone can seal under: never mint, whoever seems to be asking.
   if (sessionKeys()?.practiceOnly) return bffError(503, 'not_configured');
+  const base = apiUrl();
+  if (base === null) return bffError(503, 'not_configured');
 
   const session = await getSession();
   if (session?.demo === true) return bffError(403, 'practice_session');
@@ -124,7 +134,7 @@ export async function forward(request: NextRequest, spec: ForwardSpec): Promise<
   const timer = setTimeout(() => deadline.abort(), spec.timeoutMs ?? READ_TIMEOUT_MS);
   let upstream: Response;
   try {
-    upstream = await fetch(`${apiUrl()}${spec.upstreamPath}`, {
+    upstream = await fetch(`${base}${spec.upstreamPath}`, {
       method: spec.method,
       headers,
       body,
@@ -133,7 +143,9 @@ export async function forward(request: NextRequest, spec: ForwardSpec): Promise<
       signal: AbortSignal.any([deadline.signal, request.signal]),
     });
   } catch {
-    // Refused, reset, DNS, or the deadline.
+    // The deadline: the API has the request and may still act on it.
+    if (deadline.signal.aborted) return bffError(504, 'upstream_timeout');
+    // Refused, reset or DNS.
     return bffError(502, 'service_unreachable');
   } finally {
     clearTimeout(timer);
@@ -160,10 +172,11 @@ export async function postAsUser(
   timeoutMs = START_TIMEOUT_MS,
 ): Promise<ApiOutcome> {
   const authorization = await assertionFor(session);
-  if (authorization === null) return { ok: false, code: 'not_configured' };
+  const base = apiUrl();
+  if (authorization === null || base === null) return { ok: false, code: 'not_configured' };
   let response: Response;
   try {
-    response = await fetch(`${apiUrl()}${path}`, {
+    response = await fetch(`${base}${path}`, {
       method: 'POST',
       headers: { accept: 'application/json', 'content-type': 'application/json', authorization },
       body: JSON.stringify(payload),
@@ -171,8 +184,10 @@ export async function postAsUser(
       cache: 'no-store',
       signal: AbortSignal.timeout(timeoutMs),
     });
-  } catch {
-    return { ok: false, code: 'service_unreachable' };
+  } catch (error) {
+    // Out of time, the API may still be starting it; anything else never reached it.
+    const timedOut = error instanceof Error && error.name === 'TimeoutError';
+    return { ok: false, code: timedOut ? 'upstream_timeout' : 'service_unreachable' };
   }
   if (response.ok) {
     // The body is the DispatchResult; nothing here needs it, so it is not read.

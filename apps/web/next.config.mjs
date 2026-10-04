@@ -27,11 +27,17 @@ export const CONNECTOR_PATHS = Object.freeze([
 ]);
 
 /**
+ * The hosts plain `http:` may reach: this computer. Anywhere else, what goes
+ * to the API (pasted agent keys, the Copilot token, assertions) needs https.
+ */
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
+
+/**
  * `raw` as a proxy base (origin plus any base path, no trailing slash), or
- * null unless it is an absolute http(s) URL with no credentials, query or
- * fragment. Next compiles a destination's host and path as patterns (`:name`,
- * `(`, `*`), so only plain host and path characters get through; that also
- * leaves out IPv6 literals.
+ * null unless it is an absolute https URL (plain http only to localhost or
+ * 127.0.0.1) with no credentials, query or fragment. Next compiles a
+ * destination's host and path as patterns (`:name`, `(`, `*`), so only plain
+ * host and path characters get through; that also leaves out IPv6 literals.
  *
  * @param {string | undefined} raw
  * @returns {string | null}
@@ -44,7 +50,7 @@ function connectorApiBase(raw) {
   } catch {
     return null;
   }
-  if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
+  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && LOOPBACK_HOSTS.has(url.hostname))) return null;
   if (url.username || url.password || url.search || url.hash) return null;
   if (!/^[A-Za-z0-9.-]+$/.test(url.hostname)) return null;
   const path = url.pathname.replace(/\/+$/, '');
@@ -64,6 +70,67 @@ export function connectorRewrites(raw) {
   const base = connectorApiBase(raw);
   if (base === null) return [];
   return CONNECTOR_PATHS.map((path) => ({ source: path, destination: `${base}${path}` }));
+}
+
+/**
+ * `raw`'s origin when it parses as one of `schemes`, else null.
+ *
+ * @param {string | undefined} raw
+ * @param {readonly string[]} schemes
+ * @returns {URL | null}
+ */
+function parsedOrigin(raw, schemes) {
+  if (!raw) return null;
+  try {
+    const url = new URL(raw);
+    return schemes.includes(url.protocol) && !url.username && !url.password ? url : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Everywhere a page on this site may open a connection to (CSP
+ * `connect-src`), so script that got in can't send a pasted key anywhere
+ * else:
+ * - this origin: the BFF, the lobby's token route, Next's own requests (and,
+ *   under `next dev`, its hot-reload socket);
+ * - the API the browser reads from while signed out, and the flags:
+ *   NEXT_PUBLIC_API_URL, or the `http://localhost:8000` that lib/api.ts and
+ *   @forge/flags fall back to;
+ * - the lobby's LiveKit server (LIVEKIT_URL): its signal socket and the https
+ *   endpoints livekit-client checks on the same host (region settings, the
+ *   connection check). Only that host: LiveKit Cloud's other regions are left
+ *   out, so a failed join stays failed rather than trying another region.
+ *
+ * Both values are read when `next dev` starts or `next build` runs, like the
+ * rest of this file's headers, so set them at build time.
+ *
+ * @param {Record<string, string | undefined>} env
+ * @returns {string[]}
+ */
+export function connectSources(env) {
+  const sources = ["'self'"];
+  const api = parsedOrigin(env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000', ['https:', 'http:']);
+  if (api !== null) sources.push(api.origin);
+  const livekit = parsedOrigin(env.LIVEKIT_URL, ['wss:', 'ws:', 'https:', 'http:']);
+  if (livekit !== null) {
+    const secure = livekit.protocol === 'wss:' || livekit.protocol === 'https:';
+    sources.push(`${secure ? 'wss' : 'ws'}://${livekit.host}`, `${secure ? 'https' : 'http'}://${livekit.host}`);
+  }
+  return [...new Set(sources)];
+}
+
+/**
+ * The site-wide Content-Security-Policy: never framed (clickjacking on the
+ * sign-in, account and consent pages), and connections only to
+ * {@link connectSources}.
+ *
+ * @param {Record<string, string | undefined>} env
+ * @returns {string}
+ */
+export function contentSecurityPolicy(env) {
+  return `frame-ancestors 'none'; connect-src ${connectSources(env).join(' ')}`;
 }
 
 /** @type {import('next').NextConfig} */
@@ -96,14 +163,15 @@ const nextConfig = {
   transpilePackages: ['@forge/shared', '@forge/flags', '@forge/auth', '@forge/lobby', 'three'],
 
   // Baseline response headers on every route: no framing (clickjacking on the
-  // sign-in and account pages), no MIME sniffing, and no full URLs (the OAuth
+  // sign-in and account pages) and connections only where the site needs them
+  // (contentSecurityPolicy), no MIME sniffing, and no full URLs (the OAuth
   // callback's ?code=&state=) leaked to other origins in Referer.
   async headers() {
     return [
       {
         source: '/:path*',
         headers: [
-          { key: 'Content-Security-Policy', value: "frame-ancestors 'none'" },
+          { key: 'Content-Security-Policy', value: contentSecurityPolicy(process.env) },
           { key: 'X-Content-Type-Options', value: 'nosniff' },
           { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
         ],
@@ -131,8 +199,8 @@ const nextConfig = {
     const beforeFiles = connectorRewrites(raw);
     if (raw && beforeFiles.length === 0) {
       // Never the value itself: it is configuration, and may carry more than a host.
-      console.warn(
-        'FORGE_API_URL is not an absolute http(s) URL without credentials, query or fragment, so the FORGE connector paths (/mcp, /oauth/token, ...) are not proxied',
+      console.error(
+        'FORGE_API_URL is not an https URL (plain http only to localhost or 127.0.0.1) without credentials, query or fragment, so the FORGE connector paths (/mcp, /oauth/token, ...) are not proxied',
       );
     }
     return { beforeFiles, afterFiles: [], fallback: [] };

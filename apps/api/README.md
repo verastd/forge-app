@@ -15,7 +15,10 @@ Layout — routers stay thin, all logic lives in `services/` (AGENTS.md):
 
 ```
 src/forge_api/
-  main.py              app factory: title/version, CORS (and the connector paths' own), routers, error handler
+  main.py              app factory: title/version, CORS (and the connector paths' own), routers,
+                       error handlers (flat JSON errors; on /api/bridge and /api/oauth a failed
+                       validation is 422 invalid_request with field names only, 400 when nested
+                       more than 32 deep)
   models.py            pydantic mirrors of packages/shared zod schemas
   routers/             HTTP surface only: health, flags, bridge, upland, upland_scrape,
                        oauth (the connector's OAuth endpoints and the consent page's calls),
@@ -23,19 +26,19 @@ src/forge_api/
   services/
     flags.py           flag resolution
     identity.py        verifies the web tier's API assertion; the admin check
-    errors.py          the flat error envelope every endpoint answers with
-    state.py           the SQLite state database (FORGE_STATE_DB_PATH)
+    errors.py          ApiError, the flat {"error": ...} body the services raise
+    state.py           the SQLite state database (FORGE_STATE_DB_PATH; no migrations yet)
     brief.py           the brief every agent gets (mirrors packages/shared/src/brief.ts)
     rails.py           the rail registry (mirrors packages/shared/src/rails.ts)
-    bridge.py          the Bridge: tasks, claims, hand-offs, status, checks, submission
+    bridge.py          the Bridge: tasks, claims, hand-offs, status, checks, relays, submission
     vault.py           saved agent keys, encrypted (FORGE_VAULT_KEY)
-    github_reads.py    pull requests, check runs, forks and task issues from GitHub
-    rail_adapters/     one module per start rail's vendor API
+    github_reads.py    pull requests (by branch, number or search), check runs and forks from GitHub
+    rail_adapters/     one module per start rail's vendor API, and the outbound rules (base.py)
     bridge_mcp.py      the connector's tools, prompt and server instructions
     mcp_types.py       the seam between the MCP server and those tools
     mcp_server.py      the MCP server: JSON-RPC 2.0 over POST /mcp
     oauth.py           the connector's OAuth 2.1 authorization server
     upland/            the Upland scraper, storage and analytics
   tools/live_rails.py  runs one start rail outside the web app (docs/live-tests.md)
-  fixtures/tasks.json  8 agent-ready starter tasks (PRD H.3)
+  fixtures/tasks.json  8 agent-ready starter tasks (PRD H.3): the Bridge's only task source
 ```

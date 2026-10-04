@@ -76,7 +76,9 @@ export function compileBrief(
   if (criteria.length > 0) {
     sections.push(`Done when:\n${criteria.map((item) => `- ${item}`).join('\n')}`);
   }
-  // The pull request title is AGENTS.md rule 8's `[#<issue>] <goal>`.
+  // The pull request title is AGENTS.md rule 8's `[#<issue>] <goal>`. Inside its quotes
+  // a `"` in the title becomes `'`, so the title can't close the quote early.
+  const quotedTitle = task.title.replaceAll('"', "'");
   sections.push(
     'Rules:\n' +
       '- Read AGENTS.md at the repo root before you start.\n' +
@@ -84,7 +86,7 @@ export function compileBrief(
       "- Don't change .github/, the acceptance tests, or anything outside this task.\n" +
       '- Run make lint and make test before you push.\n' +
       `- When it's ready, open a pull request from ${head} to ${UPSTREAM_REPO} main, ` +
-      `titled "[#${task.id}] ${task.title}", with "Closes #${task.id}" in the description.`,
+      `titled "[#${task.id}] ${quotedTitle}", with "Closes #${task.id}" in the description.`,
   );
   sections.push(CONNECTOR_LINE);
   sections.push(`Task: ${task.url}`);
