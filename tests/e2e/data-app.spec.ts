@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import type { Page, Route } from '@playwright/test';
 
-import { DATA_LINK, DATA_SLOT, clickThrough, lobbyRoot, openLobby, slotOnScreen, tapThrough } from './helpers/lobby';
+import { DATA_LINK, DATA_SLOT, lobbyRoot, openLobby, slotOnScreen, tapThrough } from './helpers/lobby';
 import { demoSignIn, signInAs } from './helpers/session';
 
 /**
@@ -18,8 +18,8 @@ import { demoSignIn, signInAs } from './helpers/session';
  * the Data app's lit screen in the 3D view (lobby.spec.ts covers the lobby
  * itself, and helpers/lobby.ts how a test aims a tap).
  *
- * `/apps/data*` is behind sign-in, so every test past the entry flow below
- * signs in first, mostly with the practice account. The practice account
+ * `/apps` and everything under it is behind sign-in, so every test signs in
+ * first, mostly with the practice account. The practice account
  * still can't reach the API — the BFF 401s a demo session before it ever
  * forwards — but that's invisible once a test mocks the BFF's own routes
  * itself; where a test deliberately leaves them unmocked, that real 401 is
@@ -79,30 +79,30 @@ const SALE_ACTION = {
 };
 
 test.describe('reaching the Data app', () => {
-  test('from the lobby directory, signed out then in with the practice account, lands on /apps/data', async ({
+  test('signed out, from the lobby: a sign-in with the practice account, then its directory link, lands on /apps/data', async ({
     page,
   }) => {
     await page.goto('/apps');
-    await clickThrough(
-      page.getByRole('navigation', { name: 'Apps', exact: true }).getByRole('link', { name: DATA_LINK, exact: true }),
-      /\/signin\?next=%2Fapps%2Fdata$/,
-    );
-
+    await expect(page).toHaveURL(/\/signin\?next=%2Fapps$/);
     await demoSignIn(page);
-    await expect(page).toHaveURL(/\/apps\/data$/);
+    await expect(page).toHaveURL(/\/apps$/);
+
+    // The directory is the way in by keyboard while the 3D wall is the page.
+    await page
+      .getByRole('navigation', { name: 'Apps', exact: true })
+      .getByRole('link', { name: DATA_LINK, exact: true })
+      .focus();
+    await page.keyboard.press('Enter');
+    await expect(page).toHaveURL(/\/apps\/data$/, { timeout: 30_000 });
   });
 
-  test('from a tap on its lit screen in the 3D lobby, signed out then in, lands on /apps/data', async ({
-    page,
-  }) => {
+  test('from a tap on its lit screen in the 3D lobby, lands on /apps/data', async ({ page }) => {
     // The 3D view has to be up first, and SwiftShader builds it slowly.
     test.setTimeout(90_000);
     await openLobby(page);
     await expect(lobbyRoot(page)).toHaveAttribute('data-focus', 'data');
 
-    await tapThrough(page, await slotOnScreen(page, DATA_SLOT), /\/signin\?next=%2Fapps%2Fdata$/);
-    await demoSignIn(page);
-    await expect(page).toHaveURL(/\/apps\/data$/);
+    await tapThrough(page, await slotOnScreen(page, DATA_SLOT), /\/apps\/data$/);
     await expect(page.getByRole('link', { name: 'Back to the lobby' })).toHaveAttribute('href', '/apps?from=data');
   });
 });

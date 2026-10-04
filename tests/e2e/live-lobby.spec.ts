@@ -67,7 +67,9 @@ function jwtClaims(token: string): Record<string, unknown> {
   return JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as Record<string, unknown>;
 }
 
-test('with the API down the flags fail closed: no 3D view, just the directory', async ({ page }) => {
+test('with the API down the flags fail closed: no 3D view, just the directory', async ({ page, context, baseURL }) => {
+  // The lobby needs a sign-in; this build's is GitHub's, sealed directly.
+  await signInAs(context, baseURL ?? '', MEMBER);
   await page.route('**/api/**', (route) => route.abort());
   await page.goto('/apps');
 

@@ -2,7 +2,9 @@
  * Free roam, as the prototype drives it: drag to look, WASD or the touch
  * stick to walk, Space/Shift or the lift buttons to rise and fall, the wheel
  * to bob up and down, arrow keys to turn and tilt. A tap (a press that moved
- * less than 8 px) picks whatever panel is under it.
+ * less than 8 px) picks whatever panel is under it. The mouse's place over
+ * the canvas is kept for the scene's hover (the cursor, and an empty slot's
+ * readout).
  *
  * Angles follow @forge/lobby's camera.ts: yaw grows turning right, pitch
  * grows looking down. The look eases toward its target (faster when the
@@ -35,15 +37,22 @@ export interface ControlsOptions {
   fall: HTMLElement | null;
   /** Hit-tests a point in client coordinates. */
   pick(clientX: number, clientY: number): Hit | null;
-  /** A tap landed on something. */
-  onTap(hit: Hit): void;
+  /** A tap landed on something, from a mouse, a finger or a pen. */
+  onTap(hit: Hit, pointerType: string): void;
+}
+
+/** Where the mouse is over the canvas, in client coordinates, or null once it has left. */
+export interface HoverChange {
+  at: { x: number; y: number } | null;
 }
 
 export interface Controls {
   /** Advances the look and the walk by `dt` seconds. */
   step(dt: number, reducedMotion: boolean): void;
-  /** The last mouse position that wants a hover test, once; null when nothing moved. */
-  takeHover(): { x: number; y: number } | null;
+  /** The mouse's latest move over the canvas (or its leaving it), once; null when nothing changed. */
+  takeHover(): HoverChange | null;
+  /** A drag has gone past a tap's slop: the visitor is looking around, not pointing. */
+  looking(): boolean;
   dispose(): void;
 }
 
@@ -80,8 +89,8 @@ export function createControls(motion: Motion, opts: ControlsOptions): Controls 
   const { canvas, stick, knob, rise, fall } = opts;
   const keys = new Map<string, boolean>();
   const joy = { x: 0, y: 0 };
-  let drag: { id: number; x: number; y: number; sx: number; sy: number } | null = null;
-  let hover: { x: number; y: number } | null = null;
+  let drag: { id: number; x: number; y: number; sx: number; sy: number; looking: boolean } | null = null;
+  let hover: HoverChange | null = null;
   let stickPointer: number | null = null;
   const cleanups: Array<() => void> = [];
 
@@ -113,7 +122,14 @@ export function createControls(motion: Motion, opts: ControlsOptions): Controls 
     if (drag || (event.pointerType === 'mouse' && event.button !== 0)) {
       return;
     }
-    drag = { id: event.pointerId, x: event.clientX, y: event.clientY, sx: event.clientX, sy: event.clientY };
+    drag = {
+      id: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+      sx: event.clientX,
+      sy: event.clientY,
+      looking: false,
+    };
     capture(canvas, event.pointerId);
   });
   on(canvas, 'pointermove', (event) => {
@@ -126,8 +142,12 @@ export function createControls(motion: Motion, opts: ControlsOptions): Controls 
       );
       drag.x = event.clientX;
       drag.y = event.clientY;
-    } else if (!drag && event.pointerType === 'mouse') {
-      hover = { x: event.clientX, y: event.clientY };
+      if (!drag.looking && Math.hypot(event.clientX - drag.sx, event.clientY - drag.sy) >= TAP_SLOP) {
+        drag.looking = true;
+      }
+    }
+    if (event.pointerType === 'mouse') {
+      hover = { at: { x: event.clientX, y: event.clientY } };
     }
   });
   on(canvas, 'pointerup', (event) => {
@@ -136,10 +156,13 @@ export function createControls(motion: Motion, opts: ControlsOptions): Controls 
     }
     const tap = Math.hypot(event.clientX - drag.sx, event.clientY - drag.sy) < TAP_SLOP;
     drag = null;
+    if (event.pointerType === 'mouse') {
+      hover = { at: { x: event.clientX, y: event.clientY } };
+    }
     if (tap) {
       const hit = opts.pick(event.clientX, event.clientY);
       if (hit) {
-        opts.onTap(hit);
+        opts.onTap(hit, event.pointerType);
       }
     }
   });
@@ -150,8 +173,10 @@ export function createControls(motion: Motion, opts: ControlsOptions): Controls 
   };
   on(canvas, 'pointercancel', endDrag);
   on(canvas, 'lostpointercapture', endDrag);
-  on(canvas, 'pointerleave', () => {
-    hover = null;
+  on(canvas, 'pointerleave', (event) => {
+    if (event.pointerType === 'mouse') {
+      hover = { at: null };
+    }
     canvas.style.cursor = '';
   });
 
@@ -288,9 +313,12 @@ export function createControls(motion: Motion, opts: ControlsOptions): Controls 
       motion.pos.y = THREE.MathUtils.clamp(motion.pos.y, CAMERA_LIMITS.minY, CAMERA_LIMITS.maxY);
     },
     takeHover() {
-      const at = hover;
+      const change = hover;
       hover = null;
-      return at;
+      return change;
+    },
+    looking() {
+      return drag !== null && drag.looking;
     },
     dispose() {
       for (const cleanup of cleanups.splice(0)) {

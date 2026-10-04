@@ -11,13 +11,20 @@
  * wall's displacement and two normal maps) are built one per animation frame
  * before the first render, so the page stays responsive behind the veil.
  *
+ * The mouse over an empty slot (or a finger's tap on one, for a few
+ * seconds) puts that slot's readout in its panel and lights the rock behind
+ * it (readout.ts). Every colour comes from palette.ts.
+ *
  * Reduced motion: no dust drift, no light flicker, a still grid, no bobbing
- * orbs, and the look eases faster (controls.ts).
+ * orbs, a readout that switches rather than fades, and the look eases
+ * faster (controls.ts).
  *
  * The shell hears about it through callbacks: ready after the first frame,
  * lost when the WebGL context goes, error when a frame throws, and the
  * focus, peer count and picks as they change. Position is written straight
- * onto the lobby root as `data-x/y/z/yaw`, ten times a second.
+ * onto the lobby root as `data-x/y/z/yaw`, ten times a second, and the
+ * readout's slot as `data-hover-slot` (empty when none) and its light as
+ * `data-hover-glow` (on or off) whenever they change.
  */
 
 import * as THREE from 'three';
@@ -27,8 +34,10 @@ import type { AppEntry, CameraState } from '@forge/lobby';
 import type { PeerState, PresenceFeed, SelfState } from '../presence/types';
 import { createControls, createPicker } from './controls';
 import type { Hit, Motion } from './controls';
+import { CAVE_PALETTE, shaderColor } from './palette';
 import { createPeers } from './peers';
 import type { PeerClasses } from './peers';
+import { READOUT_TAP_MS, createSlotReadout } from './readout';
 import { SCREEN_INSET, applyTV, createEmbers, createScreenPanel, createTvLight } from './screen';
 import type { ScreenPanel } from './screen';
 
@@ -40,7 +49,6 @@ const WALL_H = 300;
 /** A lit screen loads its media once it is this close, or in view. */
 const MEDIA_RANGE = 40;
 const WARM = 0xff6a24;
-const GREEN = 0xc4ff4a;
 const NO_PEERS: ReadonlyMap<string, PeerState> = new Map();
 const NOBODY_JOINING: ReadonlyMap<string, string> = new Map();
 
@@ -293,9 +301,10 @@ export function createCave(canvas: HTMLCanvasElement, opts: CaveOptions): Cave {
 
   // ---------- holographic grid: every slot, one instance each, in slot-index order ----------
   const uTime = { value: 0 };
+  const hologram = shaderColor(CAVE_PALETTE.accent);
   const gridMat = new THREE.ShaderMaterial({
     uniforms: {
-      uColor: { value: new THREE.Color(GREEN) },
+      uColor: { value: hologram },
       uTime,
       uSize: { value: new THREE.Vector2(PW, PH) },
     },
@@ -345,6 +354,9 @@ export function createCave(canvas: HTMLCanvasElement, opts: CaveOptions): Cave {
   grid.renderOrder = 2;
   scene.add(grid);
 
+  // An empty slot's readout and its light on the rock: made once, shown on hover or a tap.
+  const readout = createSlotReadout(scene, { color: hologram, time: uTime, glow: CAVE_PALETTE.glow });
+
   // ---------- the screens: one per lit app ----------
   const embers = createEmbers();
   const light = lowTier || savesData();
@@ -380,7 +392,7 @@ export function createCave(canvas: HTMLCanvasElement, opts: CaveOptions): Cave {
   const spotMax = 14 * (18 / (LX * LY));
   const bounce = new THREE.HemisphereLight(0x408f96, 0x000000, 0);
   scene.add(bounce);
-  scene.add(new THREE.AmbientLight(GREEN, 0.022));
+  scene.add(new THREE.AmbientLight(CAVE_PALETTE.ambient, 0.022));
 
   // Dust in the light.
   const dustCount = lowTier ? 120 : 500;
@@ -455,6 +467,36 @@ export function createCave(canvas: HTMLCanvasElement, opts: CaveOptions): Cave {
     }
   };
 
+  // ---------- hover: the cursor, and an empty slot's readout ----------
+  /** Where the mouse is over the canvas (client coordinates), or null. */
+  let mouseAt: { x: number; y: number } | null = null;
+  let hoverStale = false;
+  let hoverKey = '';
+  /** The empty slot under the mouse, or null. */
+  let hoverSlot: number | null = null;
+  /** The empty slot a finger last tapped, shown until `tapUntil` (no hover on a touch screen). */
+  let tapSlot: number | null = null;
+  let tapUntil = 0;
+  /** What the root says the readout is on. */
+  let shownSlot: number | null = null;
+  const root = opts.hud.root;
+  root.dataset.hoverSlot = '';
+  root.dataset.hoverGlow = 'off';
+
+  /** What is under the mouse now, for the cursor and the readout. Nothing while it drags to look. */
+  const pickHover = (key: string): void => {
+    hoverStale = false;
+    hoverKey = key;
+    if (mouseAt === null || controls.looking()) {
+      hoverSlot = null;
+      canvas.style.cursor = '';
+      return;
+    }
+    const hit = picker.pick(mouseAt.x, mouseAt.y);
+    canvas.style.cursor = hit ? 'pointer' : '';
+    hoverSlot = hit !== null && !hit.lit ? hit.slot : null;
+  };
+
   const controls = createControls(motion, {
     canvas,
     stick: opts.hud.stick,
@@ -462,10 +504,14 @@ export function createCave(canvas: HTMLCanvasElement, opts: CaveOptions): Cave {
     rise: opts.hud.rise,
     fall: opts.hud.fall,
     pick: picker.pick,
-    onTap(hit) {
+    onTap(hit, pointerType) {
       setFocus(hit);
       // The tap wins over the crosshair until the camera moves again.
       focusKey = poseKey();
+      if (!hit.lit && pointerType !== 'mouse') {
+        tapSlot = hit.slot;
+        tapUntil = performance.now() + READOUT_TAP_MS;
+      }
       opts.onPick(hit, pose());
     },
   });
@@ -613,7 +659,8 @@ export function createCave(canvas: HTMLCanvasElement, opts: CaveOptions): Cave {
         last = now;
         return;
       }
-      const dt = Math.min(Math.max((now - last) / 1000, 0), 0.05);
+      const elapsed = Math.max((now - last) / 1000, 0);
+      const dt = Math.min(elapsed, 0.05);
       last = now;
       t += dt;
       fit();
@@ -650,7 +697,22 @@ export function createCave(canvas: HTMLCanvasElement, opts: CaveOptions): Cave {
 
       const hover = controls.takeHover();
       if (hover) {
-        canvas.style.cursor = picker.pick(hover.x, hover.y) ? 'pointer' : '';
+        mouseAt = hover.at;
+        hoverStale = true;
+      }
+      if (hoverStale) {
+        pickHover(poseKey());
+      }
+      if (tapSlot !== null && now >= tapUntil) {
+        tapSlot = null;
+      }
+      const readoutSlot = hoverSlot ?? tapSlot;
+      readout.show(readoutSlot);
+      readout.step(elapsed, reducedMotion);
+      if (readoutSlot !== shownSlot) {
+        shownSlot = readoutSlot;
+        root.dataset.hoverSlot = readoutSlot === null ? '' : String(readoutSlot);
+        root.dataset.hoverGlow = readoutSlot === null ? 'off' : 'on';
       }
 
       if (!reducedMotion) {
@@ -701,7 +763,6 @@ export function createCave(canvas: HTMLCanvasElement, opts: CaveOptions): Cave {
 
       if (now >= nextHudAt) {
         nextHudAt = now + 100;
-        const root = opts.hud.root;
         root.dataset.x = fixed(motion.pos.x);
         root.dataset.y = fixed(motion.pos.y);
         root.dataset.z = fixed(motion.pos.z);
@@ -710,6 +771,10 @@ export function createCave(canvas: HTMLCanvasElement, opts: CaveOptions): Cave {
         if (key !== focusKey) {
           focusKey = key;
           setFocus(picker.pickNdc(0, 0));
+        }
+        // The view moved under a still mouse (keys, the stick, a look easing in): so may what is under it.
+        if (mouseAt !== null && key !== hoverKey) {
+          pickHover(key);
         }
       }
     } catch (error) {
@@ -737,6 +802,9 @@ export function createCave(canvas: HTMLCanvasElement, opts: CaveOptions): Cave {
       canvas.removeEventListener('webglcontextlost', onContextLost);
       controls.dispose();
       peers.dispose();
+      readout.dispose();
+      delete root.dataset.hoverSlot;
+      delete root.dataset.hoverGlow;
       for (const screen of screens) {
         screen.dispose();
       }

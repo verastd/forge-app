@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 
+import { gotoLobby } from './helpers/lobby';
 import { demoSignIn } from './helpers/session';
 
 /**
@@ -28,13 +29,25 @@ async function expectPillOnScreen(page: Page): Promise<void> {
   expect((box?.x ?? 0) + (box?.width ?? Infinity)).toBeLessThanOrEqual(390);
 }
 
-for (const path of ['/', '/apps', '/propose']) {
+for (const path of ['/', '/propose']) {
   test(`${path}, signed out, fits the screen`, async ({ page }) => {
     await page.goto(path);
     await expect(page.getByRole('navigation', { name: 'Main' })).toBeVisible();
     await expectNoSideScroll(page);
   });
 }
+
+test('/apps, signed in (it needs a sign-in), fits the screen, its nav folded into a Menu button', async ({ page }) => {
+  await gotoLobby(page);
+  const menu = page.getByRole('button', { name: 'Menu', exact: true });
+  await expect(menu).toBeVisible();
+  await expectNoSideScroll(page);
+  // Hydrated: the nav knows it is on a narrow screen.
+  await expect(page.locator('header[data-chrome="lobby"]')).toHaveAttribute('data-nav-mode', 'menu');
+  await menu.click();
+  await expect(page.getByRole('navigation', { name: 'Main' })).toBeVisible();
+  await expectNoSideScroll(page);
+});
 
 test('/contribute with the API down fits the screen, pill and all', async ({ page }) => {
   await goOffline(page);

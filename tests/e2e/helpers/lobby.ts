@@ -15,6 +15,9 @@
  * only moves on frames: every wait below polls the attributes rather than
  * sleeping a fixed time.
  *
+ * `/apps` needs a sign-in: `gotoLobby` and `openLobby` sign in with the
+ * practice account when the visit lands on `/signin`.
+ *
  * Module resolution: `@forge/lobby` is a dependency of `apps/web` only, so,
  * as `helpers/session.ts` does for `@forge/auth`, it is imported from its
  * built `dist` by relative path, which needs `make setup` first. That keeps
@@ -50,6 +53,12 @@ if (data === undefined) {
 }
 /** The Data app's slot on the wall: 0, the bottom panel straight ahead of the spawn point. */
 export const DATA_SLOT = slotIndex(data.slot);
+
+/**
+ * An empty slot in view from the spawn point on any screen, a phone held
+ * upright included: the panel straight above Data's (column 0, row 1).
+ */
+export const EMPTY_ABOVE_DATA = slotIndex({ col: data.slot.col, row: data.slot.row + 1 });
 
 /** The scene camera's vertical field of view, in degrees (createCave.ts's PerspectiveCamera). */
 const FOV_DEGREES = 60;
@@ -93,14 +102,65 @@ export async function expectReady(page: Page, timeout = READY_TIMEOUT): Promise<
   await expect(lobbyRoot(page)).toHaveAttribute('data-lobby-state', 'ready', { timeout });
 }
 
-/** Opens `path` (default `/apps`) and waits for the 3D view to be up. */
+/** The page's heading block (the h1 and its lede) and its directory, as Lobby.tsx wraps them. */
+export function headingBlock(page: Page): Locator {
+  return lobbyRoot(page).locator('[data-heading]');
+}
+
+export function directoryBlock(page: Page): Locator {
+  return lobbyRoot(page).locator('[data-directory]');
+}
+
+/**
+ * Out of sight the way a visually hidden element is: in the page (so in the
+ * accessibility tree) but clipped to a box of a pixel at most. Playwright's
+ * own `toBeVisible` counts a 1 px box as visible, so this reads the box.
+ */
+export async function expectOutOfSight(locator: Locator): Promise<void> {
+  await expect(locator).toHaveCount(1);
+  await expect
+    .poll(async () => {
+      const box = await locator.boundingBox();
+      return box === null ? 0 : Math.max(box.width, box.height);
+    })
+    .toBeLessThanOrEqual(1);
+}
+
+/** On screen: visible, and a real box, not a clipped pixel. */
+export async function expectInSight(locator: Locator): Promise<void> {
+  await expect(locator).toBeVisible();
+  await expect.poll(async () => (await locator.boundingBox())?.width ?? 0).toBeGreaterThan(40);
+}
+
+/** `path` as a pattern for the end of a URL, every regex character escaped. */
+export function urlEndingWith(path: string): RegExp {
+  return new RegExp(`${path.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}$`);
+}
+
+/**
+ * Visits `path` (default `/apps`) signed in. The lobby and everything under
+ * it is behind sign-in (apps/web/src/middleware.ts), so a signed-out visit
+ * lands on `/signin?next=<path>`: this signs in there with the practice
+ * account, the demo build's own way in, and lands back on `path`. Already
+ * signed in, it is just the visit. The live build has no practice account:
+ * seal a session with `signInAs` before calling this there.
+ */
+export async function gotoLobby(page: Page, path = '/apps'): Promise<void> {
+  await page.goto(path);
+  if (new URL(page.url()).pathname === '/signin') {
+    await demoSignIn(page);
+  }
+  await expect(page).toHaveURL(urlEndingWith(path));
+}
+
+/** Opens `path` (default `/apps`) signed in (see `gotoLobby`) and waits for the 3D view to be up. */
 export async function openLobby(page: Page, path = '/apps'): Promise<void> {
   await expectWebGL2(page);
-  await page.goto(path);
+  await gotoLobby(page, path);
   await expectReady(page);
 }
 
-type FlagName =
+export type FlagName =
   | 'csv_export'
   | 'contribute_bridge'
   | 'upland_data'
@@ -116,7 +176,14 @@ type FlagName =
  * read every missing flag as off, `apps_lobby` included.
  */
 export async function serveFlags(page: Page, overrides: Partial<Record<FlagName, boolean>> = {}): Promise<void> {
-  const flags = {
+  const flags = allFlags(overrides);
+  await page.route('**/api/flags', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(flags) }),
+  );
+}
+
+function allFlags(overrides: Partial<Record<FlagName, boolean>> = {}): Record<FlagName, boolean> {
+  return {
     csv_export: true,
     contribute_bridge: true,
     upland_data: true,
@@ -127,9 +194,24 @@ export async function serveFlags(page: Page, overrides: Partial<Record<FlagName,
     proposals: true,
     ...overrides,
   };
-  await page.route('**/api/flags', (route) =>
-    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(flags) }),
-  );
+}
+
+/**
+ * Holds the flags answer until the returned function is called, then serves
+ * every flag on: until then the lobby stays where the server's first render
+ * left it, `loading`. Release it within 8 s, the flag client's own timeout
+ * (packages/flags), or the lobby goes on without the answer.
+ */
+export async function holdFlags(page: Page): Promise<() => void> {
+  let release: () => void = () => undefined;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route('**/api/flags', async (route) => {
+    await held;
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(allFlags()) });
+  });
+  return release;
 }
 
 /** The practice account, signed in through the real `/signin` page, landing on `/apps`. */
@@ -188,14 +270,19 @@ export async function slotOnScreen(page: Page, index: number, pitch = INITIAL_CA
 
 /**
  * A tap on the 3D view: press and release on one pixel (controls.ts counts
- * anything under 8 px of travel as a tap, not a drag). Checks first that
- * the canvas itself is what's under the point, so a heading or panel
- * floating over the view fails the test by name instead of eating the tap.
+ * anything under 8 px of travel as a tap, not a drag), with the mouse, or a
+ * finger with `touch` (the page needs `hasTouch`). Checks first that the
+ * canvas itself is what's under the point, so a heading or panel floating
+ * over the view fails the test by name instead of eating the tap.
  */
-export async function tapScene(page: Page, point: Point): Promise<void> {
+export async function tapScene(page: Page, point: Point, { touch = false } = {}): Promise<void> {
   const under = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.tagName ?? 'nothing', point);
   expect(under, `the tap at (${point.x.toFixed(0)}, ${point.y.toFixed(0)}) must land on the 3D view`).toBe('CANVAS');
-  await page.mouse.click(point.x, point.y);
+  if (touch) {
+    await page.touchscreen.tap(point.x, point.y);
+  } else {
+    await page.mouse.click(point.x, point.y);
+  }
 }
 
 /**

@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test';
 
+import { gotoLobby } from './helpers/lobby';
+
 /**
  * The splash and the main nav (PRD v0.2: Contribute / Propose / Apps). The
  * nav is shared chrome (`SiteChrome` renders it for every non-`/apps/<slug>`
@@ -83,13 +85,20 @@ test.describe('aria-current tracks the active section', () => {
 
   for (const { path, label } of SECTIONS) {
     test(`marks ${label} current on ${path}, and nothing else`, async ({ page }) => {
-      await page.goto(path);
-      const nav = page.getByRole('navigation', { name: 'Main' });
+      // The lobby needs a sign-in (the middleware): the practice account. Its nav
+      // slides out of sight once the 3D wall is up, so it is read even then.
+      const lobby = path === '/apps';
+      if (lobby) {
+        await gotoLobby(page);
+      } else {
+        await page.goto(path);
+      }
+      const nav = page.getByRole('navigation', { name: 'Main', includeHidden: lobby });
 
-      await expect(nav.getByRole('link', { name: label })).toHaveAttribute('aria-current', 'page');
+      await expect(nav.getByRole('link', { name: label, includeHidden: lobby })).toHaveAttribute('aria-current', 'page');
       for (const other of SECTIONS) {
         if (other.label !== label) {
-          await expect(nav.getByRole('link', { name: other.label })).not.toHaveAttribute(
+          await expect(nav.getByRole('link', { name: other.label, includeHidden: lobby })).not.toHaveAttribute(
             'aria-current',
             'page',
           );

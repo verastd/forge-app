@@ -22,17 +22,15 @@
  * banner says so and no deadline counts down.
  *
  * The heading and lede render in every state, first: arriving from the
- * lobby moves focus to the page's h1 (`SiteChrome`), and `?slot=` puts its
- * line straight after them.
+ * lobby moves focus to the page's h1 (`SiteChrome`).
  */
 
 import Link from 'next/link';
-import { Suspense, useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import type { ProposalMe } from '@forge/shared';
 
 import { useSession } from '../../components/SessionProvider';
 import { useToast } from '../../components/Toast';
-import { ProposeSlotNote } from '../../components/lobby/ProposeSlotNote';
 import { Freshness } from '../../lib/freshness';
 import { isDemoMode } from '../../lib/mode';
 import { failureOf, loadMe, loadProposals, switchTestTimers } from '../../lib/proposals';
@@ -253,11 +251,6 @@ export function ProposeFloor() {
           decides it together, in the open.
         </p>
       </div>
-      {!off && (
-        <Suspense fallback={null}>
-          <ProposeSlotNote />
-        </Suspense>
-      )}
 
       {flag.loading ? (
         <Loading text="Opening the floor…" />

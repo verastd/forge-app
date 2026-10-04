@@ -1,9 +1,10 @@
 /*
- * /apps is SiteChrome's "lobby" chrome mode (see SiteChrome.tsx): the site
- * nav stays, there's no footer, and the page is full-bleed. The 3D lobby
- * (components/lobby) fills the viewport under the nav; this page's heading
- * and directory float over it, taking the pointer only inside the
- * directory's own box so every drag around them reaches the cave.
+ * /apps is SiteChrome's "lobby" chrome mode (see SiteChrome.tsx): no footer,
+ * and the page is full-bleed. The 3D lobby (components/lobby) fills the
+ * viewport; while it is the page, this page's heading and directory are out
+ * of sight, and the directory, when a keyboard user brings it back, takes
+ * the pointer only inside its own box so every drag around it reaches the
+ * cave. Without the 3D view they are the page, under the site nav.
  */
 
 .lobby {

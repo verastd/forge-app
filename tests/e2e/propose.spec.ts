@@ -106,14 +106,6 @@ test.describe('the floor', () => {
     );
   });
 
-  test('?slot= from the lobby says the slot is free, right after the heading and lede', async ({ page }) => {
-    await page.goto('/propose?slot=2');
-    await expect(page.getByText('Slot 2 is free. Bring a proposal to fill it.')).toBeVisible();
-    // Slot 0 holds the Data app: no line for it.
-    await page.goto('/propose?slot=0');
-    await expect(page.getByRole('heading', { name: 'Needs a second' })).toBeVisible();
-    await expect(page.getByText(/is free/)).toHaveCount(0);
-  });
 });
 
 test.describe('read-only signed out', () => {

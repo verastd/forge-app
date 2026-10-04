@@ -10,18 +10,28 @@
  * - The scene itself (LobbyScene, loaded on the client only), inside an
  *   error boundary. A lost WebGL context, a throw while building or a throw
  *   in a frame all end in the same "Reload to try again" state.
+ * - The page's heading and directory. While the 3D wall is the page (from
+ *   the server's first render, through loading, to the wall on screen) both
+ *   are out of sight but still in the page for screen readers; the
+ *   directory shows while a keyboard user is in it. Without the wall
+ *   (switched off, no WebGL2, or a view that broke) they are the page.
  * - Presence: one feed per visit, connected on mount and closed on unmount.
  *   The scene publishes to it and draws its peers every frame; the mic
  *   button, and "Rejoin here" after the lobby was opened in another tab or
  *   device, are the only other things that talk to it. The button shows the
  *   feed's own word on the mic, which a reconnect can turn off.
- * - Opening: a tap on a lit panel saves the camera and opens the app; a tap
- *   on an empty slot opens /propose for that slot. Any visit to /apps starts
+ * - The cave is its own experience: a tap on a lit panel saves the camera and
+ *   opens the app; a tap on an empty slot stays in the cave and only says so
+ *   (the toast). Exit, top left whenever the wall is the page, is the other
+ *   way out: home, to `/`, which unmounts all of this, the presence and
+ *   voice feed with it, as any navigation does. Any visit to /apps starts
  *   from the camera this tab saved, if it saved one; otherwise at the
  *   centre, facing the app named by `?from=<slug>`. Coming back from an app
- *   (`?from=<slug>`) also puts keyboard focus on that app's directory link.
+ *   (`?from=<slug>`) to the page without its wall puts keyboard focus on
+ *   that app's directory link; with the wall, SiteChrome's arrival focus on
+ *   the page's h1 stands (see ArrivalFocus).
  * - The veil, the hint, the toast, the touch stick and the lift buttons,
- *   as in the prototype.
+ *   as in the prototype, and Exit.
  *
  * The root carries `data-lobby` and the state attributes e2e reads:
  * `data-lobby-state`, `data-focus`, `data-motion`, `data-peers`,
@@ -41,6 +51,7 @@ import {
 } from '@forge/lobby';
 import type { CameraState } from '@forge/lobby';
 import dynamic from 'next/dynamic';
+import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Component, Suspense, useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { ReactNode, RefObject } from 'react';
@@ -50,13 +61,13 @@ import { isDemoMode } from '../../lib/mode';
 import { useSession } from '../SessionProvider';
 import styles from './Lobby.module.css';
 import type { LobbySceneProps, SceneEvents } from './LobbyScene';
+import { isFallback, publishLobbyState } from './lobbyState';
+import type { LobbyState } from './lobbyState';
 import { createPresenceFeed } from './presence/types';
 import type { FeedKind, PresenceFeed } from './presence/types';
 import type { Hit } from './scene/controls';
 
 const LobbyScene = dynamic(() => import('./LobbyScene'), { ssr: false });
-
-type LobbyState = 'loading' | 'ready' | 'unsupported' | 'lost' | 'off';
 
 const MESSAGES: Partial<Record<LobbyState, string>> = {
   off: 'The 3D lobby is switched off right now.',
@@ -66,7 +77,17 @@ const MESSAGES: Partial<Record<LobbyState, string>> = {
 
 const TOAST_MS = 1800;
 
-const cx = (...names: Array<string | false | null | undefined>): string => names.filter(Boolean).join(' ');
+/**
+ * For a browser that runs no script (inside `<noscript>`): the heading and
+ * the directory back in sight, undoing `.aside` and `.directoryAside`.
+ */
+const NO_SCRIPT_SHOWS_THE_PAGE =
+  "[data-lobby] [data-heading='aside'], [data-lobby] [data-directory='aside'] {" +
+  ' position: static !important; width: auto !important; height: auto !important;' +
+  ' margin: 0 !important; overflow: visible !important; clip: auto !important;' +
+  ' clip-path: none !important; white-space: normal !important; }';
+
+const cx =(...names: Array<string | false | null | undefined>): string => names.filter(Boolean).join(' ');
 
 // ---------- reduced motion, as a store ----------
 
@@ -165,24 +186,46 @@ function SceneHost(props: Omit<LobbySceneProps, 'initial'>) {
   return <LobbyScene initial={initial} {...props} />;
 }
 
+/** Nobody has put keyboard focus anywhere yet: nothing, or the h1 SiteChrome focused on arrival. */
+function focusUntouched(): boolean {
+  const active = document.activeElement;
+  return active === null || active === document.body || (active instanceof HTMLElement && active.matches('main h1'));
+}
+
 /**
- * Back from an app (`?from=<slug>`): keyboard focus goes to that app's link
- * in the directory, so Tab carries on from where the visitor left. The link
- * is marked `data-arrival-focus` too, which SiteChrome's focus-on-arrival
- * prefers to the page's h1. Rendered with or without the 3D view.
+ * Back from an app (`?from=<slug>`) to the lobby without its 3D wall
+ * (`fallback`: switched off, no WebGL2, or a view that broke): keyboard
+ * focus goes to that app's link in the directory, the way in there, so Tab
+ * carries on from where the visitor left. The link is marked
+ * `data-arrival-focus` too, which SiteChrome's focus-on-arrival prefers to
+ * the page's h1. Focus somebody already moved stays where it is.
+ *
+ * While the wall is the page this does nothing: the directory is out of
+ * sight there, and focus moved into it would either reveal it on arrival or
+ * leave a sighted keyboard user on something they cannot see. SiteChrome's
+ * arrival focus on the page's h1 stands instead. The h1 is out of sight too,
+ * but it is the page's heading, not a control: a screen reader announces the
+ * page, the camera keys (scene/controls.ts) work from there as from
+ * anywhere that isn't a field or a button, and the first Tab goes on into
+ * the directory, which shows itself while focus is in it.
  */
-function ArrivalFocus({ root }: { root: RefObject<HTMLDivElement | null> }) {
+function ArrivalFocus({ root, fallback }: { root: RefObject<HTMLDivElement | null>; fallback: boolean }) {
   const from = useSearchParams().get('from');
   useEffect(() => {
+    if (!fallback) {
+      return undefined;
+    }
     const app = from === null ? undefined : appBySlug(from);
     const link = app ? root.current?.querySelector<HTMLElement>(`a[data-slug="${app.slug}"]`) : null;
     if (!link) {
       return undefined;
     }
     link.setAttribute('data-arrival-focus', '');
-    link.focus({ preventScroll: true });
+    if (focusUntouched()) {
+      link.focus({ preventScroll: true });
+    }
     return () => link.removeAttribute('data-arrival-focus');
-  }, [from, root]);
+  }, [from, root, fallback]);
   return null;
 }
 
@@ -291,19 +334,22 @@ export function Lobby({ heading, directory }: { heading: ReactNode; directory: R
 
   const say = useCallback((text: string) => setToast((current) => ({ text, on: true, id: current.id + 1 })), []);
 
+  // The chrome around the lobby (SiteChrome's lobby nav) follows its state.
+  useEffect(() => () => publishLobbyState('none'), []);
+
+  /** The cave is its own experience: nothing in it leaves but a lit app and Exit. */
   const open = (hit: Hit, pose: CameraState): void => {
-    saveCamera(pose);
-    if (hit.lit) {
-      const app = appBySlug(hit.slug);
-      if (!app) {
-        return;
-      }
-      say(`Opening ${app.title}`);
-      router.push(app.route);
-    } else {
-      say('Empty slot. Propose something for it.');
-      router.push(`/propose?slot=${hit.slot}`);
+    if (!hit.lit) {
+      say('Empty slot');
+      return;
     }
+    const app = appBySlug(hit.slug);
+    if (!app) {
+      return;
+    }
+    saveCamera(pose);
+    say(`Opening ${app.title}`);
+    router.push(app.route);
   };
 
   const events: SceneEvents = {
@@ -375,7 +421,12 @@ export function Lobby({ heading, directory }: { heading: ReactNode; directory: R
           : ready && webgl === 'yes'
             ? 'ready'
             : 'loading';
+  useEffect(() => {
+    publishLobbyState(state);
+  }, [state]);
   const message = MESSAGES[state];
+  /** No wall to show: the heading, the message and the directory are the page. */
+  const fallback = isFallback(state);
   const voice = !feedInfo.voice ? 'unavailable' : micOn ? 'on' : 'off';
 
   return (
@@ -404,26 +455,41 @@ export function Lobby({ heading, directory }: { heading: ReactNode; directory: R
       )}
 
       <Suspense fallback={null}>
-        <ArrivalFocus root={rootRef} />
+        <ArrivalFocus root={rootRef} fallback={fallback} />
       </Suspense>
 
       <div className={styles.overlay}>
         <div className={styles.intro}>
-          {heading}
+          {/* The way out of the cave, while the wall is the page: home. Without the
+              wall the page is a normal page, with the site nav, so it has none. */}
+          {!fallback && (
+            <Link href="/" className={styles.exit} aria-label="Exit the cave">
+              Exit
+            </Link>
+          )}
+          {/* While the wall is the page, from the server's first render on, the wall is
+              the heading and the directory: both step out of sight but stay in the page
+              for screen readers (the h1 is still the page's heading), and the directory
+              shows again while a keyboard user is in it. Without the wall they are the
+              page, so they show. */}
+          <div className={cx(!fallback && styles.aside)} data-heading={fallback ? 'shown' : 'aside'}>
+            {heading}
+          </div>
           {message && (
             <p className={styles.message} role="status">
               {message}
             </p>
           )}
-          {/* With the wall on screen, the wall is the directory: the list steps out of
-              sight but stays in the page for screen readers, and shows again while a
-              keyboard user is in it. Without the wall it is the way in, so it shows. */}
-          <div
-            className={cx(live && ready && styles.directoryAside)}
-            data-directory={live && ready ? 'aside' : 'shown'}
-          >
+          <div className={cx(!fallback && styles.directoryAside)} data-directory={fallback ? 'shown' : 'aside'}>
             {directory}
           </div>
+          {/* A browser that runs no script never gets the wall, and the state stays at
+              the server's 'loading': there the heading and the directory are the page,
+              so this undoes their hiding. Only such a browser reads it, so a visitor
+              with scripts never sees them come and go while the wall loads. */}
+          <noscript>
+            <style>{NO_SCRIPT_SHOWS_THE_PAGE}</style>
+          </noscript>
         </div>
         {live && (
           <aside className={styles.chat} aria-label="People nearby">

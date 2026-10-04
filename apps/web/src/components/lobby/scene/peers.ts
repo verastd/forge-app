@@ -18,6 +18,7 @@ import * as THREE from 'three';
 import { near, sanitizeName } from '@forge/lobby';
 
 import type { PeerState } from '../presence/types';
+import { CAVE_PALETTE } from './palette';
 
 /** CSS module class names the tags and the nearby list use (Lobby.module.css). */
 export interface PeerClasses {
@@ -41,7 +42,7 @@ export interface Peers {
   dispose(): void;
 }
 
-const ORB_COLOR = 0xc4ff4a;
+const ORB_COLOR = CAVE_PALETTE.accent;
 /** Point lights are pooled: a fixed count keeps three.js from recompiling every lit material when someone joins. */
 const LIGHT_POOL = 4;
 /** Orbs float a little under a visitor's eye height, where the prototype kept them. */

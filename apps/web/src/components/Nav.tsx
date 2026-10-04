@@ -26,7 +26,14 @@ function ParcelMark() {
   );
 }
 
-export function Nav() {
+/**
+ * What the site nav holds: the wordmark, the three jobs, the offline pill,
+ * the bell and the account slot. `layout="bar"` is the bar's order, left to
+ * right; `layout="panel"` is the lobby's menu panel on a phone
+ * (LobbyNav.tsx): the wordmark, the pill, the bell and the account slot on
+ * the top row, where their own panels have room to open, then the jobs.
+ */
+export function NavContents({ layout = 'bar' }: { layout?: 'bar' | 'panel' }) {
   const pathname = usePathname();
   const degraded = useDegraded();
 
@@ -35,36 +42,67 @@ export function Nav() {
   const isCurrent = (href: string): boolean =>
     pathname === href || pathname.startsWith(`${href}/`);
 
+  const wordmark = (
+    <Link href="/" className="wordmark" aria-label="FORGE home">
+      <ParcelMark />
+      <span className="wordmark-text">FORGE</span>
+    </Link>
+  );
+  const main = (
+    <nav aria-label="Main">
+      <ul className="nav-links">
+        {LINKS.map((link) => (
+          <li key={link.href}>
+            <Link
+              href={link.href}
+              className="nav-link"
+              aria-current={isCurrent(link.href) ? 'page' : undefined}
+            >
+              {link.label}
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </nav>
+  );
+  const account = (
+    <>
+      <span className="spacer" />
+      {degraded && (
+        <Chip tone="warn" className="degraded-pill" title="We could not reach the FORGE service, so you are seeing a local demo copy.">
+          offline demo data
+        </Chip>
+      )}
+      <NotificationBell />
+      <AccountMenu />
+    </>
+  );
+
+  if (layout === 'panel') {
+    return (
+      <>
+        <div className="nav-panel-head">
+          {wordmark}
+          {account}
+        </div>
+        {main}
+      </>
+    );
+  }
+  return (
+    <>
+      {wordmark}
+      {main}
+      {account}
+    </>
+  );
+}
+
+export function Nav() {
   return (
     <header className="nav">
       <div className="nav-inner">
-        <Link href="/" className="wordmark" aria-label="FORGE home">
-          <ParcelMark />
-          <span className="wordmark-text">FORGE</span>
-        </Link>
-        <nav aria-label="Main">
-          <ul className="nav-links">
-            {LINKS.map((link) => (
-              <li key={link.href}>
-                <Link
-                  href={link.href}
-                  className="nav-link"
-                  aria-current={isCurrent(link.href) ? 'page' : undefined}
-                >
-                  {link.label}
-                </Link>
-              </li>
-            ))}
-          </ul>
-        </nav>
-        <span className="spacer" />
-        {degraded && (
-          <Chip tone="warn" className="degraded-pill" title="We could not reach the FORGE service, so you are seeing a local demo copy.">
-            offline demo data
-          </Chip>
-        )}
-        <NotificationBell />
-        <AccountMenu />
+        <NavContents />
       </div>
     </header>
   );
