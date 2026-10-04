@@ -64,7 +64,7 @@ async function practiceSignIn(page: Page, next: string): Promise<void> {
   await goOffline(page);
   await page.goto(`/signin?next=${encodeURIComponent(next)}`);
   await demoSignIn(page);
-  await expect(page).toHaveURL(new RegExp(`${next.replace(/[/]/g, '\\/')}$`));
+  await expect(page).toHaveURL(new RegExp(`${next.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`));
 }
 
 test.describe('the floor', () => {
