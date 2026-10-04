@@ -41,8 +41,8 @@
  * `data-lobby-state`, `data-focus`, `data-motion`, `data-peers`,
  * `data-voice` (unavailable, off or on), `data-feed`, `data-sound`
  * (blocked, on, or none without voice), `data-room-sound` and
- * `data-deafened` here, and `data-x/y/z/yaw`, which the scene writes itself
- * ten times a second.
+ * `data-deafened` here, and `data-x/y/z/yaw/pitch`, which the scene writes
+ * itself ten times a second.
  */
 
 import { useFlags } from '@forge/flags/react';

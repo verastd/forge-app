@@ -6,7 +6,7 @@
  * GL, SwiftShader (`playwright.config.ts` pins it), so nothing here reads
  * pixels. The page reports on itself through its root element instead,
  * `<div data-lobby>` (apps/web/src/components/lobby/Lobby.tsx):
- * `data-lobby-state`, the camera as `data-x/y/z/yaw` (written by the frame
+ * `data-lobby-state`, the camera as `data-x/y/z/yaw/pitch` (written by the frame
  * loop, so absent until the first frame), what the crosshair is on as
  * `data-focus`, and the presence feed as `data-feed`, `data-peers`,
  * `data-voice`, `data-sound`, `data-room-sound` and `data-deafened`. The

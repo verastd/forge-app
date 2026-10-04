@@ -806,8 +806,8 @@ doing, for e2e and for anyone debugging:
 | `lost` | The WebGL context was lost, or the scene threw while building or in a frame: "The 3D view stopped. Reload to try again." |
 | `off` | The `apps_lobby` flag is off: "The 3D lobby is switched off right now." |
 
-Beside it: `data-x`, `data-y`, `data-z` and `data-yaw` (the camera, written
-ten times a second once the first frame is drawn), `data-focus` (the app
+Beside it: `data-x`, `data-y`, `data-z`, `data-yaw` and `data-pitch` (the
+camera, written ten times a second once the first frame is drawn), `data-focus` (the app
 under the crosshair or the last tap, or `empty:<slot>`), `data-motion`
 (`full`, or `reduced` while the visitor prefers reduced motion: no drift,
 flicker or bob), `data-feed` (`none`, `local` or `livekit`: the feed presence
@@ -821,9 +821,10 @@ showing, or empty, and whether its light is `on` or `off`). The people
 panel marks each row `data-person-id`. The site nav's header on `/apps`
 carries `data-nav-mode` and `data-nav` (`shown` or `hidden`).
 
-**Moving and opening.** Drag to look; WASD, the arrow keys or the touch
-stick to walk; Space and Shift, or the lift buttons, to rise and fall. The
-camera stays 2.5 m inside the wall's ring, between eye height and 220 m. A
+**Moving and opening.** Drag to look (a drag pulls the cave, as a photo
+sphere does: drag right and the view turns left); WASD, the arrow keys or
+the touch stick to walk; Space and Shift, or the lift buttons, to rise and
+fall. The camera stays 2.5 m inside the wall's ring, between eye height and 220 m. A
 tap on a lit panel saves the camera in `sessionStorage`
 (`forge.lobby.pos.v2`, so per tab) and opens the app; so does leaving the
 lobby any other way. Any visit to `/apps` in that tab, the browser's Back
