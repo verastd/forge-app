@@ -4,14 +4,19 @@ pull request by number (for submit), and whether the caller has a fork.
 Reads are anonymous unless FORGE_GITHUB_READ_TOKEN is set; a read-only token raises
 GitHub's limit from 60 to 5,000 requests an hour, and production needs one (every status
 poll may read a pull request and its checks). The GITHUB_TOKEN variable that CI runners
-and dev containers carry is never read. Answers are cached per process: pull requests
-and checks for 60 s, forks for 5 minutes. Every failure raises GitHubUnavailable, and
-callers degrade (checks say "pending" with a plain note) instead of answering 500.
+and dev containers carry is never read. A read that GitHub refuses with 401 because of
+the token (expired or revoked) is retried once anonymously, and one warning is logged
+for it, naming the variable but never the token or any header: reads keep working at
+the anonymous rate until the operator replaces the token. Answers are cached per
+process: pull requests and checks for 60 s, forks for 5 minutes. Every failure raises
+GitHubUnavailable, and callers degrade (checks say "pending" with a plain note) instead
+of answering 500.
 
 Same outbound rules as the rail adapters (rail_adapters/base.py): no redirects, 5 s to
 connect, 20 s in all, at most 1 MB read.
 """
 
+import logging
 import os
 import re
 import threading
@@ -33,6 +38,8 @@ from forge_api.services.rail_adapters.base import (
     make_client,
     strip_controls,
 )
+
+logger = logging.getLogger(__name__)
 
 READ_TOKEN_ENV = "FORGE_GITHUB_READ_TOKEN"
 API_URL = "https://api.github.com"
@@ -239,8 +246,22 @@ class GitHubReads:
         return env.get(READ_TOKEN_ENV, "").strip()
 
     def _get(self, path: str, params: Mapping[str, str] | None = None) -> VendorResponse:
-        headers = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": API_VERSION}
         token = self._token()
+        response = self._send(path, params, token)
+        if token and response.status == 401:
+            # The token is expired or revoked, and every read would fail with it. The
+            # same read anonymously still works, at 60 an hour. The warning names the
+            # variable only: never the token, and no header.
+            logger.warning(
+                "GitHub refused %s (401), so a read was retried without it; "
+                "replace the token, since anonymous reads are limited to 60 an hour",
+                READ_TOKEN_ENV,
+            )
+            response = self._send(path, params, "")
+        return response
+
+    def _send(self, path: str, params: Mapping[str, str] | None, token: str) -> VendorResponse:
+        headers = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": API_VERSION}
         if token:
             headers["Authorization"] = f"Bearer {token}"
         call = OutboundCall(

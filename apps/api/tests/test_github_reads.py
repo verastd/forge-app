@@ -1,6 +1,8 @@
 """GitHub reads (services/github_reads.py): which pull request counts, how checks become
 a state and notes, the caches, the read token, and failing soft."""
 
+import logging
+
 import httpx
 import pytest
 
@@ -140,6 +142,87 @@ def test_the_read_token_comes_only_from_its_own_variable(github: FakeGitHub) -> 
     signed.pull(1)
     assert github.requests[-1].headers["authorization"] == "Bearer test-only-read"
     assert github.requests[-1].headers["x-github-api-version"] == "2022-11-28"
+
+
+EXPIRED_TOKEN = "test-only-expired-read-token"
+READS_LOGGER = "forge_api.services.github_reads"
+
+
+def warnings_from_reads(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
+    """What github_reads logged (httpx logs each request too, at INFO)."""
+    return [record for record in caplog.records if record.name == READS_LOGGER]
+
+
+def refusing_the_token(github: FakeGitHub) -> httpx.Client:
+    """api.github.com once the read token has expired: a request carrying it gets 401."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "authorization" in request.headers:
+            github.requests.append(request)
+            return json_response(401, {"message": "Bad credentials"})
+        return github.handler(request)
+
+    return httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=False)
+
+
+def test_a_refused_read_token_is_retried_once_anonymously_with_one_warning(
+    github: FakeGitHub, caplog: pytest.LogCaptureFixture
+) -> None:
+    github.add_pull(12, LOGIN, BRANCH)
+    github.add_fork(LOGIN)
+    reads = GitHubReads(
+        client=refusing_the_token(github), env={"FORGE_GITHUB_READ_TOKEN": EXPIRED_TOKEN}
+    )
+    with caplog.at_level(logging.DEBUG):
+        pull = reads.pull(12)
+
+    assert pull is not None and pull.number == 12
+    # Once with the token, then once without it.
+    assert [request.headers.get("authorization") for request in github.requests] == [
+        f"Bearer {EXPIRED_TOKEN}",
+        None,
+    ]
+    ours = warnings_from_reads(caplog)
+    assert [record.levelno for record in ours] == [logging.WARNING]
+    warning = ours[0].getMessage()
+    assert "FORGE_GITHUB_READ_TOKEN" in warning and "401" in warning
+    # Nothing anyone logged (httpx included) carries the token or a header.
+    for leaked in (EXPIRED_TOKEN, "Bearer", "uthorization", "Accept", "X-GitHub"):
+        assert leaked not in caplog.text
+
+    # Every kind of read falls back the same way, one warning each.
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        assert reads.fork(LOGIN).exists is True
+        assert reads.find_pull(LOGIN, BRANCH) is not None
+    assert len(warnings_from_reads(caplog)) == 2
+    assert EXPIRED_TOKEN not in caplog.text
+
+
+def test_only_a_refused_token_is_retried(
+    github: FakeGitHub, caplog: pytest.LogCaptureFixture
+) -> None:
+    signed = GitHubReads(client=github.client(), env={"FORGE_GITHUB_READ_TOKEN": EXPIRED_TOKEN})
+    with caplog.at_level(logging.WARNING):
+        # Anonymous already: a 401 is just a failure.
+        github.fail = 401
+        with pytest.raises(GitHubUnavailable):
+            github.reads().pull(1)
+        assert len(github.requests) == 1
+        # Any other refusal of the token (403: rate limited) isn't retried either.
+        github.fail = 403
+        with pytest.raises(GitHubUnavailable):
+            signed.pull(1)
+        assert len(github.requests) == 2
+        assert warnings_from_reads(caplog) == []
+        # An anonymous retry that fails too is a failure, after exactly one retry.
+        github.fail = 401
+        with pytest.raises(GitHubUnavailable):
+            signed.pull(1)
+    assert len(github.requests) == 4
+    assert github.requests[2].headers["authorization"] == f"Bearer {EXPIRED_TOKEN}"
+    assert "authorization" not in github.requests[3].headers
+    assert len(warnings_from_reads(caplog)) == 1
 
 
 def test_check_runs_parse(github: FakeGitHub, reads: GitHubReads) -> None:

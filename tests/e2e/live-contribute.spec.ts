@@ -597,9 +597,33 @@ test.describe('after the hand-off', () => {
   }
 
   test('a status with no holder means it is not yours any more', async ({ page, context, baseURL }) => {
-    await holdingTaskOne(page, context, baseURL, {
-      status: status({ holder: undefined, leaseEndsAt: undefined, detail: 'This task was let go.' }),
+    // The page asks for the status as soon as it shows the task as yours, so
+    // an answer that comes back at once can take the lease away before that
+    // view has painted. Hold the answer until the view is up.
+    let answerStatus = (): void => undefined;
+    const statusMayAnswer = new Promise<void>((resolve) => {
+      answerStatus = () => resolve();
     });
+    await signInAs(context, baseURL ?? '', IDENTITY);
+    await serviceDown(page);
+    await openBridge(page);
+    await serve(page, '**/bff/bridge/tasks/1', detail(MINE));
+    await serve(page, '**/bff/bridge/rails', rails());
+    await page.route('**/bff/bridge/status/1', async (route) => {
+      await statusMayAnswer;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(status({ holder: undefined, leaseEndsAt: undefined, detail: 'This task was let go.' })),
+      });
+    });
+    try {
+      await page.goto('/contribute/task/1');
+      await expect(page.getByRole('heading', { name: 'Get your agent on it' })).toBeVisible();
+    } finally {
+      answerStatus();
+    }
+
     await expect(page.getByText("This task isn't yours any more: it was released, or its time ran out.", { exact: false })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Get your agent on it' })).toHaveCount(0);
     await expect(page.getByRole('region', { name: 'Where it is' })).toHaveCount(0);
