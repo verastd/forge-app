@@ -210,6 +210,10 @@ def _explain(exc: ApiError, task_id: int | None, login: str) -> ToolError:
             "once. Finish one, or release it with release_task, first."
         ),
         "not_claimed": f"Task {task} isn't claimed by anyone. Call claim_task first.",
+        "already_shipped": (
+            f"Task {task} is already shipped: its pull request was merged, so there is "
+            "nothing left to do on it. Call list_tasks to find an open one."
+        ),
         "not_holder": (
             f"Task {task} is claimed by someone else, so only they can do that. Call "
             "list_tasks to find an open one."

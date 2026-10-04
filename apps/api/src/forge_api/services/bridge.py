@@ -1096,7 +1096,9 @@ class Bridge:
 
     def held_lease(self, identity: Identity, task_id: int) -> Lease:
         """The caller's lease on the task while it holds it: 409 not_claimed when nobody
-        holds it, 403 not_holder when someone else does. The caller's own lease that ran
+        holds it, 403 not_holder when someone else does, 409 already_shipped once its pull
+        request merged (the lease still keeps the task off the board, but nobody can start
+        agents, report, hand in or release on shipped work). The caller's own lease that ran
         out of time is first checked for a pull request opened in time, which holds it."""
         lease = self.store.latest(task_id)
         now = self.store.now()
@@ -1113,6 +1115,8 @@ class Bridge:
             raise ApiError(409, {"error": "not_claimed", "taskId": task_id})
         if lease.holder_sub != identity.sub:
             raise ApiError(403, {"error": "not_holder", "taskId": task_id})
+        if lease.merged:
+            raise ApiError(409, {"error": "already_shipped", "taskId": task_id})
         return lease
 
     def latest_lease(self, task_id: int) -> Lease:

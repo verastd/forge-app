@@ -282,6 +282,10 @@ test.describe('the hand-off helpers (lib/handoff.ts)', () => {
       ],
       [{ code: 'not_holder' }, "This task isn't yours any more, so nothing changed. Claim it again first."],
       [{ code: 'not_claimed' }, "This task isn't yours any more, so nothing changed. Claim it again first."],
+      [
+        { code: 'already_shipped' },
+        'This task is already shipped: its pull request was merged, so there is nothing left to do on it.',
+      ],
       [{ code: 'unauthenticated' }, 'Your sign-in has ended. Sign in again, then try once more.'],
       [{ code: 'practice_session' }, "Practice accounts can't do that. Sign in with GitHub to do it for real."],
       [{ code: 'service_unreachable' }, "FORGE couldn't reach its service just now, so nothing changed. Try again in a minute."],

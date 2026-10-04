@@ -192,6 +192,7 @@ export const START_ERROR_CODES: ReadonlySet<string> = new Set([
   'already_started',
   'not_holder',
   'not_claimed',
+  'already_shipped',
   'unauthenticated',
   'practice_session',
   'bad_origin',
@@ -224,6 +225,8 @@ function common(code: string): string | null {
     case 'not_holder':
     case 'not_claimed':
       return "This task isn't yours any more, so nothing changed. Claim it again first.";
+    case 'already_shipped':
+      return 'This task is already shipped: its pull request was merged, so there is nothing left to do on it.';
     case 'too_large':
     case 'body_too_large':
       return "That's too long to send. Check what you pasted.";

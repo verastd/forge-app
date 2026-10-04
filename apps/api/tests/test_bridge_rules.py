@@ -269,11 +269,41 @@ def test_a_merged_task_stays_done_and_frees_the_claim_limit(
     assert theirs.structured is not None and theirs.structured["lease"]["state"] == "taken"
     assert "was merged" in theirs.text
 
-    # Letting a shipped task go doesn't reopen it.
-    assert client.post("/api/bridge/release/1", headers=me).status_code == 200
+    # Shipped work can't be let go, so it can't be reopened that way either.
+    released = client.post("/api/bridge/release/1", headers=me)
+    assert (released.status_code, released.json()["error"]) == (409, "already_shipped")
     assert card(client, 1)["status"] == "claimed"
     assert claim(client, them, 1).json() == {"error": "already_claimed", "claimedBy": USER.login}
     assert status(client)["stage"] == "shipped"
+
+
+def test_shipped_work_takes_no_more_holder_actions(
+    client: TestClient, env: BridgeEnv, me: dict[str, str]
+) -> None:
+    """Review on #18: once its pull request merged, the former holder (and their agent)
+    can't start more agent sessions, send notes, hand in another pull request, report
+    progress or let the task go; the lease only keeps shipped work off the board."""
+    claimed(client, me, 1)
+    env.github.add_pull(11, USER.login, CSV_BRANCH, state="closed", merged=True)
+    assert status(client, me)["stage"] == "shipped"
+
+    for response in (
+        dispatch(client, me, "codex"),
+        client.post("/api/bridge/feedback/1", headers=me),
+        submit(client, me, 11),
+        client.post("/api/bridge/release/1", headers=me),
+    ):
+        assert (response.status_code, response.json()) == (
+            409,
+            {"error": "already_shipped", "taskId": 1},
+        )
+    for name, args in (
+        ("report_progress", {"task_id": 1, "stage": "working", "message": "More."}),
+        ("submit_task", {"task_id": 1, "pr_url": pull_link(11)}),
+        ("release_task", {"task_id": 1}),
+    ):
+        assert "already shipped" in refused(name, args)
+    assert status(client, me)["stage"] == "shipped"
 
 
 def test_an_agent_after_the_clock_is_still_the_holder_when_its_pull_request_is_open(
