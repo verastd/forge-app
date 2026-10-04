@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test';
 
+import { gotoLobby } from './helpers/lobby';
+
 /**
  * The splash and the main nav (PRD v0.2: Contribute / Propose / Apps). The
  * nav is shared chrome (`SiteChrome` renders it for every non-`/apps/<slug>`
@@ -83,7 +85,12 @@ test.describe('aria-current tracks the active section', () => {
 
   for (const { path, label } of SECTIONS) {
     test(`marks ${label} current on ${path}, and nothing else`, async ({ page }) => {
-      await page.goto(path);
+      if (path === '/apps') {
+        // The lobby needs a sign-in (the middleware): the practice account.
+        await gotoLobby(page);
+      } else {
+        await page.goto(path);
+      }
       const nav = page.getByRole('navigation', { name: 'Main' });
 
       await expect(nav.getByRole('link', { name: label })).toHaveAttribute('aria-current', 'page');

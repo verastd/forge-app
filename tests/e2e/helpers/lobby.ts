@@ -15,6 +15,9 @@
  * only moves on frames: every wait below polls the attributes rather than
  * sleeping a fixed time.
  *
+ * `/apps` needs a sign-in: `gotoLobby` and `openLobby` sign in with the
+ * practice account when the visit lands on `/signin`.
+ *
  * Module resolution: `@forge/lobby` is a dependency of `apps/web` only, so,
  * as `helpers/session.ts` does for `@forge/auth`, it is imported from its
  * built `dist` by relative path, which needs `make setup` first. That keeps
@@ -93,10 +96,31 @@ export async function expectReady(page: Page, timeout = READY_TIMEOUT): Promise<
   await expect(lobbyRoot(page)).toHaveAttribute('data-lobby-state', 'ready', { timeout });
 }
 
-/** Opens `path` (default `/apps`) and waits for the 3D view to be up. */
+/** `path` as a pattern for the end of a URL, every regex character escaped. */
+export function urlEndingWith(path: string): RegExp {
+  return new RegExp(`${path.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}$`);
+}
+
+/**
+ * Visits `path` (default `/apps`) signed in. The lobby and everything under
+ * it is behind sign-in (apps/web/src/middleware.ts), so a signed-out visit
+ * lands on `/signin?next=<path>`: this signs in there with the practice
+ * account, the demo build's own way in, and lands back on `path`. Already
+ * signed in, it is just the visit. The live build has no practice account:
+ * seal a session with `signInAs` before calling this there.
+ */
+export async function gotoLobby(page: Page, path = '/apps'): Promise<void> {
+  await page.goto(path);
+  if (new URL(page.url()).pathname === '/signin') {
+    await demoSignIn(page);
+  }
+  await expect(page).toHaveURL(urlEndingWith(path));
+}
+
+/** Opens `path` (default `/apps`) signed in (see `gotoLobby`) and waits for the 3D view to be up. */
 export async function openLobby(page: Page, path = '/apps'): Promise<void> {
   await expectWebGL2(page);
-  await page.goto(path);
+  await gotoLobby(page, path);
   await expectReady(page);
 }
 

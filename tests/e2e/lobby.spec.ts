@@ -8,6 +8,7 @@ import {
   clickThrough,
   expectReady,
   expectWebGL2,
+  gotoLobby,
   holdKey,
   lobbyRoot,
   openLobby,
@@ -20,7 +21,7 @@ import {
   slotOnScreen,
   tapThrough,
 } from './helpers/lobby';
-import { signInAs } from './helpers/session';
+import { demoSignIn, signInAs } from './helpers/session';
 
 /**
  * The Apps lobby at /apps (project `chromium-demo`: the practice build, API
@@ -45,15 +46,18 @@ import { signInAs } from './helpers/session';
  * test opts out, as the full-motion block below does (it never visits `/`).
  *
  * Presence on the practice build is the local feed: tabs of one browser
- * over a BroadcastChannel, no server and no voice. A signed-out visitor has
- * no feed at all. The LiveKit feed is live-lobby.spec.ts's; this server is
- * never given LiveKit settings (playwright.config.ts blanks them), so its
- * token route says voice is unavailable.
+ * over a BroadcastChannel, no server and no voice. The LiveKit feed is
+ * live-lobby.spec.ts's; this server is never given LiveKit settings
+ * (playwright.config.ts blanks them), so its token route says voice is
+ * unavailable.
+ *
+ * `/apps` needs a sign-in (the middleware), so every visit here signs in
+ * with the practice account first (`gotoLobby` and `openLobby` in
+ * helpers/lobby.ts). Signed out, the lobby is a redirect to /signin.
  */
 
 /** A dark slot on the bottom row, three columns right of Data: in view from the spawn point. */
 const DARK_SLOT = 3;
-const SIGN_IN_FOR_DATA = /\/signin\?next=%2Fapps%2Fdata$/;
 
 function directoryLink(page: Page) {
   return page
@@ -69,7 +73,7 @@ test('the browser has WebGL2, or every scene test below fails for that reason', 
   await expectWebGL2(page);
 });
 
-test('signed out, the lobby comes up at the centre, facing the Data screen, alone', async ({ page }) => {
+test('signed in, the lobby comes up at the centre, facing the Data screen, alone', async ({ page }) => {
   test.setTimeout(90_000);
   await openLobby(page);
 
@@ -83,8 +87,8 @@ test('signed out, the lobby comes up at the centre, facing the Data screen, alon
   });
   await expect(root).toHaveAttribute('data-focus', 'data');
   await expect(root).toHaveAttribute('data-motion', 'reduced');
-  // Nobody signed in: no presence feed, nobody else, and no voice.
-  await expect(root).toHaveAttribute('data-feed', 'none');
+  // The practice account in one tab: the local feed, nobody else, and no voice.
+  await expect(root).toHaveAttribute('data-feed', 'local');
   await expect(root).toHaveAttribute('data-peers', '0');
   await expect(root).toHaveAttribute('data-voice', 'unavailable');
   await expect(page.getByRole('button', { name: 'Voice unavailable' })).toBeDisabled();
@@ -93,7 +97,7 @@ test('signed out, the lobby comes up at the centre, facing the Data screen, alon
 test('the heading, the lede and the directory are unchanged, and list the Data app and the empty slots', async ({
   page,
 }) => {
-  await page.goto('/apps');
+  await gotoLobby(page);
 
   await expect(page.getByRole('heading', { name: 'Apps', level: 1 })).toBeVisible();
   await expect(page.getByText('Everything the community has built, on one wall.')).toBeVisible();
@@ -124,12 +128,30 @@ test('with the wall on screen the directory steps out of sight, and comes back f
   await expect.poll(async () => (await directory.boundingBox())?.width ?? 0).toBeLessThanOrEqual(1);
 });
 
-test.describe('signed out, the Data app asks for a sign-in first', () => {
-  test('from the directory link, by keyboard: the way in once the wall is up', async ({ page }) => {
+test.describe('signed out, the lobby asks for a sign-in first', () => {
+  test('/apps goes to /signin and, signed in with the practice account, comes back', async ({ page }) => {
     await page.goto('/apps');
+    await expect(page).toHaveURL(/\/signin\?next=%2Fapps$/);
+    await demoSignIn(page);
+    await expect(page).toHaveURL(/\/apps$/);
+    await expect(lobbyRoot(page)).toHaveCount(1);
+  });
+
+  test("an app's way back, /apps?from=data, keeps its ?from= through the sign-in", async ({ page }) => {
+    await page.goto('/apps?from=data');
+    await expect(page).toHaveURL(/\/signin\?next=%2Fapps%3Ffrom%3Ddata$/);
+    await demoSignIn(page);
+    await expect(page).toHaveURL(/\/apps\?from=data$/);
+    await expect(lobbyRoot(page)).toHaveCount(1);
+  });
+});
+
+test.describe('signed in, the Data app opens', () => {
+  test('from the directory link, by keyboard: the way in once the wall is up', async ({ page }) => {
+    await gotoLobby(page);
     await directoryLink(page).focus();
     await page.keyboard.press('Enter');
-    await expect(page).toHaveURL(SIGN_IN_FOR_DATA, { timeout: 30_000 });
+    await expect(page).toHaveURL(/\/apps\/data$/, { timeout: 30_000 });
   });
 
   test('from a tap on its lit screen', async ({ page }) => {
@@ -137,7 +159,7 @@ test.describe('signed out, the Data app asks for a sign-in first', () => {
     await openLobby(page);
     await expect(lobbyRoot(page)).toHaveAttribute('data-focus', 'data');
 
-    await tapThrough(page, await slotOnScreen(page, DATA_SLOT), SIGN_IN_FOR_DATA);
+    await tapThrough(page, await slotOnScreen(page, DATA_SLOT), /\/apps\/data$/);
   });
 });
 
@@ -232,7 +254,7 @@ test("/propose?slot= puts its note after the heading and lede, so a reader start
 
 test.describe('reduced motion', () => {
   test('data-motion follows the preference: reduced, then full, then reduced again', async ({ page }) => {
-    await page.goto('/apps');
+    await gotoLobby(page);
     const root = lobbyRoot(page);
 
     await expect(root).toHaveAttribute('data-motion', 'reduced');
@@ -247,7 +269,7 @@ test.describe('reduced motion', () => {
     test.use({ contextOptions: { reducedMotion: 'no-preference' } });
 
     test('data-motion is full, and turns reduced when the preference does', async ({ page }) => {
-      await page.goto('/apps');
+      await gotoLobby(page);
       const root = lobbyRoot(page);
 
       await expect(root).toHaveAttribute('data-motion', 'full');
@@ -270,19 +292,19 @@ test.describe('without the 3D view', () => {
         },
       });
     });
-    await page.goto('/apps');
+    await gotoLobby(page);
 
     const root = lobbyRoot(page);
     await expect(root).toHaveAttribute('data-lobby-state', 'unsupported');
     await expect(page.getByText("This browser can't show the 3D lobby.")).toBeVisible();
     await expect(root.locator('canvas')).toHaveCount(0);
-    await clickThrough(directoryLink(page), SIGN_IN_FOR_DATA);
+    await clickThrough(directoryLink(page), /\/apps\/data$/);
   });
 
   test('the apps_lobby flag off: the directory and one line saying so', async ({ page }) => {
     // The practice build's fallback is every flag on, so off has to be served.
     await serveFlags(page, { apps_lobby: false });
-    await page.goto('/apps');
+    await gotoLobby(page);
 
     const root = lobbyRoot(page);
     await expect(root).toHaveAttribute('data-lobby-state', 'off');
@@ -323,7 +345,7 @@ test.describe('without the 3D view', () => {
         },
       });
     });
-    await page.goto('/apps');
+    await gotoLobby(page);
 
     await expect(lobbyRoot(page)).toHaveAttribute('data-lobby-state', 'lost', { timeout: 60_000 });
     await expect(page.getByText('The 3D view stopped. Reload to try again.')).toBeVisible();
@@ -467,7 +489,10 @@ test("the practice build's token route has no LiveKit settings: even a GitHub se
   expect(await response.json()).toEqual({ error: 'voice_unavailable' });
 });
 
-test('/apps/nope is a 404 with the not-found page', async ({ page }) => {
+test('/apps/nope asks for a sign-in, then is a 404 with the not-found page', async ({ page }) => {
+  await page.goto('/apps/nope');
+  await expect(page).toHaveURL(/\/signin\?next=%2Fapps%2Fnope$/);
+  await demoSignIn(page);
   const response = await page.goto('/apps/nope');
   expect(response?.status()).toBe(404);
   await expect(page.getByRole('heading', { name: 'Page not found', level: 1 })).toBeVisible();

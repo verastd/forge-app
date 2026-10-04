@@ -53,6 +53,40 @@ test.describe('signed out', () => {
     await page.goto('/apps/data');
     await expect(page).toHaveURL(/\/signin\?next=%2Fapps%2Fdata$/);
   });
+
+  test('so does the lobby itself, /apps', async ({ page }) => {
+    await page.goto('/apps');
+    await expect(page).toHaveURL(/\/signin\?next=%2Fapps$/);
+  });
+
+  // Every way into the lobby a signed-out visitor is shown lands on the
+  // sign-in and, once signed in, comes back to the lobby.
+  for (const { from, name, scope } of [
+    { from: '/', name: 'Apps', scope: 'nav' },
+    { from: '/', name: 'Enter the lobby', scope: 'hero' },
+    { from: '/nonexistent', name: 'Go to the lobby', scope: 'main' },
+  ] as const) {
+    test(`"${name}" on ${from} goes through the sign-in to the lobby`, async ({ page }) => {
+      await page.goto(from);
+      const link =
+        scope === 'nav'
+          ? page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name })
+          : scope === 'hero'
+            ? page.locator('.hero-actions').getByRole('link', { name })
+            : page.getByRole('main').getByRole('link', { name });
+      // Clicked again only while the page never left: a click can land before Next hydrates.
+      await expect(async () => {
+        if (!page.url().includes('/signin')) {
+          await link.click({ timeout: 5_000 });
+        }
+        await expect(page).toHaveURL(/\/signin\?next=%2Fapps$/, { timeout: 10_000 });
+      }).toPass({ timeout: 45_000 });
+
+      await demoSignIn(page);
+      await expect(page).toHaveURL(/\/apps$/);
+      await expect(page.locator('[data-lobby]')).toHaveCount(1);
+    });
+  }
 });
 
 test.describe('signing in with the practice account', () => {
