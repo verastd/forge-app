@@ -41,6 +41,7 @@ from forge_api.services.rail_adapters.base import (
     https_url,
     json_body,
     session_ref,
+    started_body,
 )
 
 BASE_URL = "https://jules.googleapis.com/v1alpha"
@@ -175,7 +176,7 @@ class JulesAdapter(RailAdapter):
             rejected_statuses=frozenset({401}),
             rejected=_bad_key,
         )
-        body = json_body(response, vendor=self.vendor)
+        body = started_body(response)
         name = body.get("name")
         ident = body.get("id")
         ref = session_ref(name) if isinstance(name, str) and name.startswith("sessions/") else None

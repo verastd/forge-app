@@ -1,8 +1,12 @@
+import { createServer } from 'node:http';
+import type { ServerResponse } from 'node:http';
+
 import { expect, test } from '@playwright/test';
 import type { APIRequestContext } from '@playwright/test';
 
+import { DEMO_API_PORT } from './helpers/env';
 import { demoSignIn, signInAs } from './helpers/session';
-import { assertionClaims, json, withStandIn } from './helpers/standin';
+import { assertionClaims, json, listenWhenFree, withStandIn } from './helpers/standin';
 
 /**
  * The Bridge BFF (`/bff/bridge/*`) and the connected-agents BFF
@@ -289,5 +293,32 @@ test.describe('with a stand-in API on the demo server’s API port', () => {
         expect(await response.json()).toEqual({ error: 'service_unreachable' });
       },
     );
+  });
+
+  test('an API that took the request but never answers is a 504 upstream_timeout, not "unreachable"', async ({
+    context,
+    baseURL,
+  }) => {
+    // A start or a relay may still go through behind it, so the page must not
+    // be told nothing changed (review-creds CR-3). A read shows the same rule
+    // at its 25 s deadline; a start waits 45 s for the same answer.
+    test.setTimeout(90_000);
+    await signInAs(context, baseURL ?? '', { sub: '4100206', login: 'slow-check' });
+    const held: ServerResponse[] = [];
+    const server = createServer((_request, response) => {
+      held.push(response);
+    });
+    await listenWhenFree(server, DEMO_API_PORT);
+    try {
+      const started = Date.now();
+      const response = await context.request.get('/bff/bridge/rails', { timeout: 60_000 });
+      expect(response.status()).toBe(504);
+      expect(await response.json()).toEqual({ error: 'upstream_timeout' });
+      expect(Date.now() - started).toBeGreaterThanOrEqual(24_000);
+      expect(held).toHaveLength(1);
+    } finally {
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+    }
   });
 });

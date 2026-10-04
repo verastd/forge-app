@@ -39,6 +39,7 @@ from forge_api.services.rail_adapters.base import (
     json_body,
     send,
     session_ref,
+    started_body,
 )
 
 BASE_URL = "https://api.cursor.com"
@@ -102,7 +103,7 @@ class CursorAdapter(RailAdapter):
             rejected_statuses=frozenset({401}),
             rejected=rejected,
         )
-        body = json_body(response, vendor=self.vendor)
+        body = started_body(response)
         agent = body.get("agent")
         agent = agent if isinstance(agent, dict) else {}
         return AdapterResult(

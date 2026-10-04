@@ -17,7 +17,6 @@ from forge_api.services.bridge import (
     FixtureTaskSource,
     GitHubTaskSource,
     branch_name,
-    parse_task_issue,
 )
 from forge_api.services.brief import compile_brief
 from forge_api.services.state import get_state_db
@@ -88,7 +87,9 @@ def db_bytes(path: Any) -> bytes:
 
 
 def plain(text: str) -> bool:
-    padded = f" {text.lower()} "
+    """No jargon in FORGE's own words. A label quoted from the task page (“…”) is the
+    page's wording, so it isn't checked here."""
+    padded = f" {re.sub(r'“[^”]*”', '', text).lower()} "
     return not any(term in padded for term in JARGON)
 
 
@@ -233,6 +234,8 @@ def test_claim_is_the_callers_and_repeating_it_is_idempotent(
 def test_lease_hours_follow_size_class(
     client: TestClient, env: BridgeEnv, user_headers: dict[str, str]
 ) -> None:
+    # The only size M task has tier floor T1, above every account's T0 for now.
+    env.monkeypatch.setattr(bridge_service, "caller_tier", lambda identity: "T1")
     assert claim(client, user_headers, FLAGS_ADMIN_TASK)["leaseHours"] == 96
 
 
@@ -247,16 +250,17 @@ def test_claim_unknown_task_is_404(
 def test_claim_limit_counts_active_leases(
     client: TestClient, env: BridgeEnv, user_headers: dict[str, str]
 ) -> None:
+    # Tasks 1, 3, 6 and 8 are the T0 ones.
     claim(client, user_headers, 1)
-    claim(client, user_headers, 2)
-    third = client.post("/api/bridge/claim", json={"taskId": 3}, headers=user_headers)
+    claim(client, user_headers, 3)
+    third = client.post("/api/bridge/claim", json={"taskId": 6}, headers=user_headers)
     assert third.status_code == 409
     assert third.json() == {"error": "claim_limit", "limit": 2}
     env.monkeypatch.setenv("FORGE_MAX_ACTIVE_CLAIMS", "3")
-    claim(client, user_headers, 3)
+    claim(client, user_headers, 6)
     env.monkeypatch.setenv("FORGE_MAX_ACTIVE_CLAIMS", "nonsense")  # back to the default
     assert (
-        client.post("/api/bridge/claim", json={"taskId": 4}, headers=user_headers).status_code
+        client.post("/api/bridge/claim", json={"taskId": 8}, headers=user_headers).status_code
         == 409
     )
 
@@ -532,6 +536,7 @@ def test_a_rejected_saved_key_is_deleted(
     )
     assert first.status_code == 200, first.text
     env.vendor.respond = lambda request: json_response(401, {"error": "Unauthorized"})
+    env.clock.advance(121)  # past the two minutes in which a start answers already_started
     rejected = dispatch(client, user_headers, "cursor")
     assert rejected.status_code == 400
     assert rejected.json() == {"error": "credential_rejected", "rail": "cursor"}
@@ -659,6 +664,11 @@ def test_stages_follow_the_real_signals(
     ready = status(client, user_headers)
     assert ready["stage"] == "ready_to_submit"
     assert "compareUrl" in ready
+    # It names the compare link as the task page labels it.
+    assert ready["detail"] == (
+        "Your agent says the work is ready, but there's no pull request for it yet. Use “When "
+        "your agent has pushed its branch: open the pull request”, or ask your agent to open it."
+    )
 
     sha = "a" * 40
     env.github.add_pull(12, USER.login, CSV_BRANCH, sha=sha)
@@ -679,7 +689,11 @@ def test_stages_follow_the_real_signals(
     env.clock.advance(61)
     failed = status(client, user_headers)
     assert failed["stage"] == "in_checks"
-    assert "1 of 2 checks failed" in failed["detail"]
+    # Nothing was started with a saved key, so there is no "Send the notes" to point at.
+    assert (failed["canRelay"], failed["detail"]) == (
+        False,
+        "1 of 2 checks failed. Your agent can read the notes below and fix them.",
+    )
 
     env.github.set_checks(sha, ("lint", "completed", "success"), ("test", "completed", "success"))
     env.clock.advance(61)
@@ -730,7 +744,10 @@ def test_a_reported_pull_request_from_the_holders_fork_counts(
     client: TestClient, env: BridgeEnv, user_headers: dict[str, str]
 ) -> None:
     claim(client, user_headers)
-    env.github.add_pull(41, USER.login, "cursor/some-other-name", sha="c" * 40)
+    # Another branch, but its title names the task: AGENTS.md rule 8's `[#<issue>]`.
+    env.github.add_pull(
+        41, USER.login, "cursor/some-other-name", sha="c" * 40, title="[#1] Polish the export"
+    )
     progress(env, "pr_opened", "Opened it", "https://github.com/verastd/forge-app/pull/41")
     seen = status(client, user_headers)
     assert seen["stage"] == "in_checks"
@@ -746,7 +763,7 @@ def test_github_trouble_degrades_status_instead_of_failing(
     env.clock.advance(61)
     seen = status(client, user_headers)
     assert seen["stage"] == "agent_working"
-    assert "couldn't reach GitHub" in seen["detail"]
+    assert "GitHub can't be reached right now" in seen["detail"]
 
 
 def test_status_shows_at_most_fifty_events(
@@ -754,6 +771,7 @@ def test_status_shows_at_most_fifty_events(
 ) -> None:
     claim(client, user_headers)
     for index in range(60):
+        env.clock.advance(150)  # within the 30-an-hour limit on progress reports
         progress(env, "working", f"step {index}")
     events = status(client, user_headers)["events"]
     assert len(events) == 50
@@ -794,6 +812,7 @@ def test_everyone_else_still_gets_forges_newest_events(
     FORGE's own events out of what everyone else sees."""
     claim(client, user_headers)
     for index in range(60):
+        env.clock.advance(150)  # within the 30-an-hour limit on progress reports
         progress(env, "working", f"step {index}")
     assert [event["kind"] for event in status(client)["events"]] == ["claimed"]
     assert len(status(client, user_headers)["events"]) == 50
@@ -858,7 +877,7 @@ def test_check_results_follow_the_pull_request(
     down = client.get(f"/api/bridge/checks/{CSV_TASK}")
     assert down.status_code == 200
     assert down.json()["state"] == "pending"
-    assert "couldn't reach GitHub" in down.json()["notes"]
+    assert "GitHub can't be reached right now" in down.json()["notes"]
 
 
 def test_check_results_notes_for_every_state(
@@ -884,10 +903,10 @@ def test_check_results_notes_for_every_state(
     assert passed["notes"] == "All 2 checks passed on pull request #21. Nothing to fix."
     env.github.fail_on = "/check-runs"
     down = checks()
-    assert down["state"] == "pending" and "couldn't read the checks" in down["notes"]
+    assert down["state"] == "pending" and "can't be read" in down["notes"]
     assert down["prUrl"].endswith("/pull/21") and down["headSha"] == sha
     seen = status(client, user_headers)
-    assert seen["stage"] == "in_checks" and "couldn't reach GitHub" in seen["detail"]
+    assert seen["stage"] == "in_checks" and "GitHub can't be reached" in seen["detail"]
     env.github.fail_on = None
     env.github.pulls[0].update(state="closed", merged=True)
     merged = checks()
@@ -911,12 +930,17 @@ def test_progress_reports_are_capped_per_task(
     client: TestClient, env: BridgeEnv, user_headers: dict[str, str]
 ) -> None:
     claim(client, user_headers)
-    env.monkeypatch.setattr(bridge_service, "MAX_PROGRESS_PER_LEASE", 2)
+    env.monkeypatch.setattr(bridge_service, "PROGRESS_LIMIT", 2)
     progress(env, "working")
     progress(env, "working")
     with pytest.raises(bridge_service.ApiError) as caught:
         progress(env, "working")
-    assert (caught.value.status_code, caught.value.payload["error"]) == (429, "progress_limit")
+    assert (caught.value.status_code, caught.value.payload) == (
+        429,
+        {"error": "progress_limit", "limit": 2},
+    )
+    env.clock.advance(3601)  # a limit per hour, not a cap on the task
+    progress(env, "working")
 
 
 def test_small_helpers_and_providers(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1050,7 +1074,8 @@ def test_submit_checks_the_pull_request_is_the_callers(
     assert theirs.status_code == 403
     assert theirs.json() == {"error": "not_your_pr", "prNumber": 78}
 
-    env.github.add_pull(79, USER.login, "my-own-name", sha="f" * 40)
+    # Another branch, but the description links the task, as Foreman's gate reads it.
+    env.github.add_pull(79, USER.login, "my-own-name", sha="f" * 40, body="Fixes #1")
     ok = submit("https://github.com/verastd/forge-app/pull/79/")
     assert ok.status_code == 200
     body = ok.json()
@@ -1090,8 +1115,8 @@ def test_profile_is_the_callers_own(
     assert fresh["ledger"] == [
         {"kind": "claim", "refIssue": CSV_TASK, "points": 0.0, "at": "2026-08-10T09:00:00Z"}
     ]
-    env.github.add_pull(12, USER.login, CSV_BRANCH, state="closed", merged=True)
     env.clock.advance(3600)
+    env.github.add_pull(12, USER.login, CSV_BRANCH, state="closed", merged=True)  # at 10:00
     status(client, user_headers)  # notices the merge
     shipped = client.get("/api/bridge/profile", headers=user_headers).json()
     assert shipped["merged"] == 1 and shipped["survivalRate"] == 1.0
@@ -1151,97 +1176,25 @@ def test_fixture_tasks_carry_their_criteria() -> None:
     assert branch_name(1, tasks[0].title) == CSV_BRANCH
 
 
-ISSUE_BODY = """### Goal
-
-Export works.
-
-### Civilian summary
-
-Let people download what they see.
-
-### Acceptance criteria
-
-1. The export returns CSV
-2) It has a header row
-- It is fast
-
-### Acceptance tests
-
-tests/acceptance/issue-31/
-
-### Size class
-
-M
-
-### Tier floor
-
-_No response_
-
-### Reward class
-
-R2
-"""
-
-
-def issue(number: int = 31, **overrides: Any) -> dict[str, Any]:
-    base: dict[str, Any] = {
-        "number": number,
-        "title": "Ship the export",
-        "body": ISSUE_BODY,
-        "html_url": f"https://github.com/verastd/forge-app/issues/{number}",
-        "labels": [{"name": "agent-ready"}, {"name": "status:open"}, {"name": "size:S"}],
-    }
-    base.update(overrides)
-    return base
-
-
-def test_a_task_spec_issue_parses_into_a_task() -> None:
-    task = parse_task_issue(issue())
-    assert task is not None
-    assert (task.id, task.title, task.size, task.rewardClass, task.rewardUsd, task.tierFloor) == (
-        31,
-        "Ship the export",
-        "M",
-        "R2",
-        200.0,
-        "T0",
-    )
-    assert task.civilianSummary == "Let people download what they see."
-    assert task.acceptanceCriteria == [
-        "The export returns CSV",
-        "It has a header row",
-        "It is fast",
-    ]
-    assert task.labels == ["agent-ready", "status:open", "size:S"]
-    from_labels = parse_task_issue(issue(body="### Civilian summary\n\nPlain words.\n"))
-    assert from_labels is not None and from_labels.size == "S"
-    assert parse_task_issue(issue(body="### Goal\n\nOnly a goal\n", labels=[])) is None
-    assert parse_task_issue(issue(number=True)) is None
-    assert parse_task_issue(issue(title=None)) is None
-
-
-def test_the_github_task_source_reads_labelled_issues(client: TestClient, env: BridgeEnv) -> None:
-    env.github.issues = [
-        issue(31),
-        issue(32, body="nothing parseable"),
-        {"number": 33, "pull_request": {}},
-    ]
+def test_the_github_task_source_waits_for_foreman(client: TestClient, env: BridgeEnv) -> None:
+    """Issue text never reaches a brief (mcp H1/H2, B-M8/B-M9, web M7): the fixtures are
+    the only tasks, whatever FORGE_TASK_SOURCE says, and GitHub's issues are never read."""
+    with pytest.raises(NotImplementedError):
+        GitHubTaskSource().list_tasks()
+    with pytest.raises(NotImplementedError):
+        GitHubTaskSource().get_task(31)
     env.monkeypatch.setenv("FORGE_TASK_SOURCE", "github")
+    assert isinstance(bridge_service.get_task_source(), FixtureTaskSource)
     tasks = client.get("/api/bridge/tasks").json()["tasks"]
-    assert [task["id"] for task in tasks] == [31]
-    source = bridge_service.get_task_source()
-    assert isinstance(source, GitHubTaskSource)
-    assert source.get_task(31) is not None and source.get_task(32) is None
-    bridge_service.get_github_reads().clear_cache()
-    env.github.fail = 500
-    assert [task.id for task in source.list_tasks()] == [31]  # the last good list
-    env.monkeypatch.setenv("FORGE_TASK_SOURCE", "fixtures")
-    assert len(client.get("/api/bridge/tasks").json()["tasks"]) == 8
+    assert [task["id"] for task in tasks] == list(range(1, 9))
+    assert client.get("/api/bridge/tasks/31").status_code == 404
+    assert not any(request.url.path.endswith("/issues") for request in env.github.requests)
 
 
 # --- the kill switch ----------------------------------------------------------------------
 
-#: Every route family under /api/bridge/* must 404 while contribute_bridge is off.
+#: Every route family under /api/bridge/*. All 404 while contribute_bridge is off, except
+#: SAVED_KEY_ROUTES.
 ROUTES = [
     ("get", "/api/bridge/rails", None),
     ("get", "/api/bridge/tasks", None),
@@ -1259,9 +1212,14 @@ ROUTES = [
     ("delete", "/api/bridge/me/keys/jules", None),
     ("get", "/api/bridge/me/fork", None),
 ]
+#: Seeing and removing your saved keys works whatever the switches say (web M1).
+SAVED_KEY_ROUTES = {("get", "/api/bridge/me/keys"), ("delete", "/api/bridge/me/keys/jules")}
 
 
-@pytest.mark.parametrize(("method", "path", "body"), ROUTES)
+@pytest.mark.parametrize(
+    ("method", "path", "body"),
+    [route for route in ROUTES if route[:2] not in SAVED_KEY_ROUTES],
+)
 def test_bridge_routes_are_404_when_the_kill_switch_is_off(
     client: TestClient,
     env: BridgeEnv,
@@ -1274,6 +1232,25 @@ def test_bridge_routes_are_404_when_the_kill_switch_is_off(
     response = client.request(method, path, json=body, headers=user_headers)
     assert response.status_code == 404
     assert response.json() == {"error": "bridge-disabled"}
+
+
+def test_saved_keys_can_be_seen_and_removed_with_the_kill_switch_off(
+    client: TestClient, env: BridgeEnv, user_headers: dict[str, str]
+) -> None:
+    """web M1: an incident is exactly when people want their keys gone."""
+    env.vault_on()
+    env.start_rails("jules")
+    claim(client, user_headers)
+    dispatch(client, user_headers, "jules", credential={"key": JULES_KEY}, saveCredential=True)
+    env.monkeypatch.setenv(flags_service.ENV_JSON, json.dumps({"contribute_bridge": False}))
+    assert client.get("/api/bridge/rails").status_code == 404  # the rest stays closed
+    listed = client.get("/api/bridge/me/keys", headers=user_headers)
+    assert listed.status_code == 200
+    assert [saved["rail"] for saved in listed.json()["credentials"]] == ["jules"]
+    removed = client.delete("/api/bridge/me/keys/jules", headers=user_headers)
+    assert removed.status_code == 200
+    assert removed.json() == {"credentials": [], "vault": True}
+    assert client.get("/api/bridge/me/keys").status_code == 401  # still only your own
 
 
 def test_every_route_is_documented(client: TestClient) -> None:

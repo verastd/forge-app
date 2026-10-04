@@ -1,7 +1,8 @@
 """The Bridge: browse, claim, dispatch, watch, iterate, settle (PRD Appendix I; contract §5).
 
 Thin: parse, call `services.bridge.Bridge`, return the model. Every route 404s while the
-`contribute_bridge` kill switch is off. Identity is the web tier's assertion:
+`contribute_bridge` kill switch is off, except GET and DELETE `/me/keys`: people can see
+and remove their saved keys whatever the switches say. Identity is the web tier's assertion:
 `require_identity` (401 without one) or `optional_identity` (None when no Authorization
 header is sent at all; a bad header is still 401).
 
@@ -45,11 +46,10 @@ MAX_DISPATCH_BODY = 16 * 1024
 
 
 def _require_bridge_enabled() -> None:
-    """Router-wide gate: every /api/bridge/* route 404s while the Bridge kill
-    switch is off, instead of quietly continuing to serve it (mirrors the
-    csv_export gate on routers/upland.py's export route, applied once for
-    the whole router rather than per-route since every route here is
-    Bridge-only)."""
+    """The kill switch: every gated /api/bridge/* route 404s while it is off, instead
+    of quietly continuing to serve it (mirrors the csv_export gate on
+    routers/upland.py's export route, applied once for the gated routes rather than
+    per-route)."""
     if not flags_service.is_enabled(FLAG):
         raise ApiError(404, {"error": "bridge-disabled"})
 
@@ -71,33 +71,33 @@ def get_bridge(
     return Bridge(store, source, github, client)
 
 
-router = APIRouter(
-    prefix="/api/bridge",
-    tags=["bridge"],
-    dependencies=[Depends(_require_bridge_enabled)],
-)
+#: Every route but the saved-key ones: 404 while the kill switch is off.
+_gated = APIRouter(dependencies=[Depends(_require_bridge_enabled)])
+#: Seeing and removing your saved keys works whatever the switches say: what FORGE keeps
+#: of yours stays in your hands during an incident too.
+_always = APIRouter()
 
 BridgeDep = Annotated[Bridge, Depends(get_bridge)]
 User = Annotated[Identity, Depends(require_identity)]
 MaybeUser = Annotated[Identity | None, Depends(optional_identity)]
 
 
-@router.get("/rails", response_model=RailList, response_model_exclude_none=True)
+@_gated.get("/rails", response_model=RailList, response_model_exclude_none=True)
 def rails(bridge: BridgeDep, user: MaybeUser) -> RailList:
     return bridge.rails(user)
 
 
-@router.get("/tasks", response_model=TaskList, response_model_exclude_none=True)
+@_gated.get("/tasks", response_model=TaskList, response_model_exclude_none=True)
 def list_tasks(bridge: BridgeDep) -> TaskList:
     return bridge.list_tasks()
 
 
-@router.get("/tasks/{task_id}", response_model=TaskDetail, response_model_exclude_none=True)
+@_gated.get("/tasks/{task_id}", response_model=TaskDetail, response_model_exclude_none=True)
 def task_detail(task_id: int, bridge: BridgeDep, user: MaybeUser) -> TaskDetail:
     return bridge.task_detail(task_id, user)
 
 
-@router.get("/tasks/{task_id}/brief", response_class=PlainTextResponse)
+@_gated.get("/tasks/{task_id}/brief", response_class=PlainTextResponse)
 def brief(task_id: int, bridge: BridgeDep, login: str | None = None) -> PlainTextResponse:
     """The brief as plain text, for Claude Code's `prompt_url`: readable from any origin,
     no credentials. An invalid login gets the generic brief."""
@@ -111,12 +111,12 @@ def brief(task_id: int, bridge: BridgeDep, login: str | None = None) -> PlainTex
     )
 
 
-@router.post("/claim", response_model=ClaimResponse)
+@_gated.post("/claim", response_model=ClaimResponse)
 def claim(request: ClaimRequest, bridge: BridgeDep, user: User) -> ClaimResponse:
     return bridge.claim(user, request.taskId)
 
 
-@router.post("/release/{task_id}", response_model=BridgeStatus, response_model_exclude_none=True)
+@_gated.post("/release/{task_id}", response_model=BridgeStatus, response_model_exclude_none=True)
 def release(task_id: int, bridge: BridgeDep, user: User) -> BridgeStatus:
     return bridge.release(user, task_id)
 
@@ -159,7 +159,7 @@ async def _read_capped(request: Request, limit: int) -> bytes:
     return b"".join(chunks)
 
 
-@router.post(
+@_gated.post(
     "/dispatch",
     response_model=DispatchResult,
     response_model_exclude_none=True,
@@ -170,45 +170,52 @@ async def dispatch(request: Request, bridge: BridgeDep, user: User) -> DispatchR
     return await run_in_threadpool(bridge.dispatch, user, parsed)
 
 
-@router.get("/status/{task_id}", response_model=BridgeStatus, response_model_exclude_none=True)
+@_gated.get("/status/{task_id}", response_model=BridgeStatus, response_model_exclude_none=True)
 def status(task_id: int, bridge: BridgeDep, user: MaybeUser) -> BridgeStatus:
     return bridge.status(task_id, user)
 
 
-@router.get("/checks/{task_id}", response_model=CheckResults, response_model_exclude_none=True)
+@_gated.get("/checks/{task_id}", response_model=CheckResults, response_model_exclude_none=True)
 def checks(task_id: int, bridge: BridgeDep, user: MaybeUser) -> CheckResults:
     return bridge.check_results(task_id)
 
 
-@router.post(
+@_gated.post(
     "/feedback/{task_id}", response_model=FeedbackResponse, response_model_exclude_none=True
 )
 def feedback(task_id: int, bridge: BridgeDep, user: User) -> FeedbackResponse:
     return bridge.feedback(user, task_id)
 
 
-@router.post("/submit/{task_id}", response_model=BridgeStatus, response_model_exclude_none=True)
+@_gated.post("/submit/{task_id}", response_model=BridgeStatus, response_model_exclude_none=True)
 def submit(task_id: int, request: SubmitRequest, bridge: BridgeDep, user: User) -> BridgeStatus:
     return bridge.submit(user, task_id, request.prUrl)
 
 
-@router.get("/profile", response_model=ContributorProfile, response_model_exclude_none=True)
+@_gated.get("/profile", response_model=ContributorProfile, response_model_exclude_none=True)
 def profile(bridge: BridgeDep, user: User) -> ContributorProfile:
     return bridge.profile(user)
 
 
-@router.get("/me/keys", response_model=SavedCredentialList, response_model_exclude_none=True)
+@_always.get("/me/keys", response_model=SavedCredentialList, response_model_exclude_none=True)
 def saved_keys(bridge: BridgeDep, user: User) -> SavedCredentialList:
+    """Hints only; it works with the vault off and with the kill switch off."""
     return bridge.saved_keys(user)
 
 
-@router.delete(
+@_always.delete(
     "/me/keys/{rail}", response_model=SavedCredentialList, response_model_exclude_none=True
 )
 def delete_key(rail: str, bridge: BridgeDep, user: User) -> SavedCredentialList:
+    """Needs no vault key, and works with the kill switch off."""
     return bridge.delete_key(user, rail)
 
 
-@router.get("/me/fork", response_model=ForkStatus, response_model_exclude_none=True)
+@_gated.get("/me/fork", response_model=ForkStatus, response_model_exclude_none=True)
 def fork(bridge: BridgeDep, user: User) -> ForkStatus:
     return bridge.fork(user)
+
+
+router = APIRouter(prefix="/api/bridge", tags=["bridge"])
+router.include_router(_gated)
+router.include_router(_always)

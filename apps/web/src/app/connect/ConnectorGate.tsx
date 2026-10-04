@@ -2,7 +2,9 @@
 
 /**
  * /connect's kill switch: the `mcp_connector` flag, read client-side like the
- * Bridge's and the Data app's. Flags fail closed, so a flag service nobody can
+ * Bridge's and the Data app's. The API also closes the connector while
+ * `github_signin` is off (nobody could sign in to approve an agent), so the
+ * page reads that flag the same way. Flags fail closed, so a flag service nobody can
  * reach reads exactly like the switch thrown on purpose. The practice build
  * starts from its all-on fallback (`demoFlagFallback`), but an actual answer
  * from the service still wins there: unlike the Bridge, the connector is not
@@ -35,7 +37,7 @@ export function ConnectorGate({ available, children }: { available: boolean; chi
   }
 
   // `available` is false when this server has no public origin to give out.
-  if (!available || !flags.mcp_connector) {
+  if (!available || !flags.mcp_connector || !flags.github_signin) {
     return (
       <div className="card stack" role="status">
         <p>{CONNECTOR_OFF}</p>

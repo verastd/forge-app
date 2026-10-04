@@ -13,7 +13,7 @@ services/mcp_server.py answers the JSON-RPC:
 
 import json
 import logging
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Request, Response
 from fastapi.concurrency import run_in_threadpool
@@ -55,7 +55,7 @@ async def mcp_post(
         return _unauthorized(config, token_sent=False)
     token = mcp_server.bearer_token(authorization) or ""
     try:
-        identity = await run_in_threadpool(
+        grant = await run_in_threadpool(
             oauth_service.verify_access_token, db, token, config.resource, now=int(clock())
         )
     except InvalidToken as exc:
@@ -78,16 +78,16 @@ async def mcp_post(
         payload = json.loads(body)
     except (ValueError, RecursionError):
         return _rpc_error(400, "Parse error", code=mcp_server.PARSE_ERROR)
-    key = oauth_service.token_key(token)
     session = mcp_server.Session(
         registry=registry,
-        context=ToolContext(identity=identity, db=db),
-        allow=lambda: limiter.allow(key, clock()),
+        context=ToolContext(identity=grant.identity, db=db),
+        # One budget per grant (one connected agent): a refreshed token shares it.
+        allow=lambda: limiter.allow(grant.grant_id, clock()),
     )
     status, reply = await run_in_threadpool(mcp_server.handle_payload, payload, session)
     if reply is None:
         return Response(status_code=status)
-    return JSONResponse(reply, status_code=status, headers=NO_STORE)
+    return _Reply(reply, status_code=status, headers=NO_STORE)
 
 
 @router.api_route("/mcp", methods=["GET", "DELETE"], include_in_schema=False)
@@ -126,3 +126,14 @@ def _rpc_error(
     return JSONResponse(
         mcp_server.error_response(None, code, message), status_code=status, headers=headers
     )
+
+
+class _Reply(JSONResponse):
+    """A JSON-RPC reply that never fails to encode: a lone surrogate, which JSON can carry
+    and UTF-8 can't, becomes "?" instead of a bare 500 without CORS headers. Ids and
+    methods holding one are refused before this (services/mcp_server.py); this covers
+    text echoed back, such as an unknown tool's name."""
+
+    def render(self, content: Any) -> bytes:
+        text = json.dumps(content, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
+        return text.encode("utf-8", "replace")

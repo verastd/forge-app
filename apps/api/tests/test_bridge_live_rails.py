@@ -38,11 +38,6 @@ def run(
     return code, out.getvalue(), vendor
 
 
-@pytest.fixture(autouse=True)
-def _fixture_tasks(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("FORGE_TASK_SOURCE", raising=False)
-
-
 @pytest.mark.parametrize(
     "argv",
     [
@@ -226,8 +221,7 @@ def test_the_module_entry_point(
     import sys
     import warnings
 
-    for name in ("JULES_API_KEY", "FORGE_TASK_SOURCE"):
-        monkeypatch.delenv(name, raising=False)
+    monkeypatch.delenv("JULES_API_KEY", raising=False)
     monkeypatch.setattr(sys, "argv", ["live_rails", "--rail", "jules", *BASE])
     with pytest.raises(SystemExit) as caught, warnings.catch_warnings():
         # runpy notes the module was imported already (by this test file); harmless here.

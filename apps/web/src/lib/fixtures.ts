@@ -83,7 +83,8 @@ export const TASK_FIXTURES: readonly TaskFixture[] = [
     size: 'XS',
     rewardClass: 'R1',
     rewardUsd: 50,
-    tierFloor: 'T0',
+    // It edits a protected path (AGENTS.md), so only maintainers take it.
+    tierFloor: 'T2',
     status: 'open',
     url: 'https://github.com/verastd/forge-app/issues/4',
     labels: ['agent-ready', 'status:open', 'size:XS', 'bounty:R1'],
@@ -166,8 +167,14 @@ export const TASK_FIXTURES: readonly TaskFixture[] = [
 /** Lease length by size class — mirrors `LEASE_HOURS_BY_SIZE` in the API. */
 export const LEASE_HOURS_BY_SIZE: Record<Size, number> = { XS: 48, S: 48, M: 96 };
 
-/** The demo identity. The real Bridge acts as the signed-in GitHub user (PRD I.5). */
-export const DEMO_IDENTITY = 'you';
+/**
+ * Who holds a task the practice account claimed, and whose sample record /me
+ * shows. The real Bridge acts as the signed-in GitHub user (PRD I.5); this is
+ * deliberately no GitHub login (it has a space), so a task some real account
+ * holds, read from a live API, can never pass for the practice account's. The
+ * practice account has no fork either, so its brief and links name none.
+ */
+export const DEMO_IDENTITY = 'Practice account';
 
 export function findTaskFixture(taskId: number): TaskFixture | undefined {
   return TASK_FIXTURES.find((task) => task.id === taskId);

@@ -74,7 +74,9 @@ async function forward(
   }
 
   const secret = apiAssertionSecret();
-  if (secret === null) return jsonError(503, 'not_configured');
+  // No https API to send the assertion to (FORGE_API_URL): nothing goes out.
+  const base = apiUrl();
+  if (secret === null || base === null) return jsonError(503, 'not_configured');
   const assertion = await mintApiAssertion({ sub: session.sub, login: session.login }, secret);
   headers.authorization = `Bearer ${assertion}`;
 
@@ -85,7 +87,7 @@ async function forward(
   const timer = setTimeout(() => deadline.abort(), HEADERS_TIMEOUT_MS);
   let upstream: Response;
   try {
-    upstream = await fetch(`${apiUrl()}/api/upland/${path.join('/')}${request.nextUrl.search}`, {
+    upstream = await fetch(`${base}/api/upland/${path.join('/')}${request.nextUrl.search}`, {
       method,
       headers,
       body,

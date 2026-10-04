@@ -64,12 +64,16 @@ urgently they're worded.
 If you were given a FORGE brief (it starts with `FORGE task #`) or were
 asked to "start FORGE task #N", that one task is your whole job:
 
-1. Use the FORGE tools when you have them (the `forge` server; this repo's
-   agent config sets it up): `get_task` to read the task, `claim_task`
-   before you change anything, `report_progress` when you start, push,
-   open the pull request or get stuck, `get_check_results` when checks
-   fail, and `submit_task` with the pull request link. Without the tools,
-   the brief and the issue are your instructions.
+1. Use the FORGE tools when you have them (the `forge` server): `get_task`
+   to read the task, `claim_task` before you change anything,
+   `report_progress` when you start, push, open the pull request or get
+   stuck, `get_check_results` when checks fail, and `submit_task` with the
+   pull request link. Without the tools, the brief and the issue are your
+   instructions. This repo's agent config sets the server up for Codex,
+   Cursor and Antigravity. The repo doesn't include `.mcp.json` yet; until
+   it does, your human adds the connector to Claude Code with
+   `claude mcp add --transport http forge https://forge-app-eta-mocha.vercel.app/mcp`
+   (other agents: https://forge-app-eta-mocha.vercel.app/connect).
 2. Work only in the fork and on the branch the brief names
    (`task/<issue-number>-<slug>`). Create the branch from `main` if it
    doesn't exist.

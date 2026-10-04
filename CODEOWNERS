@@ -72,3 +72,15 @@
 /apps/api/src/forge_api/services/brief.py      @verastd @forge-cold
 /apps/api/src/forge_api/services/rails.py      @verastd @forge-cold
 /apps/api/src/forge_api/services/bridge_mcp.py @verastd @forge-cold
+/apps/api/src/forge_api/fixtures/              @verastd @forge-cold
+# Code that holds a pasted or saved agent key, or the Copilot token, on its way
+# through (the form, the browser's request, the BFF, the API's dispatch and
+# relay), and the checks on the links it shows back.
+/apps/web/src/lib/bff-forward.ts               @verastd @forge-cold
+/apps/web/src/lib/handoff.ts                   @verastd @forge-cold
+/apps/web/src/lib/api.ts                       @verastd @forge-cold
+/apps/web/src/components/contribute/           @verastd @forge-cold
+/apps/api/src/forge_api/services/bridge.py     @verastd @forge-cold
+/apps/api/src/forge_api/routers/bridge.py      @verastd @forge-cold
+/apps/api/src/forge_api/models.py              @verastd @forge-cold
+/apps/api/src/forge_api/main.py                @verastd @forge-cold

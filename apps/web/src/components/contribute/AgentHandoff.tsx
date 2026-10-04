@@ -12,18 +12,22 @@
  * at the bottom (Phase 4: no copy/paste in the flow).
  */
 
-import type { DispatchResult, OpenRail, RailInfo, StartRail } from '@forge/shared';
+import type { OpenRail, RailInfo, StartRail } from '@forge/shared';
 import { railMeta } from '@forge/shared';
 
 import { CopyBox } from '../CopyBox';
 import { OpenRails } from './OpenRails';
-import { StartRails } from './StartRails';
+import { SetupSteps, StartRails } from './StartRails';
 import { describeStartError, startedSentence } from '../../lib/handoff';
 import type { StartOutcome } from '../../lib/handoff';
 import styles from './contribute.module.css';
 
-/** What the Copilot callback sent back (`?started=` / `?start_error=`), said once. */
-export function CallbackOutcome({ outcome }: { outcome: StartOutcome }) {
+/**
+ * What the Copilot callback sent back (`?started=` / `?start_error=`), said
+ * once. A setup failure brings the rail's setup steps with it, right below
+ * the sentence that points at them.
+ */
+export function CallbackOutcome({ outcome, appSlug }: { outcome: StartOutcome; appSlug: string | null }) {
   const meta = railMeta(outcome.rail);
   if (outcome.kind === 'started') {
     return (
@@ -33,9 +37,11 @@ export function CallbackOutcome({ outcome }: { outcome: StartOutcome }) {
       </div>
     );
   }
+  const setup = outcome.failure.code === 'rail_setup_needed';
   return (
     <div className={`${styles.outcome} ${styles.outcomeError}`} role="alert">
-      <p className={styles.outcomeTitle}>{describeStartError(outcome.failure, meta)}</p>
+      <p className={styles.outcomeTitle}>{describeStartError(outcome.failure, meta, { steps: 'below' })}</p>
+      {setup && <SetupSteps meta={meta} vault={false} appSlug={appSlug} />}
     </div>
   );
 }
@@ -47,42 +53,51 @@ export function AgentHandoff({
   appSlug,
   practice,
   agentStart,
+  connector,
   startRails,
   vault,
   railsLoaded,
   railsFailed,
   outcome,
   onStarted,
+  onCheck,
   onOpened,
 }: {
   taskId: number;
+  /** The text every rail hands over: the API's `TaskDetail.brief`. */
   brief: string;
   login: string | null;
   appSlug: string | null;
   practice: boolean;
   /** The `agent_start` flag. */
   agentStart: boolean;
+  /** The `mcp_connector` flag: the FORGE connector is on. */
+  connector: boolean;
   /** The start rails the API says are on. */
   startRails: readonly RailInfo[];
   vault: boolean;
   railsLoaded: boolean;
   railsFailed: boolean;
   outcome: StartOutcome | null;
-  onStarted: (rail: StartRail, result: DispatchResult) => void;
+  onStarted: (rail: StartRail) => void;
+  onCheck: () => void;
   onOpened: (rail: OpenRail) => void;
 }) {
   const showStart = agentStart && startRails.length > 0;
 
   return (
     <section className="card stack" aria-labelledby="handoff-title">
-      <h2 id="handoff-title">Get your agent on it</h2>
+      {/* Focusable, so a claim can take keyboard and screen-reader users straight here. */}
+      <h2 id="handoff-title" tabIndex={-1}>
+        Get your agent on it
+      </h2>
       {practice && (
         <p className="faint">
           Practice account: a start here is pretend and sends nothing anywhere. The &ldquo;Open my
           agent&rdquo; links open your real agent.
         </p>
       )}
-      {outcome !== null && <CallbackOutcome outcome={outcome} />}
+      {outcome !== null && <CallbackOutcome outcome={outcome} appSlug={appSlug} />}
 
       {showStart && (
         <div className={styles.part} aria-labelledby="start-title" role="group">
@@ -99,6 +114,7 @@ export function AgentHandoff({
             appSlug={appSlug}
             practice={practice}
             onStarted={onStarted}
+            onCheck={onCheck}
           />
         </div>
       )}
@@ -113,7 +129,14 @@ export function AgentHandoff({
           <h3 id="open-title">Open my agent</h3>
           <p className="muted">Opens your agent with the task already typed in. You press send.</p>
         </div>
-        <OpenRails taskId={taskId} brief={brief} login={login} appSlug={appSlug} onOpened={onOpened} />
+        <OpenRails
+          taskId={taskId}
+          brief={brief}
+          login={login}
+          appSlug={appSlug}
+          connector={connector}
+          onOpened={onOpened}
+        />
       </div>
 
       <details className="disclosure">

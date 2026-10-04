@@ -1,7 +1,8 @@
 /**
  * The GitHub side of sign-in: the authorize redirect, the code-for-token
- * exchange and `GET /user`. Nothing here keeps the token. The callback trades
- * it for the profile and drops it, because Phase 1 stores no GitHub token.
+ * exchange and `GET /user`, and revoking a token once it has done its one
+ * job. Nothing here keeps the token. The callback trades it for the profile
+ * and drops it, because Phase 1 stores no GitHub token.
  *
  * GitHub's profile formats live here too. A session carries a GitHub
  * identity, so the session and the API assertion validate with these same
@@ -12,6 +13,8 @@ import { AuthError } from './errors.js';
 const AUTHORIZE_URL = 'https://github.com/login/oauth/authorize';
 const TOKEN_URL = 'https://github.com/login/oauth/access_token';
 const USER_URL = 'https://api.github.com/user';
+/** `DELETE /applications/{client_id}/token`: the app revoking one of its own user tokens. */
+const APP_TOKEN_URL = 'https://api.github.com/applications';
 const USER_AGENT = 'forge-web';
 const TIMEOUT_MS = 10_000;
 
@@ -175,6 +178,52 @@ export async function fetchGitHubUser(
     throw new AuthError('github_user_failed');
   }
   return { id, login, name, avatarUrl };
+}
+
+export interface RevokeTokenParams {
+  clientId: string;
+  clientSecret: string;
+  accessToken: string;
+  fetchImpl?: FetchLike;
+}
+
+/**
+ * Revokes a user access token this GitHub App issued, once it has done the
+ * one job it was asked for: `DELETE /applications/{client_id}/token`, with the
+ * App's client id and secret as Basic auth and the token in the body.
+ *
+ * Best effort, and it never throws: it resolves true only when GitHub says it
+ * is done (204), so the caller can log that much and no more. Like the calls
+ * above, nothing it does can carry the secret or the token into an error or a
+ * redirect.
+ */
+export async function revokeGitHubToken({
+  clientId,
+  clientSecret,
+  accessToken,
+  fetchImpl = globalThis.fetch,
+}: RevokeTokenParams): Promise<boolean> {
+  if (clientId === '' || clientSecret === '' || accessToken === '') return false;
+  try {
+    const response = await fetchImpl(`${APP_TOKEN_URL}/${encodeURIComponent(clientId)}/token`, {
+      method: 'DELETE',
+      headers: {
+        Accept: 'application/vnd.github+json',
+        Authorization: `Basic ${btoa(`${clientId}:${clientSecret}`)}`,
+        'Content-Type': 'application/json',
+        'User-Agent': USER_AGENT,
+        'X-GitHub-Api-Version': '2022-11-28',
+      },
+      body: JSON.stringify({ access_token: accessToken }),
+      redirect: 'error',
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    await response.body?.cancel().catch(() => undefined);
+    return response.status === 204;
+  } catch {
+    // A network error, the timeout, a redirect, or a secret btoa can't encode.
+    return false;
+  }
 }
 
 /**

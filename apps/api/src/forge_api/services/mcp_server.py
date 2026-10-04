@@ -47,7 +47,8 @@ SERVER_NAME: Final = "forge"
 SERVER_TITLE: Final = "FORGE"
 TOOLS_MODULE: Final = "forge_api.services.bridge_mcp"
 
-#: Per access token: at most this many JSON-RPC requests in any window of this many seconds.
+#: Per grant (one connected agent, whichever of its tokens it uses): at most this many
+#: JSON-RPC requests in any window of this many seconds.
 RATE_LIMIT: Final = 120
 RATE_WINDOW: Final = 60.0
 MAX_BATCH: Final = 32
@@ -112,7 +113,7 @@ def get_mcp_registry() -> McpRegistry:
 
 
 class RateLimiter:
-    """A sliding-window limit per key (a token's hash), in process memory."""
+    """A sliding-window limit per key (an OAuth grant's id), in process memory."""
 
     #: Past this many keys, forget the ones with no request inside the window.
     MAX_KEYS: Final = 10_000
@@ -233,13 +234,13 @@ def handle_message(message: object, session: Session) -> tuple[dict[str, Any] | 
             return None, False  # a response to a server request: nothing to do
         return error_response(_id_of(message), INVALID_REQUEST, "Invalid Request"), True
     method = message["method"]
-    if not isinstance(method, str):
+    if not isinstance(method, str) or not _is_text(method):
         return error_response(_id_of(message), INVALID_REQUEST, "Invalid Request: method"), True
     if "id" not in message:
         return None, False  # a notification: accepted, never answered
     request_id = message["id"]
     if not _valid_id(request_id):
-        message_text = "Invalid Request: id must be a string or an integer"
+        message_text = "Invalid Request: id must be an integer or a string of valid Unicode"
         return error_response(None, INVALID_REQUEST, message_text), True
     params = message.get("params")
     if params is None:
@@ -475,8 +476,21 @@ def _single_page(params: Mapping[str, Any]) -> None:
 
 
 def _valid_id(value: object) -> bool:
-    # MCP request ids are strings or integers; never null, a bool or a float.
-    return isinstance(value, str) or (isinstance(value, int) and not isinstance(value, bool))
+    # MCP request ids are strings or integers; never null, a bool or a float. A string
+    # must be one a reply can echo.
+    if isinstance(value, str):
+        return _is_text(value)
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _is_text(value: str) -> bool:
+    """`value` encodes as UTF-8: it holds no lone surrogate, which JSON's `\\ud800`
+    escapes can carry and no reply can."""
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
 
 
 def _id_of(message: object) -> object:

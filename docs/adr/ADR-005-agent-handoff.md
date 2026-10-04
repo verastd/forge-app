@@ -114,17 +114,19 @@ Cursor, Devin, OpenHands and a Claude Code routine, FORGE calls the
 vendor's API with the contributor's own credential and the agent works in
 their fork, on their plan, so FORGE still pays for no agent time (bring
 your own agent holds). Copilot needs nothing pasted: a one-time GitHub
-authorization at each start, used for that one call. The other rails take
-a key, which FORGE uses for the call the person asked for and keeps only
-if they tick "Remember it".
+authorization at each start, used for that one start and then revoked. The
+other rails take a key, which FORGE uses for the call the person asked for
+and keeps only if they tick "Remember it" (the box starts unticked).
 
 **Open rails are links built from one brief.** Claude Code (web and
 computer), the Codex app, VS Code's agents window and the Cursor app open
 with the brief typed in; the contributor presses send. Antigravity has no
-link, so its steps say "Open your fork in Antigravity and ask it: Start
-FORGE task #N". Every rail, start or open, gets the same brief, built by
-one function in each language and held byte-identical by a shared golden
-fixture.
+link, so its steps say to open the fork in Antigravity (after Sync fork on
+GitHub, for a fork older than October 2026), sign in to FORGE the first
+time, and ask it "Start FORGE task #N"; because it works only through the
+connector, it is offered only while the connector is on. Every rail, start
+or open, gets the same brief, built by one function in each language and
+held byte-identical by a shared golden fixture.
 
 **The FORGE connector.** An MCP server at `<web origin>/mcp`, protected by
 OAuth 2.1 (dynamic client registration, PKCE, a consent screen behind
@@ -135,11 +137,14 @@ hand-written JSON-RPC with no new dependency, stateless, and lives on the
 web origin through rewrites, so its address survives the API moving.
 [`architecture.md`](../architecture.md#the-forge-connector) has the flow.
 
-**The repo tells agents where the connector is.** `.mcp.json` (Claude
-Code, and VS Code 1.140+), `.codex/config.toml`, `.agents/mcp_config.json`
-and `.cursor/mcp.json` name the connector, so an agent opened in a fork
-finds it, and `AGENTS.md` gains a short "Working on a FORGE task" section
-for any agent. There is no `.vscode/mcp.json`: VS Code 1.140 calls it
+**The repo tells agents where the connector is.** `.codex/config.toml`,
+`.agents/mcp_config.json` and `.cursor/mcp.json` name the connector, so an
+agent opened in a fork finds it, and `AGENTS.md` gains a short "Working on
+a FORGE task" section for any agent. `.mcp.json` (Claude Code, and VS Code
+1.140+) is part of this decision, but the repo doesn't include `.mcp.json`
+yet; until it does, add the connector to Claude Code with
+`claude mcp add --transport http forge <url>` (or press VS Code's button on
+`/connect`). There is no `.vscode/mcp.json`: VS Code 1.140 calls it
 deprecated and reads `.mcp.json`. Two custom agents, for GitHub Copilot
 (`.github/agents/forge.agent.md`) and Antigravity
 (`.agents/agents/forge.md`), carry the same task flow and are never a
@@ -161,10 +166,10 @@ runs [`live-tests.md`](../live-tests.md); the connector itself ships on
 
 | | PRD I.5 (Aug 2026) | Now |
 |---|---|---|
-| GitHub tokens | OAuth user tokens, encrypted at rest | None stored. Sign-in drops its token after one read ([ADR-003](ADR-003-github-app-signin.md)). The Copilot rail asks for a one-time GitHub authorization at each start, and the token is used for that call and dropped |
-| Vendor keys | Encrypted, per user, revocable in the app | Saved only when the person ticks "Remember it"; AES-256-GCM under a per-person key derived from `FORGE_VAULT_KEY`; only a hint is ever shown back; removable on `/me`; deleted when the vendor rejects it; no vault at all unless the key is set |
-| Agents acting on FORGE | Not part of the design | Connector tokens: scope `forge.tasks` only, stored as SHA-256 hashes, 5-minute single-use codes, 1-hour access and 30-day refresh that rotates; an old refresh token reused within 30 seconds is a retry and gets a fresh pair, and later reuse revokes the grant; every connection listed on `/me` with Disconnect |
-| What steers agents | Not covered (`AGENTS.md`, `CLAUDE.md` and `.gemini/` were already protected paths) | Also protected: every agent config file (`.mcp.json`, `.codex/`, `.agents/`, `.cursor/`, `.vscode/`, `.claude/`), the brief, the rail registry, the connector's tools, the `/connect` page and the launch links, because a pull request that repoints the connector would phish every contributor |
+| GitHub tokens | OAuth user tokens, encrypted at rest | None stored. Sign-in drops its token after one read ([ADR-003](ADR-003-github-app-signin.md)). The Copilot rail asks GitHub for a one-time authorization at each start (GitHub may not show a page to someone who approved FORGE before); the token is used for that start and then revoked (`DELETE /applications/{client_id}/token`) |
+| Vendor keys | Encrypted, per user, revocable in the app | Saved only when the person ticks "Remember it" (unticked to start with); AES-256-GCM under a per-person key derived from `FORGE_VAULT_KEY`; only a hint is ever shown back; removable on `/me`, even with the Bridge or the vault switched off; deleted when a vendor rejects it at a start, or answers 401 to a relay (a 403 keeps it); check notes are relayed only with the saved key that started the session, compared by a keyed fingerprint; a key that no longer opens reads as not saved, and no read deletes it; no vault at all unless the key is set. The code a key or the Copilot token passes through (`apps/web/src/lib/{api,bff-forward,handoff}.ts`, `apps/web/src/components/contribute/`, and the API's `services/bridge.py`, `routers/bridge.py`, `models.py`, `main.py`, `services/vault.py` and `services/rail_adapters/`) is a protected path |
+| Agents acting on FORGE | Not part of the design | Connector tokens: scope `forge.tasks` only, stored as SHA-256 hashes, 5-minute single-use codes, 1-hour access and 30-day refresh that rotates; an old refresh token reused within 30 seconds is a retry and gets a fresh pair, once, and any further reuse revokes the grant; a grant keeps at most 5 live refresh tokens; one connected agent gets 120 calls a minute, whichever of its tokens it uses; every connection listed on `/me` with Disconnect while the connector is on (with it or GitHub sign-in off, no token works) |
+| What steers agents | Not covered (`AGENTS.md`, `CLAUDE.md` and `.gemini/` were already protected paths) | Also protected: every agent config file (`.codex/`, `.agents/`, `.cursor/`, and `.mcp.json`, `.vscode/` and `.claude/`, which the repo doesn't include yet), the brief, the rail registry, the connector's tools, the `/connect` page, the launch links and the task fixtures, because a pull request that repoints the connector would phish every contributor, and one that rewrites a task would reach every agent given it |
 | Worst case | Open fork pull requests and claim tasks as Bridge users | Still only fork pull requests reach upstream. New: the state database plus `FORGE_VAULT_KEY` yields every saved vendor key, each good for whatever that vendor account can reach; and whoever controls the API can send connected agents misleading task text |
 | Unchanged | No repo write access, no Foreman admin surface, no deploy or merge | Same |
 
@@ -174,11 +179,16 @@ runs [`live-tests.md`](../live-tests.md); the connector itself ships on
   grants live in one SQLite file on the API box (`FORGE_STATE_DB_PATH`),
   which has to sit on a disk that survives a redeploy and be backed up.
   One API process on one box is the design; scaling out means moving it.
+  It has no migrations yet: after an upgrade that changes its tables, the
+  file is deleted, so connected agents connect again and saved keys are
+  entered again.
 - **Two new secrets.** `FORGE_OAUTH_SECRET` signs client registrations and
   `FORGE_VAULT_KEY` encrypts saved keys. Both are generated on the API box
   and never pasted anywhere else. Changing the first makes every connected
   agent connect again; changing the second makes every saved key
-  unreadable, so people enter them again.
+  unreadable, so it reads as not saved until its owner enters it again
+  (nothing is deleted: the old rows stay stored, unused, until replaced,
+  and open again if the old value comes back).
 - **Preview APIs move under us.** Copilot's tasks API is in public preview,
   Jules is v1alpha, Cursor's API is in beta and routines are a research
   preview. Each adapter names the documentation it was written against, a
@@ -198,9 +208,10 @@ runs [`live-tests.md`](../live-tests.md); the connector itself ships on
   everything an agent writes is untrusted: capped, stripped of control
   characters and shown as plain text.
 - **Not live-tested yet:** all six start rails, including Copilot on a
-  fork and whether FORGE's GitHub App can be given the "Agent tasks"
-  permission, and where Jules's automatic pull request lands; Claude Code
-  on the web using the connector; Antigravity 2.0 reading
+  fork, whether FORGE's GitHub App can be given the "Agent tasks"
+  permission, whether a Copilot task keeps running once FORGE revokes its
+  one-time token, and where Jules's automatic pull request lands; Claude
+  Code on the web using the connector; Antigravity 2.0 reading
   `.agents/mcp_config.json`. Asking Claude or Codex through `@claude` or
   `@codex` comments on a fork's pull request is a candidate, not built.
 - **Bridge claims and Foreman's `/claim` are separate.** A claim made on

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { AuthError, authorizeUrl, exchangeCode, fetchGitHubUser } from './index.js';
+import { AuthError, authorizeUrl, exchangeCode, fetchGitHubUser, revokeGitHubToken } from './index.js';
 import type { FetchLike } from './index.js';
 
 const STATE = 'Xq3vG0b1k9Zr8dT2yWc4nHs6uJm5pLf7aEo-_iRkQzA';
@@ -332,6 +332,75 @@ describe('fetchGitHubUser', () => {
     vi.stubGlobal('fetch', fetchImpl);
 
     await expect(fetchGitHubUser(TOKEN)).resolves.toMatchObject({ login: 'octocat' });
+    expect(calls).toHaveLength(1);
+  });
+});
+
+describe('revokeGitHubToken', () => {
+  const REVOKE = { clientId: EXCHANGE.clientId, clientSecret: EXCHANGE.clientSecret, accessToken: TOKEN };
+  const noContent = (): Response => new Response(null, { status: 204 });
+
+  it("DELETEs the app's token with Basic client credentials and the token in the body", async () => {
+    const timeout = vi.spyOn(AbortSignal, 'timeout');
+    const { fetchImpl, calls } = fakeFetch(noContent);
+
+    await expect(revokeGitHubToken({ ...REVOKE, fetchImpl })).resolves.toBe(true);
+
+    expect(calls).toHaveLength(1);
+    const { url, init } = calls[0]!;
+    const headers = new Headers(init.headers);
+    expect(url).toBe(`https://api.github.com/applications/${EXCHANGE.clientId}/token`);
+    expect(init.method).toBe('DELETE');
+    expect(headers.get('authorization')).toBe(`Basic ${btoa(`${EXCHANGE.clientId}:${EXCHANGE.clientSecret}`)}`);
+    expect(headers.get('accept')).toBe('application/vnd.github+json');
+    expect(headers.get('content-type')).toBe('application/json');
+    expect(headers.get('x-github-api-version')).toBe('2022-11-28');
+    expect(headers.get('user-agent')).toBe('forge-web');
+    expect(JSON.parse(String(init.body))).toEqual({ access_token: TOKEN });
+    // The token rides in the body, never in the URL.
+    expect(url).not.toContain(TOKEN);
+    expect(init.redirect).toBe('error');
+    expect(timeout).toHaveBeenCalledWith(10_000);
+  });
+
+  it('puts the client id into the path as one segment', async () => {
+    const { fetchImpl, calls } = fakeFetch(noContent);
+    await revokeGitHubToken({ ...REVOKE, clientId: 'a/b?c', fetchImpl });
+    expect(calls[0]?.url).toBe('https://api.github.com/applications/a%2Fb%3Fc/token');
+  });
+
+  it.each<[string, () => Response | Promise<Response>]>([
+    ['a network error', () => Promise.reject(new TypeError('fetch failed'))],
+    ['the timeout', () => Promise.reject(new DOMException('The operation timed out.', 'TimeoutError'))],
+    ['HTTP 404 (already gone)', () => json({ message: 'Not Found' }, 404)],
+    ['HTTP 422', () => json({ message: 'Validation Failed' }, 422)],
+    ['HTTP 200 instead of 204', () => json({})],
+  ])('is false, and never throws, on %s', async (_label, respond) => {
+    const { fetchImpl } = fakeFetch(respond);
+    await expect(revokeGitHubToken({ ...REVOKE, fetchImpl })).resolves.toBe(false);
+  });
+
+  it.each([
+    ['no client id', { clientId: '' }],
+    ['no client secret', { clientSecret: '' }],
+    ['no token', { accessToken: '' }],
+  ])('does not call GitHub with %s', async (_label, overrides) => {
+    const { fetchImpl, calls } = fakeFetch(noContent);
+    await expect(revokeGitHubToken({ ...REVOKE, ...overrides, fetchImpl })).resolves.toBe(false);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('is false for a secret Basic auth cannot carry, without calling GitHub', async () => {
+    const { fetchImpl, calls } = fakeFetch(noContent);
+    await expect(revokeGitHubToken({ ...REVOKE, clientSecret: 'not latin-1: \u{1F511}', fetchImpl })).resolves.toBe(false);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('uses globalThis.fetch by default', async () => {
+    const { fetchImpl, calls } = fakeFetch(noContent);
+    vi.stubGlobal('fetch', fetchImpl);
+
+    await expect(revokeGitHubToken(REVOKE)).resolves.toBe(true);
     expect(calls).toHaveLength(1);
   });
 });

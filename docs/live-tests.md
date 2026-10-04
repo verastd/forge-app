@@ -24,8 +24,12 @@ start rails, one each.
   pull requests.
 - **A checkout of `forge-app`** with `make setup` done. The commands below
   run from its root.
-- **Task 1** exists in the API's task source (it does in the checked-in
-  fixtures).
+- **Task 1** is one of the API's checked-in fixture tasks (the only task
+  source) and a T0 task, so the test account can claim it (tasks above T0
+  can't be claimed by anyone yet). Claiming a task you already hold changes
+  nothing, but once you let it go, or its 48 hours run out, the same
+  account can't claim it again for 24 hours: keep the claim between tests,
+  or use a second test account.
 - **Keys go in environment variables, typed in, never pasted anywhere
   else.** Not into a chat, an issue, a pull request or a file in the repo.
   `read -rs` keeps a key out of your shell history and off the screen:
@@ -83,7 +87,8 @@ write down what failed.
 fork? Does it take FORGE's GitHub App user token, and can the App be given
 the "Agent tasks" permission at all? (The permission is missing from
 GitHub's permission reference pages; the App settings are the only place
-to look.)
+to look.) Does the Copilot task keep running once FORGE revokes that
+one-time token, which the web app does as soon as the start answers?
 
 **You need.**
 
@@ -106,8 +111,9 @@ uv run python -m forge_api.tools.live_rails --rail copilot --login <login> --tas
 
 Part B, FORGE's own path, the one contributors take: with `agent_start` on
 and `FORGE_START_RAILS=copilot`, sign in as the test account, claim task 1,
-press "Start GitHub Copilot", approve GitHub's one-time authorization, and
-come back to the task page. Do this on a local or preview deployment if you
+press "Start GitHub Copilot", approve GitHub's one-time authorization
+(GitHub may skip its page if the account approved FORGE before), and come
+back to the task page. Do this on a local or preview deployment if you
 have one; on production, every signed-in contributor sees the Copilot
 button while those two settings are on, so keep the window short and turn
 them off again until the test has passed.
@@ -117,14 +123,20 @@ Copilot pushes to (the brief asks for `task/1-<slug>`), whether it opens a
 pull request and where (in the fork, or against `verastd/forge-app`), and
 whose Copilot credits and Actions minutes it used. After part B, check that
 no GitHub token was stored: a dump of the state database
-(`sqlite3 <FORGE_STATE_DB_PATH> .dump`) must not contain `ghu_`.
+(`sqlite3 <FORGE_STATE_DB_PATH> .dump`) must not contain `ghu_`. Check too
+that the Copilot task carried on after the start, although FORGE revoked
+the token straight away, and that the web app's log (Vercel) has no line
+"agent authorization: GitHub did not confirm the one-time token was
+revoked".
 
 **Passes when** `--check` succeeds, `--go` starts a task in the fork, the
 work lands on the task branch, and part B shows "GitHub Copilot is working
-on it." with a session link and leaves no token behind. If Copilot can't
-open the pull request against `verastd/forge-app` from the fork, write it
-down: the task page's "Open the pull request on GitHub" link covers that
-last step.
+on it." with a session link, leaves no token behind and keeps working
+after the revocation. If Copilot can't open the pull request against
+`verastd/forge-app` from the fork, write it down: the task page's "When
+your agent has pushed its branch: open the pull request" link covers that
+last step, and "Opened a pull request FORGE can't see?" takes one opened
+from another branch.
 
 **Then** add `copilot` to `FORGE_START_RAILS`.
 
@@ -198,36 +210,39 @@ after.
 
 **Passes when** `--check` finds the fork, `--go` starts a session, and the
 work lands on the task branch in the fork. Write down where the pull
-request opened; if it opened inside the fork, the task page's "Open the
-pull request on GitHub" link covers the last step and the rail can still go
-on.
+request opened; if it opened inside the fork, the task page's "When your
+agent has pushed its branch: open the pull request" link covers the last
+step and the rail can still go on.
 
 **Then** add `jules` to `FORGE_START_RAILS`.
 
 ## 4. Claude Code on the web with the connector
 
 **Questions.** In a Claude Code session on the web, does the agent get the
-FORGE tools: from the claude.ai connector, from the repo's `.mcp.json`, or
-both? How does signing in to the connector complete inside a cloud
-session?
+FORGE tools from the claude.ai connector? How does signing in to the
+connector complete inside a cloud session? The repo doesn't include
+`.mcp.json` yet, so the repo's own route can't be tried; until it does, the
+claude.ai connector is the only route on the web (on a computer, add the
+connector to Claude Code with `claude mcp add --transport http forge <url>`).
 
 **You need.** The test account's Claude plan (Pro or Max) with Claude Code
-on the web, and its GitHub connected to the fork. In claude.ai, Settings →
-Connectors → Add custom connector with the URL
+on the web, and its GitHub connected to the fork. In claude.ai, Customize →
+Connectors, press +, then Add custom connector with the URL
 `https://forge-app-eta-mocha.vercel.app/mcp`, then Connect: sign in with
 GitHub as the test account and press Allow.
 
 **Run.** On the Contribute page, claim task 1 and press "Claude Code on the
-web", then send. Repeat with the claude.ai connector removed (Settings →
-Connectors), to see whether the repo's `.mcp.json` works alone, and whether
-the session asks to approve it or to sign in.
+web", then send. Once the repo includes `.mcp.json`, repeat with the
+claude.ai connector removed (Customize → Connectors), to see whether
+`.mcp.json` works alone, and whether the session asks to approve it or to
+sign in.
 
 **Look at.** Whether Claude calls `get_task`, `claim_task` and
 `report_progress`, and whether the task page's timeline shows its reports
 (marked as from the agent).
 
-**Passes when** the FORGE tools work in the web session by at least one of
-the two routes and the timeline shows the agent's reports. **Then**
+**Passes when** the FORGE tools work in the web session through the
+claude.ai connector and the timeline shows the agent's reports. **Then**
 nothing to switch on (open rails are always on); make `/connect` and the
 Claude Code rail's steps say which route works.
 
@@ -239,13 +254,17 @@ desktop app, too? Does the `forge` custom agent (`.agents/agents/forge.md`)
 see the FORGE tools?
 
 **You need.** Antigravity 2.0 signed in with a personal Google account,
-and the fork cloned on the same computer. The CLI (`agy`) and the IDE for
-the second half.
+and the fork cloned on the same computer, in step with `verastd/forge-app`
+so it has `.agents/mcp_config.json` (press Sync fork on GitHub first if the
+fork is older). The CLI (`agy`) and the IDE for the second half. The FORGE
+connector must be on (`mcp_connector`): the task page offers Antigravity
+only then.
 
 **Run.** Open the fork in Antigravity 2.0 and look under Settings →
 Customizations → Installed MCP Servers for `forge`, without adding it by
 hand. Press Authenticate next to it, sign in with GitHub as the test
-account, copy the code Antigravity shows, paste it back and press Submit.
+account, copy the code your browser shows at the end, paste it back into
+Customizations and press Submit.
 Ask the default agent "Start FORGE task #1". Then pick the `forge` agent in
 the agent list and ask again. Repeat in the CLI (`agy` in the fork, then
 `/mcp`) and the IDE.

@@ -27,6 +27,7 @@ from .oauth_helpers import (
     EpochClock,
     bearer,
     connect,
+    refresh,
     rpc,
     tool,
     use_connector,
@@ -699,10 +700,74 @@ def test_empty_and_oversized_batches_are_400(api: TestClient, token: str) -> Non
     assert post(api, token, [ping] * mcp_server.MAX_BATCH).status_code == 200
 
 
+# --- lone surrogates (JSON can carry one; UTF-8, and so a reply, can't) ---------------
+
+
+def post_text(api: TestClient, token: str, body: str) -> Any:
+    headers = {**bearer(token), "Content-Type": "application/json", "Origin": ORIGIN}
+    return api.post("/mcp", content=body, headers=headers)
+
+
+@pytest.mark.parametrize(
+    ("message", "status", "code", "request_id"),
+    [
+        ('"id":"\\ud800","method":"ping"', 400, -32600, None),
+        ('"id":1,"method":"\\ud800"', 400, -32600, 1),
+        ('"id":1,"method":"tools/call","params":{"name":"\\udfff"}', 200, -32602, 1),
+        ('"id":1,"method":"prompts/get","params":{"name":"\\udfff"}', 200, -32602, 1),
+    ],
+)
+def test_lone_surrogates_get_json_rpc_errors_never_a_bare_500(
+    api: TestClient, token: str, message: str, status: int, code: int, request_id: int | None
+) -> None:
+    """Review mcp L1: in the id, the method or a tool's name, a proper JSON-RPC error with
+    the connector's CORS headers, in valid UTF-8."""
+    response = post_text(api, token, '{"jsonrpc":"2.0",' + message + "}")
+    assert response.status_code == status
+    assert response.headers["access-control-allow-origin"] == "*"
+    reply = json.loads(response.content.decode("utf-8"))
+    assert reply["error"]["code"] == code
+    assert reply["id"] == request_id
+
+
+def test_lone_surrogates_a_tool_echoes_come_back_replaced(api: TestClient, token: str) -> None:
+    named = post_text(
+        api,
+        token,
+        '{"jsonrpc":"2.0","id":1,"method":"tools/call",'
+        '"params":{"name":"echo","arguments":{"text":"hi","\\ud800":1}}}',
+    )
+    assert named.json()["result"]["content"][0]["text"] == (
+        "Invalid arguments for echo: ? is not one of its arguments."
+    )
+    echoed = post_text(
+        api,
+        token,
+        '{"jsonrpc":"2.0","id":2,"method":"tools/call",'
+        '"params":{"name":"echo","arguments":{"text":"a\\udc00b"}}}',
+    )
+    assert echoed.json()["result"]["structuredContent"] == {"text": "a?b", "login": USER[1]}
+
+
+def test_a_bad_element_leaves_the_rest_of_the_batch_alone(api: TestClient, token: str) -> None:
+    body = (
+        '[{"jsonrpc":"2.0","id":1,"method":"tools/call",'
+        '"params":{"name":"echo","arguments":{"text":"hi"}}},'
+        '{"jsonrpc":"2.0","id":"\\udc00","method":"ping"},'
+        '{"jsonrpc":"2.0","id":3,"method":"ping"}]'
+    )
+    response = post_text(api, token, body)
+    assert response.status_code == 200
+    replies = response.json()
+    assert replies[0]["result"]["structuredContent"] == {"text": "hi", "login": USER[1]}
+    assert (replies[1]["id"], replies[1]["error"]["code"]) == (None, -32600)
+    assert replies[2] == {"jsonrpc": "2.0", "id": 3, "result": {}}
+
+
 # --- rate limit ------------------------------------------------------------------------
 
 
-def test_requests_per_token_are_rate_limited(
+def test_requests_per_grant_are_rate_limited(
     api: TestClient,
     token: str,
     overrides: Overrides,
@@ -719,12 +784,33 @@ def test_requests_per_token_are_rate_limited(
     limited = rpc(api, token, "ping").json()
     assert limited["error"] == {"code": -32000, "message": "rate limited"}
     other = connect(api, auth_headers("1003", "octo-other")).access_token
-    assert rpc(api, other, "ping").json()["result"] == {}  # every token has its own budget
+    assert rpc(api, other, "ping").json()["result"] == {}  # every grant has its own budget
     oauth_clock.advance(60)
     assert rpc(api, token, "ping").json()["result"] == {}
     batch = [{"jsonrpc": "2.0", "id": n, "method": "ping"} for n in range(3)]
     replies = post(api, token, batch).json()
     assert ["result" in reply for reply in replies] == [True, True, False]
+
+
+def test_refreshing_buys_no_fresh_budget(
+    api: TestClient, overrides: Overrides, oauth_clock: EpochClock, auth_headers: AuthHeaders
+) -> None:
+    """Review M2: the budget is the grant's, so a refreshed token (and the retry's, and the
+    old token, still live for its hour) share it. Another connection is another grant."""
+    overrides.limiter = RateLimiter(limit=3, window=60)
+    user = auth_headers(*USER)
+    connection = connect(api, user)
+    for _ in range(3):
+        assert rpc(api, connection.access_token, "ping").json()["result"] == {}
+    renewed = refresh(api, connection.registration, connection.refresh_token).json()
+    oauth_clock.advance(1)
+    retried = refresh(api, connection.registration, connection.refresh_token).json()
+    for access in (renewed["access_token"], retried["access_token"], connection.access_token):
+        assert rpc(api, access, "ping").json()["error"]["code"] == -32000
+    another = connect(api, user).access_token  # a new registration: its own grant
+    assert rpc(api, another, "ping").json()["result"] == {}
+    oauth_clock.advance(60)
+    assert rpc(api, renewed["access_token"], "ping").json()["result"] == {}
 
 
 def test_the_default_limit_is_120_a_minute() -> None:

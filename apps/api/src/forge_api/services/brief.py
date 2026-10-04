@@ -76,7 +76,9 @@ def compile_brief(task: BriefTask, criteria: Sequence[str], login: str | None) -
     sections = [f"FORGE task #{task.id}: {task.title}", f"Why: {task.civilianSummary}"]
     if criteria:
         sections.append("Done when:\n" + "\n".join(f"- {item}" for item in criteria))
-    # The pull request title is AGENTS.md rule 8's `[#<issue>] <goal>`.
+    # The pull request title is AGENTS.md rule 8's `[#<issue>] <goal>`. Inside its quotes
+    # a `"` in the title becomes `'`, so the title can't close the quote early.
+    quoted_title = task.title.replace('"', "'")
     sections.append(
         "Rules:\n"
         "- Read AGENTS.md at the repo root before you start.\n"
@@ -84,7 +86,7 @@ def compile_brief(task: BriefTask, criteria: Sequence[str], login: str | None) -
         "- Don't change .github/, the acceptance tests, or anything outside this task.\n"
         "- Run make lint and make test before you push.\n"
         f"- When it's ready, open a pull request from {head} to {UPSTREAM_REPO} main, "
-        f'titled "[#{task.id}] {task.title}", with "Closes #{task.id}" in the description.'
+        f'titled "[#{task.id}] {quoted_title}", with "Closes #{task.id}" in the description.'
     )
     sections.append(_CONNECTOR_LINE)
     sections.append(f"Task: {task.url}")

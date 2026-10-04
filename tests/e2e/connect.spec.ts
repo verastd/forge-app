@@ -23,6 +23,7 @@ import {
   isSameOriginPost,
   MAX_VALUE_LENGTH,
   oauthFields,
+  returnTarget,
   scopesDescribed,
 } from '../../apps/web/src/app/oauth/authorize/oauth-request';
 import { DEMO_API_PORT } from './helpers/env';
@@ -94,9 +95,25 @@ test.describe('helpers', () => {
       'https://api.example.com/#frag',
       'https://api.example.com/:param',
       'http://[::1]:8000',
+      // Plain http only to this computer: tokens and codes cross these paths (review-creds CR-13).
+      'http://api.example.com',
+      'http://10.0.0.5:8000',
+      'http://localhost.example.com',
     ]) {
       expect(connectorRewrites(bad), String(bad)).toEqual([]);
     }
+    expect(connectorRewrites('http://localhost:8000')[0]?.destination).toBe('http://localhost:8000/mcp');
+  });
+
+  test('returnTarget names where a refused request would go back to: a host, or the app, never the address', () => {
+    expect(returnTarget('https://claude.ai/api/mcp/auth_callback?error=invalid_scope&state=s')).toBe('claude.ai');
+    expect(returnTarget('https://app.example.com:8443/cb?error=x')).toBe('app.example.com:8443');
+    expect(returnTarget('https://app.example.com:443/cb?error=x')).toBe('app.example.com');
+    expect(returnTarget('http://127.0.0.1:33418/?error=x')).toBe('127.0.0.1:33418');
+    expect(returnTarget('cursor://anysphere.cursor-retrieval/oauth/callback?error=x')).toBe('anysphere.cursor-retrieval');
+    // `scheme:/path` names no host: the app, by its scheme (as the API's redirectHost says it).
+    expect(returnTarget('com.example.app:/oauth2redirect?error=x&state=s')).toBe('the app com.example.app');
+    expect(returnTarget('https://xn--bcher-kva.example/cb')).toBe('xn--bcher-kva.example');
   });
 
   test('authorizeParamsFrom maps the OAuth query onto AuthorizeParams', () => {
@@ -329,10 +346,9 @@ function decodeCursorLink(href: string): { name: string | null; config: unknown 
 // --------------------------------------------------------------------------
 
 /** Answers the browser's flag fetch, so the page never depends on what happens to run on :8000. */
-async function serveFlags(page: Page, mcpConnector: boolean): Promise<void> {
-  await page.route('**/api/flags', (route) =>
-    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ mcp_connector: mcpConnector }) }),
-  );
+async function serveFlags(page: Page, mcpConnector: boolean, githubSignin = true): Promise<void> {
+  const body = JSON.stringify({ mcp_connector: mcpConnector, github_signin: githubSignin });
+  await page.route('**/api/flags', (route) => route.fulfill({ status: 200, contentType: 'application/json', body }));
 }
 
 async function expectNoSideScroll(page: Page, width: number): Promise<void> {
@@ -413,6 +429,14 @@ test.describe('/connect', () => {
     await expect(page.getByText('The FORGE connector is switched off right now.')).toBeVisible();
     await expect(page.getByTestId('connector-url')).toHaveCount(0);
     await expect(page.getByRole('link', { name: 'Add FORGE to VS Code' })).toHaveCount(0);
+  });
+
+  test('says the connector is off while GitHub sign-in is switched off, as the API does', async ({ page }) => {
+    await serveFlags(page, true, false);
+    await page.goto('/connect');
+
+    await expect(page.getByText('The FORGE connector is switched off right now.')).toBeVisible();
+    await expect(page.getByTestId('connector-url')).toHaveCount(0);
   });
 
   test('fits a 390 px screen', async ({ page, baseURL }) => {
@@ -598,6 +622,13 @@ function standInApi(request: Seen, crossSitePage?: string): Answer | undefined {
         return json(400, { error: 'invalid_client', errorDescription: 'FORGE doesn’t know this app.' });
       }
       if (clientId === 'bad-scope-app') {
+        return json(400, {
+          error: 'invalid_scope',
+          errorDescription: 'FORGE has no scope called forge.admin.',
+          redirectTo: `${CALLBACK}?error=invalid_scope&state=${STATE}`,
+        });
+      }
+      if (clientId === 'bad-scope-app-quiet') {
         return json(400, { error: 'invalid_scope', redirectTo: `${CALLBACK}?error=invalid_scope&state=${STATE}` });
       }
       if (clientId === 'switched-off') return json(404, { error: 'connector-disabled' });
@@ -756,14 +787,45 @@ test.describe('with a stand-in API on the demo server’s API port', () => {
     );
   });
 
-  test('a refusal the client may hear about goes back to the client', async ({ page, context, baseURL }) => {
+  test('a refusal the client may hear about is said here, and goes back only when asked to', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
     await signInAs(context, baseURL ?? '', REAL);
     await withStandIn(
       (request) => standInApi(request),
       async (seen) => {
-        await page.goto(consentUrl(baseURL, 'bad-scope-app'));
+        const consent = consentUrl(baseURL, 'bad-scope-app');
+        const response = await page.goto(consent);
+        // No bounce: the page itself answers, and the browser stays on FORGE (review-oauth M1).
+        expect(response?.status()).toBe(200);
+        await expect(page).toHaveURL(`${baseURL}${consent}`);
+        await expect(
+          page.getByRole('heading', { name: 'This connection request can’t go ahead: FORGE has no scope called forge.admin.' }),
+        ).toBeVisible();
+        const back = page.getByRole('link', { name: `Return to 127.0.0.1:${DEMO_API_PORT}` });
+        await expect(back).toHaveAttribute('href', `${CALLBACK}?error=invalid_scope&state=${STATE}`);
+        await expect(page.getByRole('button', { name: 'Allow' })).toHaveCount(0);
+
+        await back.click();
         await expect(page).toHaveURL(`${CALLBACK}?error=invalid_scope&state=${STATE}`);
+        await expect(page.getByRole('heading', { name: 'Back at the agent' })).toBeVisible();
         expect(calls(seen, '/api/oauth/authorize/approve')).toHaveLength(0);
+      },
+    );
+  });
+
+  test('a refusal with no description still says it can’t go ahead, and waits', async ({ page, context, baseURL }) => {
+    await signInAs(context, baseURL ?? '', REAL);
+    await withStandIn(
+      (request) => standInApi(request),
+      async () => {
+        const consent = consentUrl(baseURL, 'bad-scope-app-quiet');
+        await page.goto(consent);
+        await expect(page.getByRole('heading', { name: 'This connection request can’t go ahead.' })).toBeVisible();
+        await expect(page.getByRole('link', { name: `Return to 127.0.0.1:${DEMO_API_PORT}` })).toBeVisible();
+        await expect(page).toHaveURL(`${baseURL}${consent}`);
       },
     );
   });

@@ -177,6 +177,9 @@ test.describe('claiming with the practice account', () => {
     await expect(antigravity).toHaveAttribute('aria-expanded', 'false');
     await antigravity.click();
     await expect(antigravity).toHaveAttribute('aria-expanded', 'true');
+    // An older fork has no connector settings, and the connector wants a sign-in (review-web M6).
+    await expect(open.getByText(/press Sync fork on GitHub first so it has FORGE's connector settings/)).toBeVisible();
+    await expect(open.getByText(/Settings → Customizations, press Authenticate next to forge, then paste the code/)).toBeVisible();
     await expect(open.getByText('Ask it: Start FORGE task #1')).toBeVisible();
   });
 
@@ -211,7 +214,12 @@ test.describe('claiming with the practice account', () => {
     const key = panel.getByLabel('Your Jules API key');
     await expect(key).toHaveAttribute('type', 'password');
     await expect(key).toHaveAttribute('autocomplete', 'off');
-    await expect(panel.getByLabel('Remember it, encrypted, so next time is one click')).toBeChecked();
+    // A name of its own per vendor, and password managers told to keep out (review-creds CR-10).
+    await expect(key).toHaveAttribute('name', 'jules-key');
+    await expect(key).toHaveAttribute('data-1p-ignore', '');
+    await expect(key).toHaveAttribute('data-lpignore', 'true');
+    // Saving a key is opt-in (review-web M2).
+    await expect(panel.getByLabel('Remember it, encrypted, so next time is one click')).not.toBeChecked();
     await expect(panel.getByText('You can remove saved keys on your profile.')).toBeVisible();
 
     await key.fill('test-only-practice-key');
@@ -251,6 +259,99 @@ test.describe('claiming with the practice account', () => {
     await expect(page.getByRole('button', { name: 'Claim this' })).toBeEnabled();
     await expect(page.getByRole('heading', { name: 'Get your agent on it' })).toHaveCount(0);
     await expect(page.getByText(/yours for 48h/)).toHaveCount(0);
+  });
+
+  test('after Claim, keyboard focus is on what it opened (review-web L4)', async ({ page }) => {
+    await expect(page.getByRole('heading', { name: 'Get your agent on it' })).toBeFocused();
+  });
+
+  test('"Opened a pull request FORGE can\'t see?" is there, closed, and says practice can\'t hand one in (review-web M5)', async ({
+    page,
+  }) => {
+    const handIn = page.locator('details', { has: page.getByText("Opened a pull request FORGE can't see?") });
+    await expect(handIn).not.toHaveAttribute('open');
+    await handIn.getByText("Opened a pull request FORGE can't see?").click();
+    await handIn.getByLabel("Your pull request's link").fill('https://github.com/verastd/forge-app/pull/77');
+    await handIn.getByRole('button', { name: 'Hand it in' }).click();
+    await expect(handIn.getByRole('alert')).toHaveText(
+      "Practice accounts can't do that. Sign in with GitHub to do it for real.",
+    );
+  });
+});
+
+test.describe('a task above the practice account’s tier', () => {
+  test('says so, as the API does, and nothing is claimed (tier_too_low)', async ({ page }) => {
+    await goOffline(page);
+    await page.goto(`/signin?next=${encodeURIComponent('/contribute/task/4')}`);
+    await demoSignIn(page);
+    await page.getByRole('button', { name: 'Claim this' }).click();
+    await expect(page.getByText('This task needs a contributor tier above T0; it opens up as you ship work.')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Get your agent on it' })).toHaveCount(0);
+  });
+});
+
+test.describe('with the FORGE connector switched off', () => {
+  test('Antigravity and "Connect your agent to FORGE once" are not offered (review-web M6)', async ({ page }) => {
+    await goOffline(page);
+    await page.route('**/api/flags', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ contribute_bridge: true, agent_start: true, mcp_connector: false }),
+      }),
+    );
+    await page.goto(`/signin?next=${encodeURIComponent('/contribute/task/1')}`);
+    await demoSignIn(page);
+    await page.getByRole('button', { name: 'Claim this' }).click();
+
+    const open = openPart(page);
+    await expect(open.getByRole('link', { name: 'Open Claude Code on the web' })).toBeVisible();
+    await expect(open.getByRole('button', { name: /Google Antigravity/ })).toHaveCount(0);
+    await expect(open.getByText(/Antigravity/)).toHaveCount(0);
+    await expect(open.getByRole('link', { name: 'Connect your agent to FORGE once' })).toHaveCount(0);
+    // Nor as a first-time step that would lead to a switched-off page.
+    await open.getByText('First time with Claude Code on the web?').click();
+    await expect(open.getByText(/Connect your agent to FORGE once/)).toHaveCount(0);
+  });
+});
+
+test.describe('the practice account is nobody on GitHub', () => {
+  test('a task a GitHub user called "you" holds is not the practice account’s (review-bridge B-L7)', async ({
+    page,
+  }) => {
+    // A practice build pointed at a live API sees real holders' logins.
+    const [taskOne, ...rest] = TASK_FIXTURES;
+    if (taskOne === undefined) throw new Error('no task fixtures');
+    const { acceptanceCriteria: criteria, ...cardOne } = taskOne;
+    const card = {
+      ...cardOne,
+      status: 'claimed',
+      claimedBy: 'you',
+      leaseEndsAt: new Date(Date.now() + 40 * 60 * 60 * 1000).toISOString(),
+    };
+    const others = rest.map(({ acceptanceCriteria: _criteria, ...task }) => task);
+    await goOffline(page);
+    await page.route('**/api/bridge/tasks', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ tasks: [card, ...others] }) }),
+    );
+    await page.route('**/api/bridge/tasks/1', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ task: card, acceptanceCriteria: criteria, branch: 'task/1-x', brief: BRIEF_WITHOUT_LOGIN }),
+      }),
+    );
+    await page.goto(`/signin?next=${encodeURIComponent('/contribute')}`);
+    await demoSignIn(page);
+
+    const first = page.getByRole('region', { name: 'Tasks' }).getByRole('link').first();
+    await expect(first).toContainText('someone is on it');
+    await expect(first).not.toContainText('yours right now');
+
+    await page.goto('/contribute/task/1');
+    await expect(page.getByText('you is on this one right now.')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Claim this' })).toBeDisabled();
+    await expect(page.getByRole('heading', { name: 'Get your agent on it' })).toHaveCount(0);
   });
 });
 

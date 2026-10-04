@@ -36,14 +36,18 @@ work; a PR against a task claimed by someone else is closed regardless of
 quality.
 
 If you'd rather not leave the browser, claim a task in the in-app Bridge at
-[`/contribute`](apps/web/src/app/contribute) and press **Start it for me**
-(FORGE starts your agent through its maker's API, on your own account) or
-**Open my agent** (your agent opens with the task already typed in).
-Connect your agent to FORGE once at
+[`/contribute`](apps/web/src/app/contribute) and press **Open my agent**
+(your agent opens with the task already typed in) or, once it is switched
+on, **Start it for me** (FORGE starts your agent through its maker's API,
+on your own account; each of those rails stays off until it passes a live
+test). Connect your agent to FORGE once at
 [`/connect`](https://forge-app-eta-mocha.vercel.app/connect) and it can
-claim the task, report progress and read its check results by itself, so
-nothing needs copying and pasting. It's a client for the same GitHub-native
-pipeline, not a shortcut around it;
+claim the task, report progress and read its check results by itself, with
+nothing to copy and paste; an agent FORGE can't start, open with a link or
+reach through the connector still gets the task from a "Copy the brief"
+box.
+It's a client for the same GitHub-native pipeline, not a shortcut around
+it;
 [`docs/architecture.md`](docs/architecture.md#the-bridge) and
 [ADR-005](docs/adr/ADR-005-agent-handoff.md) say what's wired up today and
 what's still switched off.
@@ -148,10 +152,11 @@ tiers, survival, and the public ledger, and nothing pays out yet. See
 what's designed but not built.
 
 The pieces vary in how finished they are — some (the shared schemas, the
-flag client, the Gauntlet's CI jobs) are stable and exercised; others (the
-Bridge's live dispatch, the on-chain client) are wired up as demos or
-stubs. [`docs/architecture.md`](docs/architecture.md) has the honest
-per-module breakdown.
+flag client, the Gauntlet's CI jobs) are stable and exercised; others
+aren't live yet: the Bridge's start rails are built but switched off until
+each passes a live test, and the on-chain client is a mock.
+[`docs/architecture.md`](docs/architecture.md) has the honest per-module
+breakdown.
 
 ## Security
 

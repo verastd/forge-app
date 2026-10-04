@@ -194,6 +194,57 @@ def test_the_connection_uses_wal_and_enforces_foreign_keys(
         db.execute("INSERT INTO test_child (parent_id) VALUES (42)")
 
 
+def test_secure_delete_is_on_even_where_sqlite_leaves_it_off(
+    registry: dict[str, tuple[str, ...]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CR-8: whether deleted rows are overwritten depends on how SQLite was built (this
+    one does it by default, many don't), so FORGE switches it on itself."""
+    connect = sqlite3.connect
+
+    def a_build_that_keeps_deleted_content(*args: object, **kwargs: object) -> sqlite3.Connection:
+        connection = connect(*args, **kwargs)  # type: ignore[arg-type]
+        connection.execute("PRAGMA secure_delete=OFF")
+        return connection
+
+    monkeypatch.setattr(state.sqlite3, "connect", a_build_that_keeps_deleted_content)
+    db = state.get_state_db()
+    assert db.query_one("PRAGMA secure_delete") == {"secure_delete": 1}
+
+
+def _wal_size(db: state.StateDB) -> int:
+    wal = Path(f"{db.path}-wal")
+    return wal.stat().st_size if wal.exists() else 0
+
+
+def test_a_checkpoint_empties_the_write_ahead_log(db: state.StateDB) -> None:
+    """CR-8: what was deleted or overwritten stays in the -wal file until a checkpoint
+    copies it out and the log is emptied."""
+    db.execute("INSERT INTO test_notes (body) VALUES ('test-only-sealed-row')")
+    db.execute("DELETE FROM test_notes")
+    assert b"test-only-sealed-row" in Path(f"{db.path}-wal").read_bytes()
+    db.checkpoint()
+    assert _wal_size(db) == 0
+    assert b"test-only-sealed-row" not in Path(db.path).read_bytes()
+
+
+def test_a_checkpoint_asked_for_in_a_transaction_runs_when_it_commits(
+    db: state.StateDB,
+) -> None:
+    # SQLite refuses a checkpoint inside a transaction ("database table is locked").
+    with db.transaction():
+        db.execute("INSERT INTO test_notes (body) VALUES ('kept')")
+        with db.transaction():
+            db.checkpoint()
+        assert _wal_size(db) > 0  # not yet
+    assert _wal_size(db) == 0
+    with pytest.raises(RuntimeError), db.transaction():
+        db.execute("INSERT INTO test_notes (body) VALUES ('undone')")
+        db.checkpoint()
+        raise RuntimeError("the block failed")
+    assert db._checkpoint_due is False  # nothing it was asked for was kept
+    assert db.query_all("SELECT body FROM test_notes") == [{"body": "kept"}]
+
+
 # --- transactions --------------------------------------------------------------------
 
 

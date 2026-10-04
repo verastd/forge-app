@@ -8,9 +8,10 @@
  * 3. No OAuth parameters at all: nothing to approve. Someone opened the page
  *    directly, or a query too long for sign-in's `next` was dropped.
  * 4. The API checks the request, server-side. A refusal it can report to the
- *    client sends the browser back there; one it can't (an unknown client,
- *    a redirect URI that isn't the client's) is shown here and never
- *    redirects anywhere.
+ *    client is said here, with a button back to the client that carries the
+ *    error (never an automatic redirect: a link to FORGE must not bounce
+ *    anyone to another site unasked); one it can't (an unknown client, a
+ *    redirect URI that isn't the client's) is shown here with no way on.
  * 5. The consent screen: who is asking, where it sends you back to, what it
  *    can and can't do, and Allow or Cancel, posted to ./decision. Only for
  *    scopes the screen describes (`forge.tasks`); anything else is refused.
@@ -28,7 +29,7 @@ import { redirect } from 'next/navigation';
 import { getSession } from '../../../lib/session';
 import { checkAuthorization } from './consent-api';
 import styles from './consent.module.css';
-import { CAN, CANNOT, NOTICES } from './copy';
+import { CAN, CANNOT, cantGoAhead, NOTICES, RETURN_NOTE } from './copy';
 import type { NoticeKind } from './copy';
 import {
   authorizeParamsFrom,
@@ -38,6 +39,7 @@ import {
   fromRecord,
   isLoopbackHost,
   oauthFields,
+  returnTarget,
   scopesDescribed,
 } from './oauth-request';
 
@@ -72,6 +74,33 @@ function NoticePage({ kind, detail }: { kind: NoticeKind; detail?: string }) {
           </Link>
           <Link href="/" className="btn btn-ghost">
             Go home
+          </Link>
+        </div>
+      </div>
+    </main>
+  );
+}
+
+/**
+ * A refusal the app that asked may hear about: why, in the API's words, and
+ * a button back to the app that carries the error. The visitor decides.
+ */
+function ReturnPage({ to, description }: { to: string; description?: string }) {
+  const why = description === undefined ? '' : displayText(description, MAX_DETAIL_CHARS, '');
+  const target = displayText(returnTarget(to), MAX_HOST_CHARS, 'the app');
+  return (
+    <main className="page">
+      <div className={styles.panel}>
+        <h1 className="page-title">{cantGoAhead(why)}</h1>
+        <div className="card stack">
+          <p className="muted">{RETURN_NOTE}</p>
+        </div>
+        <div className="row">
+          <a href={to} className="btn btn-primary">
+            Return to {target}
+          </a>
+          <Link href="/connect" className="btn btn-ghost">
+            How to connect an agent
           </Link>
         </div>
       </div>
@@ -168,9 +197,9 @@ export default async function AuthorizePage({ searchParams }: { searchParams: Se
       // The lists describe `forge.tasks` only: never ask consent for a scope they leave out.
       if (!scopesDescribed(outcome.check.scopes)) return <NoticePage kind="unavailable" />;
       return <ConsentScreen check={outcome.check} params={mapped.params} login={session.login} />;
-    case 'redirect':
+    case 'return':
       // The API validated the client and its redirect URI, and `clientRedirect` checked the result again.
-      return redirect(outcome.to);
+      return <ReturnPage to={outcome.to} {...(outcome.description === undefined ? {} : { description: outcome.description })} />;
     case 'invalid':
       return <NoticePage kind="invalid" detail={outcome.description} />;
     case 'off':

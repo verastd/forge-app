@@ -16,10 +16,12 @@ import {
   exchangeCode,
   fetchGitHubUser,
   openTransaction,
+  revokeGitHubToken,
   safeNext,
 } from '@forge/auth';
 import type { TransactionClaims } from '@forge/auth';
 import { cookies } from 'next/headers';
+import { after } from 'next/server';
 import type { NextRequest } from 'next/server';
 
 import { githubAppConfig, isProduction, sessionKeys } from '../../../lib/auth/config';
@@ -27,6 +29,7 @@ import { redirectTo, signInFailed } from '../../../lib/auth/http';
 import { postAsUser } from '../../../lib/bff-forward';
 import type { ApiOutcome } from '../../../lib/bff-forward';
 import { getSession, setSessionCookie, signInAvailability } from '../../../lib/session';
+import { startWithToken } from './agent-start';
 
 export const dynamic = 'force-dynamic';
 
@@ -80,10 +83,11 @@ export async function GET(request: NextRequest): Promise<Response> {
  * The `agent` attempt: GitHub's one-time authorization to start Copilot on one
  * task. The token must belong to the GitHub account signed in here. It goes to
  * the API in one dispatch request, as the credential for that one start (the
- * API never saves a `copilot` credential), and is dropped when this returns:
- * it is never stored, logged or sent anywhere else. Every outcome lands back on
- * the task page, which says what happened: `?started=<rail>` or
- * `?start_error=<code>` (plus `&status=` for `rail_failed`).
+ * API never saves a `copilot` credential), and then FORGE revokes it with
+ * GitHub (`startWithToken`), once the browser has its answer: it is never
+ * stored, logged or sent anywhere else. Every outcome lands back on the task
+ * page, which says what happened: `?started=<rail>` or `?start_error=<code>`
+ * (plus `&status=` for `rail_failed`).
  */
 async function agentCallback(
   request: NextRequest,
@@ -118,12 +122,21 @@ async function agentCallback(
       redirectUri: `${config.origin}/auth/callback`,
       codeVerifier: tx.verifier,
     });
-    const user = await fetchGitHubUser(accessToken);
-    if (String(user.id) !== session.sub) return failed('wrong_account');
-    outcome = await postAsUser('/api/bridge/dispatch', session, {
-      taskId: tx.taskId,
-      rail: tx.rail,
-      credential: { key: accessToken },
+    outcome = await startWithToken(accessToken, session.sub, {
+      userIdOf: async (token) => String((await fetchGitHubUser(token)).id),
+      dispatch: (token) =>
+        postAsUser('/api/bridge/dispatch', session, { taskId: tx.taskId, rail: tx.rail, credential: { key: token } }),
+      // After the response, so the redirect never waits on GitHub. Logged without the token.
+      revoke: (token) => {
+        after(async () => {
+          const revoked = await revokeGitHubToken({
+            clientId: config.clientId,
+            clientSecret: config.clientSecret,
+            accessToken: token,
+          });
+          if (!revoked) console.warn('agent authorization: GitHub did not confirm the one-time token was revoked');
+        });
+      },
     });
   } catch (error) {
     // The code only: messages and requests could carry the code or a token.

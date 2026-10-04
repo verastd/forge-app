@@ -6,9 +6,11 @@ connected agents, and the 404/503 gates. The clock is injected; secrets are test
 import base64
 import json
 import logging
+import re
 import time
 from collections.abc import Callable, Iterator
 from typing import Any
+from urllib.parse import urlsplit
 
 import pytest
 from fastapi.testclient import TestClient
@@ -298,9 +300,16 @@ def test_registration_is_no_store(api: TestClient) -> None:
         "http://[::1]:9000/cb",
         "https://example.com/cb?tenant=a",
         "https://example.com:8443/cb",
+        "https://1.2.3.4/cb",
+        "https://[2001:db8::1]:8443/cb",
+        "https://xn--claud-esa.ai/cb",  # an IDN, in its ASCII form
         "cursor://anysphere.cursor-mcp/oauth/callback",
         "com.example.app:/oauth2redirect",
+        "com.googleusercontent.apps.123-abc:/oauth2redirect",
         "vscode://vscode.github-authentication/did-authenticate",
+        "vscode-insiders://vscode.github-authentication/did-authenticate",
+        "windsurf://codeium.windsurf/oauth/callback",
+        "claude://claude.ai/oauth/callback?client=desktop",
     ],
 )
 def test_redirect_uris_that_register(api: TestClient, uri: str) -> None:
@@ -332,6 +341,51 @@ def test_redirect_uris_that_register(api: TestClient, uri: str) -> None:
         ("https://example.com:99999/cb", "not a valid URI"),
         ("https:///no-host", "must name a host"),
         ("https://example.com/" + "a" * 600, "longer than 512"),
+        # Review H2: hosts a browser reads differently from Python.
+        ("https://evil.example\\.claude.ai/cb", "backslash"),  # a browser goes to evil.example
+        ("https://claude.ai\\@evil.example/cb", "backslash"),
+        ("cursor://anysphere.cursor-mcp\\@evil.example/cb", "backslash"),
+        ("https://claude.ai%2eevil.example/cb", "percent-encode"),
+        ("https://evil.example%2F.claude.ai/cb", "percent-encode"),
+        ("https://evil.example%5C.claude.ai/cb", "percent-encode"),
+        ("https://0x7f000001/cb", "host plainly"),  # a browser reads 127.0.0.1
+        ("https://127.1/cb", "host plainly"),
+        ("https://010.0.0.1/cb", "host plainly"),
+        ("https://example.123/cb", "host plainly"),
+        ("https://[::ffff:127.0.0.1]/cb", "host plainly"),  # shown by a browser as ::ffff:7f00:1
+        ("https://ex_ample.com/cb", "host plainly"),
+        ("https://example.com:0443/cb", "host plainly"),
+        ("https:evil.example/cb", "must name a host"),  # a browser reads https://evil.example
+        ("https:/evil.example/cb", "must name a host"),
+        # Review L2: a trailing dot.
+        ("https://claude.ai./cb", "end its host with a dot"),
+        ("http://localhost./cb", "end its host with a dot"),
+        # Review H3: schemes that hand the address to a browser, or that any page can claim.
+        ("microsoft-edge:https://evil.example/cb", "microsoft-edge: scheme"),
+        ("Microsoft-Edge:https://evil.example/cb", "microsoft-edge: scheme"),
+        ("x-safari-https://evil.example/cb", "x-safari-https: scheme"),
+        ("googlechromes://evil.example/cb", "googlechromes: scheme"),
+        ("firefox://open-url?url=https://evil.example/cb", "firefox: scheme"),
+        ("opera-https://evil.example/cb", "opera-https: scheme"),
+        ("brave://open-url?url=https://evil.example/cb", "brave: scheme"),
+        ("intent://evil.example/cb", "intent: scheme"),
+        ("web+claude:connect", "web+claude: scheme"),
+        ("web+claude.ai:/cb", "web+claude.ai: scheme"),  # reverse-domain, still a web+ one
+        ("ms-word:ofe|u|https://evil.example/x", "ms-word: scheme"),
+        ("ms-app.example:/cb", "ms-app.example: scheme"),
+        # ... schemes that are neither a known client's nor reverse-domain ...
+        ("ftp://evil.example/cb", "an app's own scheme"),
+        ("ws://evil.example/cb", "an app's own scheme"),
+        ("myapp://callback", "an app's own scheme"),
+        # ... and app schemes that carry another address.
+        ("com.example.app:https://evil.example/cb", "scheme:/path"),
+        ("com.example.app:callback", "scheme:/path"),
+        ("cursor:https://evil.example/cb", "scheme:/path"),
+        ("cursor:///no-host", "scheme:/path"),
+        ("cursor://https://evil.example/cb", "scheme:/path"),
+        ("vscode://user@vscode.dev/cb", "scheme:/path"),
+        ("cursor://anysphere.cursor-mcp:99999/cb", "scheme:/path"),
+        ("cursor://[1:2]/cb", "scheme:/path"),
     ],
 )
 def test_redirect_uris_that_are_refused(api: TestClient, uri: str, reason: str) -> None:
@@ -441,6 +495,14 @@ def test_registration_normalizes_grant_types_and_drops_duplicates(api: TestClien
         ("​‮", "Unnamed agent"),
         ("", "Unnamed agent"),
         ("A" * 80, "A" * 63 + "…"),
+        # Review mcp L7: no "Zalgo" stacks and no variation selectors.
+        ("Claude" + "̶" * 40, "Claude̶̶"),  # two combining marks kept
+        ("Claude⃝⃝⃝", "Claude⃝⃝"),  # enclosing marks count too
+        ("x́̂̃ q́̂̃", "x́̂ q́̂"),  # per character
+        ("Café", "Café"),  # an accent stays (NFKC composes it)
+        ("Claude️︀", "Claude"),  # VS16, VS1
+        ("Claude\U000e0100\U000e01ef", "Claude"),  # the variation selectors supplement
+        ("Claude᠋᠏", "Claude"),  # Mongolian free variation selectors
     ],
 )
 def test_client_names_are_sanitized(api: TestClient, raw: str, shown: str) -> None:
@@ -505,8 +567,8 @@ def test_a_client_id_signed_with_another_secret_is_foreign(
     registration = register(api)
     monkeypatch.setenv(oauth_service.SECRET_ENV, OTHER_OAUTH_SECRET)
     params = authorize_params(registration, new_pkce())
-    for path in ("check", "deny"):
-        response = api.post(f"/api/oauth/authorize/{path}", json=params)
+    for path, headers in (("check", None), ("deny", user)):
+        response = api.post(f"/api/oauth/authorize/{path}", json=params, headers=headers)
         assert response.json() == {
             "error": "invalid_client",
             "errorDescription": response.json()["errorDescription"],
@@ -540,8 +602,12 @@ def test_check_shows_where_the_client_sends_you(api: TestClient) -> None:
         "http://[::1]:9000/cb": "[::1]",
         "https://example.com:8443/cb": "example.com:8443",
         "https://example.com:443/cb": "example.com",
+        "HTTPS://Example.COM/cb": "example.com",
+        "https://XN--Claud-esa.ai/cb": "xn--claud-esa.ai",  # an IDN, shown in ASCII
+        "https://[2001:db8::1]:8443/cb": "[2001:db8::1]:8443",
         "cursor://anysphere.cursor-mcp/oauth/callback": "cursor://anysphere.cursor-mcp",
-        "com.example.app:/oauth2redirect": "com.example.app:",
+        # Review H3: never a bare "com.example.app:", which names nothing.
+        "com.example.app:/oauth2redirect": "the app com.example.app",
     }
     for uri, host in cases.items():
         registration = register(api, [uri])
@@ -549,6 +615,51 @@ def test_check_shows_where_the_client_sends_you(api: TestClient) -> None:
             "/api/oauth/authorize/check", json=authorize_params(registration, new_pkce())
         )
         assert check.json()["redirectHost"] == host, uri
+
+
+def test_the_shown_host_comes_from_the_parse_that_accepts_the_uri() -> None:
+    """Review H2/H3: `redirect_host` is the validating parse, so nothing it shows can name
+    a host other than the one the browser goes to."""
+    for uri in (
+        "https://evil.example\\.claude.ai/cb",
+        "microsoft-edge:https://evil.example/cb",
+        "web+claude:connect",
+        "https://claude.ai./cb",
+        "ftp://evil.example/cb",
+    ):
+        problem = oauth_service.redirect_uri_problem(uri)
+        assert problem is not None, uri
+        with pytest.raises(ValueError, match=re.escape(problem)):
+            oauth_service.redirect_host(uri)
+
+
+def test_a_uri_python_and_the_strict_reading_disagree_on_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If Python's urlsplit ever read another host than the strict, browser-compatible
+    reading of the same text, the URI is refused rather than shown either way."""
+    uri = "https://claude.ai/cb"
+    assert oauth_service.redirect_host(uri) == "claude.ai"
+    other_reading = urlsplit(uri.replace("claude.ai", "evil.example"))
+    monkeypatch.setattr(oauth_service, "urlsplit", lambda text: other_reading)
+    assert oauth_service.redirect_uri_problem(uri) == "is not a valid URI"
+
+
+def test_a_refused_uri_in_an_older_registration_gets_no_code(
+    api: TestClient, user: dict[str, str]
+) -> None:
+    """A client_id signed before these rules may still name a backslash URI: the consent
+    calls refuse it as an unregistered address, with no redirect (review H2)."""
+    uri = "https://evil.example\\.claude.ai/api/mcp/auth_callback"
+    client_id = oauth_service.issue_client_id(
+        config(), name="Claude", redirect_uris=[uri], auth_method="none", issued_at=1
+    )
+    params = authorize_params({"client_id": client_id, "redirect_uris": [uri]}, new_pkce())
+    for path, headers in (("check", None), ("approve", user), ("deny", user)):
+        response = api.post(f"/api/oauth/authorize/{path}", json=params, headers=headers)
+        assert response.status_code == 400, path
+        assert response.json()["error"] == "invalid_redirect_uri"
+        assert "redirectTo" not in response.json()
 
 
 @pytest.mark.parametrize(
@@ -602,7 +713,7 @@ def test_other_redirects_never_match(
 ) -> None:
     registration = register(api, [registered])
     params = authorize_params(registration, new_pkce(), redirect_uri=requested)
-    for path, headers in (("check", None), ("approve", user), ("deny", None)):
+    for path, headers in (("check", None), ("approve", user), ("deny", user)):
         response = api.post(f"/api/oauth/authorize/{path}", json=params, headers=headers)
         assert response.status_code == 400
         assert response.json()["error"] == "invalid_redirect_uri"
@@ -674,27 +785,32 @@ def test_resource_spellings_that_mean_the_connector(
     assert whoami(api, tokens["access_token"]) == 200
 
 
-def test_a_long_state_is_an_error_without_the_state(api: TestClient) -> None:
+def test_a_long_state_is_an_error_without_the_state(api: TestClient, user: dict[str, str]) -> None:
     registration = register(api)
     params = authorize_params(registration, new_pkce(), state="s" * 2049)
     body = api.post("/api/oauth/authorize/check", json=params).json()
     assert body["error"] == "invalid_request"
     assert "state" not in query_of(body["redirectTo"])
-    denied = api.post("/api/oauth/authorize/deny", json=params).json()
+    denied = api.post("/api/oauth/authorize/deny", json=params, headers=user).json()
     assert "state" not in query_of(denied["redirectTo"])
 
 
-def test_approval_needs_the_signed_in_person(api: TestClient) -> None:
+@pytest.mark.parametrize("decision", ["approve", "deny"])
+def test_a_decision_needs_the_signed_in_person(api: TestClient, decision: str) -> None:
+    """Allow, and Cancel too (review L1): no endpoint sends a browser back to a client
+    for a caller who isn't signed in."""
     params = authorize_params(register(api), new_pkce())
-    response = api.post("/api/oauth/authorize/approve", json=params)
+    response = api.post(f"/api/oauth/authorize/{decision}", json=params)
     assert response.status_code == 401
     assert response.json() == {"error": "unauthenticated"}
 
 
-def test_deny_sends_access_denied_back(api: TestClient) -> None:
+def test_deny_sends_access_denied_back(api: TestClient, user: dict[str, str]) -> None:
     registration = register(api, ["https://chatgpt.com/connector_platform_oauth_redirect?x=1"])
     response = api.post(
-        "/api/oauth/authorize/deny", json=authorize_params(registration, new_pkce(), state="st")
+        "/api/oauth/authorize/deny",
+        json=authorize_params(registration, new_pkce(), state="st"),
+        headers=user,
     )
     assert response.status_code == 200
     redirect_to = response.json()["redirectTo"]
@@ -707,18 +823,18 @@ def test_deny_sends_access_denied_back(api: TestClient) -> None:
     assert response.headers["cache-control"] == NO_STORE
 
 
-def test_deny_without_state_sends_none(api: TestClient) -> None:
+def test_deny_without_state_sends_none(api: TestClient, user: dict[str, str]) -> None:
     registration = register(api)
     params = authorize_params(registration, new_pkce(), state=None)
     assert "state" not in query_of(
-        api.post("/api/oauth/authorize/deny", json=params).json()["redirectTo"]
+        api.post("/api/oauth/authorize/deny", json=params, headers=user).json()["redirectTo"]
     )
 
 
 def test_consent_responses_carry_no_null(api: TestClient, user: dict[str, str]) -> None:
     registration = register(api)
     params = authorize_params(registration, new_pkce(), state=None, resource=None)
-    for path, headers in (("check", None), ("approve", user), ("deny", None)):
+    for path, headers in (("check", None), ("approve", user), ("deny", user)):
         assert not has_null(
             api.post(f"/api/oauth/authorize/{path}", json=params, headers=headers).json()
         )
@@ -1075,7 +1191,7 @@ def test_refresh_reuse_inside_the_grace_window_is_a_retry(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """The client lost the response, or two of its sessions refreshed at once: a fresh pair
-    in the same grant, and nothing is revoked."""
+    in the same grant, once, and nothing is revoked."""
     assert oauth_service.REFRESH_REUSE_GRACE == 30
     connection = connect(api, user)
     first = refresh(api, connection.registration, connection.refresh_token)
@@ -1137,6 +1253,82 @@ def test_the_grace_window_runs_from_the_rotation_not_from_a_retry(
     assert replay.json()["error"] == "invalid_grant"
     for access in (first["access_token"], retried.json()["access_token"]):
         assert whoami(api, access) == 401
+
+
+def live_refresh_tokens() -> int:
+    """Refresh tokens that can still be traded in: unused, unrevoked, in a live grant."""
+    row = get_state_db().query_one(
+        "SELECT COUNT(*) AS n FROM oauth_tokens AS t JOIN oauth_grants AS g ON g.id = t.grant_id "
+        "WHERE t.kind = 'refresh' AND t.used_at IS NULL AND t.revoked_at IS NULL "
+        "AND g.revoked_at IS NULL"
+    )
+    assert row is not None
+    return int(row["n"])
+
+
+def test_a_rotated_refresh_token_gets_one_retry_only(
+    api: TestClient,
+    user: dict[str, str],
+    oauth_clock: EpochClock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Review H1: a second presentation inside the window revokes the whole grant, so one
+    captured refresh token can't be turned into parallel, self-renewing token families."""
+    connection = connect(api, user)
+    first = refresh(api, connection.registration, connection.refresh_token).json()
+    oauth_clock.advance(10)
+    retried = refresh(api, connection.registration, connection.refresh_token)
+    assert retried.status_code == 200
+    oauth_clock.advance(1)  # still inside the window
+    with caplog.at_level(logging.WARNING, logger=oauth_service.__name__):
+        again = refresh(api, connection.registration, connection.refresh_token)
+    assert again.status_code == 400
+    assert again.json() == {
+        "error": "invalid_grant",
+        "error_description": "The refresh token was already used. Connect the app again.",
+    }
+    assert "presented again" in caplog.text
+    for pair in (first, retried.json()):
+        assert whoami(api, pair["access_token"]) == 401
+        assert refresh(api, connection.registration, pair["refresh_token"]).status_code == 400
+    assert api.get("/api/oauth/grants", headers=user).json() == {"agents": []}
+
+
+def test_one_rotated_token_presented_20_times_leaves_at_most_two_families(
+    api: TestClient, user: dict[str, str], oauth_clock: EpochClock
+) -> None:
+    """The review's probe (mcp M2, oauth H1): the rightful rotation, then the same old
+    refresh token 20 times inside the window. One retry, then the grant is gone."""
+    connection = connect(api, user)
+    assert refresh(api, connection.registration, connection.refresh_token).status_code == 200
+    oauth_clock.advance(5)
+    statuses = [refresh(api, connection.registration, connection.refresh_token).status_code]
+    assert live_refresh_tokens() == 2  # the rightful family and the retry's
+    statuses += [
+        refresh(api, connection.registration, connection.refresh_token).status_code
+        for _ in range(19)
+    ]
+    assert statuses == [200] + [400] * 19
+    assert live_refresh_tokens() == 0
+
+
+def test_a_grant_keeps_at_most_5_live_refresh_tokens(api: TestClient, user: dict[str, str]) -> None:
+    """Minting a sixth live refresh token in a grant revokes the oldest (all minted in the
+    same second here, so the order of minting decides)."""
+    assert oauth_service.MAX_LIVE_REFRESH_TOKENS == 5
+    oldest = connect(api, user)
+    newer = [connect(api, user, registration=oldest.registration) for _ in range(5)]
+    assert len(api.get("/api/oauth/grants", headers=user).json()["agents"]) == 1  # one grant
+    assert live_refresh_tokens() == 5
+    revoked = refresh(api, oldest.registration, oldest.refresh_token)
+    assert revoked.json() == {
+        "error": "invalid_grant",
+        "error_description": "The refresh token was revoked.",
+    }
+    assert whoami(api, oldest.access_token) == 200  # only the refresh token went
+    for connection in newer:
+        assert refresh(api, oldest.registration, connection.refresh_token).status_code == 200
+    assert live_refresh_tokens() == 5
 
 
 @pytest.mark.parametrize("how", ["disconnect", "revocation", "replayed code"])
@@ -1377,6 +1569,30 @@ def test_every_route_404s_while_the_flag_is_off(
     assert response.json() == CONNECTOR_DISABLED
 
 
+@pytest.mark.parametrize(("method", "path"), CONNECTOR_ROUTES)
+def test_every_route_404s_while_sign_in_is_off(
+    api: TestClient, monkeypatch: pytest.MonkeyPatch, method: str, path: str
+) -> None:
+    """Review mcp L6: turning `github_signin` off closes the connector too."""
+    use_connector(monkeypatch, github_signin=False)
+    response = api.request(method, path.replace("{grant_id}", "x"))
+    assert response.status_code == 404
+    assert response.json() == CONNECTOR_DISABLED
+
+
+def test_turning_sign_in_off_stops_live_connections(
+    api: TestClient, user: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    connection = connect(api, user)
+    assert whoami(api, connection.access_token) == 200
+    use_connector(monkeypatch, github_signin=False)
+    assert whoami(api, connection.access_token) == 404
+    renewed = refresh(api, connection.registration, connection.refresh_token)
+    assert (renewed.status_code, renewed.json()) == (404, CONNECTOR_DISABLED)
+    use_connector(monkeypatch)  # back on: the connection was closed, not revoked
+    assert whoami(api, connection.access_token) == 200
+
+
 @pytest.mark.parametrize(
     "environment",
     [
@@ -1490,9 +1706,10 @@ def test_verify_access_token_directly(
     connection = connect(api, user)
     db = get_state_db()
     now = int(oauth_clock())
-    assert oauth_service.verify_access_token(db, connection.access_token, RESOURCE, now=now) == (
-        Identity(*USER)
-    )
+    verified = oauth_service.verify_access_token(db, connection.access_token, RESOURCE, now=now)
+    assert verified.identity == Identity(*USER)
+    agent = api.get("/api/oauth/grants", headers=user).json()["agents"][0]
+    assert verified.grant_id == agent["id"]
     for token, resource in (
         (connection.access_token, "https://other.example/mcp"),
         (connection.refresh_token, RESOURCE),  # a refresh token is not an access token
@@ -1501,7 +1718,8 @@ def test_verify_access_token_directly(
     ):
         with pytest.raises(InvalidToken):
             oauth_service.verify_access_token(db, token, resource, now=now)
-    assert oauth_service.verify_access_token(db, connection.access_token, RESOURCE).login == USER[1]
+    wall_clock = oauth_service.verify_access_token(db, connection.access_token, RESOURCE)
+    assert wall_clock.identity.login == USER[1]
 
 
 def test_purge_forgets_what_lapsed(

@@ -10,34 +10,54 @@
  * nothing (a saved key, or Copilot's GitHub authorization) or a key pasted
  * once. A pasted key is read from the form when it is submitted, the form is
  * cleared straight away, and the key lives only in that one request: it is
- * never put in component state, never shown back, never logged.
+ * never put in component state, never shown back, never logged. The key
+ * fields carry a name of their own per vendor and ask password managers to
+ * leave them alone, so one vendor's key is never offered into another's field.
+ *
+ * A start that gets no answer may still have happened (the vendor was slow,
+ * the network dropped): the panel says so and reads the task's status before
+ * it says anything else, never "nothing changed".
  */
 
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import { ROUTINE_PROMPT } from '@forge/shared';
-import type { Credential, DispatchResult, RailInfo, StartRail } from '@forge/shared';
+import type { Credential, RailInfo, StartRail } from '@forge/shared';
 
 import { CopyBox } from '../CopyBox';
-import { errorCode, failureOf, startAgent } from '../../lib/api';
+import { ConflictError, errorCode, failureOf, fetchStatus, mayHaveHappened, startAgent } from '../../lib/api';
 import {
   credentialFields,
   describeStartError,
   keyName,
-  safeHttpsUrl,
+  sessionLink,
   setupStepLink,
   setupSteps,
   startedSentence,
+  startedSince,
 } from '../../lib/handoff';
+import type { CredentialFieldName } from '../../lib/handoff';
 import { PRACTICE_NOTE } from '../../lib/offline';
 import styles from './contribute.module.css';
 
 interface Message {
-  tone: 'ok' | 'error' | 'practice';
+  tone: 'ok' | 'error' | 'practice' | 'checking';
   text: string;
   sessionUrl?: string | null;
   saved?: boolean;
+}
+
+/**
+ * A start the status shows from this long before the click still counts as
+ * this one: the API's clock and this browser's may differ a little. (A second
+ * press within two minutes gets the API's `already_started` anyway.)
+ */
+const START_SKEW_MS = 2 * 60_000;
+
+/** The form field for one part of a rail's credential: its own name per vendor (`jules-key`, `devin-orgId`). */
+function inputName(rail: StartRail, field: CredentialFieldName): string {
+  return `${rail}-${field}`;
 }
 
 /** A rail's one-time setup, each step linked where there is somewhere to go. */
@@ -45,14 +65,17 @@ export function SetupSteps({
   meta,
   vault,
   appSlug,
+  connector = true,
 }: {
   meta: Pick<RailInfo, 'id' | 'setup' | 'keyUrl'>;
   vault: boolean;
   appSlug: string | null;
+  /** The `mcp_connector` flag: off, the "Connect your agent to FORGE" step is left out. */
+  connector?: boolean;
 }) {
   return (
     <ol className="steps">
-      {setupSteps(meta, vault).map((step) => {
+      {setupSteps(meta, vault, connector).map((step) => {
         const link = setupStepLink(meta, step, appSlug);
         return (
           <li key={step}>
@@ -76,10 +99,17 @@ export function SetupSteps({
 
 function Outcome({ message, label }: { message: Message; label: string }) {
   const tone =
-    message.tone === 'ok' ? styles.outcomeOk : message.tone === 'practice' ? styles.outcomePractice : styles.outcomeError;
+    message.tone === 'ok' || message.tone === 'checking'
+      ? styles.outcomeOk
+      : message.tone === 'practice'
+        ? styles.outcomePractice
+        : styles.outcomeError;
   return (
     <div className={`${styles.outcome} ${tone}`}>
-      <p className={styles.outcomeTitle}>{message.text}</p>
+      <p className={styles.outcomeTitle}>
+        {message.tone === 'checking' && <span className="spinner" aria-hidden="true" />}
+        {message.text}
+      </p>
       {message.tone === 'practice' && <p className="muted">{PRACTICE_NOTE}</p>}
       {message.saved === true && <p className="muted">Your key is saved, encrypted, for next time.</p>}
       {message.sessionUrl !== undefined && message.sessionUrl !== null && (
@@ -94,6 +124,37 @@ function Outcome({ message, label }: { message: Message; label: string }) {
   );
 }
 
+/**
+ * After a start that got no answer: whether the task's status shows it
+ * started (and where to watch it), or plain words that it doesn't yet.
+ */
+async function checkStart(
+  taskId: number,
+  rail: StartRail,
+  label: string,
+  sinceMs: number,
+  identified: boolean,
+): Promise<{ started: boolean; message: Message }> {
+  try {
+    const { data } = await fetchStatus(taskId, identified);
+    if (startedSince(data, rail, sinceMs)) {
+      return {
+        started: true,
+        message: { tone: 'ok', text: startedSentence(label), sessionUrl: sessionLink(data.sessionUrl, rail) },
+      };
+    }
+  } catch {
+    // The status can't be read either: say only what is known.
+  }
+  return {
+    started: false,
+    message: {
+      tone: 'error',
+      text: `FORGE didn't hear back, and this task shows no start yet. Check “Where it is” below in a minute before you start ${label} again.`,
+    },
+  };
+}
+
 export function StartRails({
   taskId,
   rails,
@@ -101,6 +162,7 @@ export function StartRails({
   appSlug,
   practice,
   onStarted,
+  onCheck,
 }: {
   taskId: number;
   /** The start rails the API says are on, in display order. */
@@ -108,7 +170,10 @@ export function StartRails({
   vault: boolean;
   appSlug: string | null;
   practice: boolean;
-  onStarted: (rail: StartRail, result: DispatchResult) => void;
+  /** A start went through (or had already): the page reads the status again. */
+  onStarted: (rail: StartRail) => void;
+  /** A start that got no answer was checked: the page reads the status again. */
+  onCheck: () => void;
 }) {
   const [open, setOpen] = useState<StartRail | null>(null);
   const [busy, setBusy] = useState(false);
@@ -142,8 +207,8 @@ export function StartRails({
       }
       const form = event.currentTarget;
       const data = new FormData(form);
-      const field = (name: string): string => {
-        const value = data.get(name);
+      const field = (name: CredentialFieldName): string => {
+        const value = data.get(inputName(railId, name));
         return typeof value === 'string' ? value.trim() : '';
       };
       let credential: Credential | undefined;
@@ -161,6 +226,7 @@ export function StartRails({
       form.reset();
       setBusy(true);
       setMessage(null);
+      const pressedAt = Date.now();
       try {
         const result = await startAgent({
           taskId,
@@ -176,30 +242,50 @@ export function StartRails({
         setMessage({
           tone: result.degraded ? 'practice' : 'ok',
           text: startedSentence(meta.label),
-          sessionUrl: safeHttpsUrl(result.data.sessionUrl),
+          sessionUrl: sessionLink(result.data.sessionUrl, railId),
           saved: keptKey,
         });
-        onStarted(railId, result.data);
+        onStarted(railId);
       } catch (error) {
-        const code = errorCode(error);
-        if (code === 'credential_rejected' && useSaved) {
-          // The API deletes a saved key the vendor refused.
-          setSavedNow((current) => ({ ...current, [railId]: false }));
+        if (error instanceof ConflictError && error.code === 'already_started') {
+          // The first press went through: say so, and where to watch it.
+          setMessage({
+            tone: 'ok',
+            text: describeStartError(failureOf(error), meta),
+            sessionUrl: sessionLink(error.extra.sessionUrl, railId),
+          });
+          onStarted(railId);
+        } else if (mayHaveHappened(error)) {
+          // No answer is not a "no": the API may be starting it right now.
+          credential = undefined;
+          setMessage({ tone: 'checking', text: 'It may have started. Checking…' });
+          const checked = await checkStart(taskId, railId, meta.label, pressedAt - START_SKEW_MS, !practice);
+          setMessage(checked.message);
+          if (checked.started) {
+            onStarted(railId);
+          } else {
+            onCheck();
+          }
+        } else {
+          if (errorCode(error) === 'credential_rejected' && useSaved) {
+            // The API deletes a saved key the vendor refused.
+            setSavedNow((current) => ({ ...current, [railId]: false }));
+          }
+          setMessage({
+            tone: 'error',
+            text: describeStartError({ ...failureOf(error), usedSavedKey: useSaved }, meta),
+          });
         }
-        setMessage({
-          tone: 'error',
-          text: describeStartError({ ...failureOf(error), usedSavedKey: useSaved }, meta),
-        });
       } finally {
         credential = undefined;
         setBusy(false);
       }
     },
-    [busy, meta, onStarted, railId, taskId, vault],
+    [busy, meta, onCheck, onStarted, practice, railId, taskId, vault],
   );
 
   let form: ReactNode = null;
-  if (meta !== undefined) {
+  if (meta !== undefined && railId !== undefined) {
     const startLabel = busy ? (
       <>
         <span className="spinner" aria-hidden="true" />
@@ -219,8 +305,8 @@ export function StartRails({
             </button>
           </div>
           <p className="faint">
-            GitHub asks you to approve FORGE for this one start. FORGE uses that approval once and
-            doesn&apos;t keep it.
+            FORGE asks GitHub for a one-time approval. If you&apos;ve approved FORGE before, GitHub may not
+            show you a page. FORGE uses it for this one start, then revokes it.
           </p>
         </form>
       );
@@ -262,13 +348,16 @@ export function StartRails({
               <label htmlFor={`start-${meta.id}-${field.name}`}>{field.label}</label>
               <input
                 id={`start-${meta.id}-${field.name}`}
-                name={field.name}
+                name={inputName(railId, field.name)}
                 type="password"
                 className={`text-input ${styles.input}`}
                 autoComplete="off"
                 autoCapitalize="off"
                 autoCorrect="off"
                 spellCheck={false}
+                // Password managers: never save or fill this (1Password, LastPass).
+                data-1p-ignore=""
+                data-lpignore="true"
                 required
                 maxLength={field.maxLength}
                 disabled={busy}
@@ -278,7 +367,7 @@ export function StartRails({
           {vault && (
             <div>
               <div className={styles.check}>
-                <input id={`start-${meta.id}-remember`} name="remember" type="checkbox" defaultChecked disabled={busy} />
+                <input id={`start-${meta.id}-remember`} name="remember" type="checkbox" disabled={busy} />
                 <label htmlFor={`start-${meta.id}-remember`}>
                   Remember it, encrypted, so next time is one click
                 </label>
@@ -323,7 +412,8 @@ export function StartRails({
                 type="button"
                 className={`rail ${chosen ? styles.railChosen : ''}`}
                 aria-expanded={chosen}
-                aria-controls={`start-panel-${rail.id}`}
+                // Only the open rail's panel exists to be controlled.
+                aria-controls={chosen ? `start-panel-${rail.id}` : undefined}
                 onClick={() => choose(rail.id as StartRail)}
               >
                 <span className="rail-head">

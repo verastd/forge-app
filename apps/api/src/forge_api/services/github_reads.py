@@ -8,12 +8,17 @@ and dev containers carry is never read. A read that GitHub refuses with 401 beca
 the token (expired or revoked) is retried once anonymously, and one warning is logged
 for it, naming the variable but never the token or any header: reads keep working at
 the anonymous rate until the operator replaces the token. Answers are cached per
-process: pull requests and checks for 60 s, forks for 5 minutes. Every failure raises
+process: pull requests, checks and searches for 60 s, forks for 5 minutes; a full cache
+drops its least recently used entry, never everything. Every failure raises
 GitHubUnavailable, and callers degrade (checks say "pending" with a plain note) instead
 of answering 500.
 
-Same outbound rules as the rail adapters (rail_adapters/base.py): no redirects, 5 s to
-connect, 20 s in all, at most 1 MB read.
+A slow or broken GitHub can't hold the API up: a read gets 5 s in all, a failed read is
+remembered for 60 s (asking again fails at once), and after 5 failures in a row FORGE
+stops asking GitHub for 60 s.
+
+Same outbound rules as the rail adapters (rail_adapters/base.py): no redirects, at most
+1 MB read.
 """
 
 import logging
@@ -21,8 +26,10 @@ import os
 import re
 import threading
 import time
-from collections.abc import Callable, Mapping
+from collections import OrderedDict
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 import httpx
@@ -31,11 +38,11 @@ from forge_api.models import CheckRun, CheckRunStatus, CheckState, ForkStatus
 from forge_api.services.brief import UPSTREAM_REPO, is_valid_login
 from forge_api.services.rail_adapters.base import (
     FORK_REPO_NAME,
+    USER_AGENT,
     OutboundCall,
     TransportFailure,
     VendorResponse,
     bounded_send,
-    make_client,
     strip_controls,
 )
 
@@ -44,19 +51,32 @@ logger = logging.getLogger(__name__)
 READ_TOKEN_ENV = "FORGE_GITHUB_READ_TOKEN"
 API_URL = "https://api.github.com"
 API_VERSION = "2022-11-28"
+#: Everything one read may take, connecting and the whole answer included.
+READ_TIMEOUT_SECONDS = 5.0
 PULL_TTL_SECONDS = 60.0
 CHECKS_TTL_SECONDS = 60.0
+SEARCH_TTL_SECONDS = 60.0
 FORK_TTL_SECONDS = 300.0
-TASKS_TTL_SECONDS = 300.0
-TASK_LABELS = ("agent-ready", "status:open")
-#: Issues are read 100 at a time; at most this many pages.
-TASK_PAGES = 3
+#: A failed read is remembered this long: asking again fails at once.
+FAILURE_TTL_SECONDS = 60.0
+#: After this many failed reads in a row, GitHub isn't asked at all for BREAKER_SECONDS.
+BREAKER_FAILURES = 5
+BREAKER_SECONDS = 60.0
 MAX_CACHE_ENTRIES = 2048
 MAX_SUMMARY = 300
+#: A search for a task's pull request reads at most this many of them in full.
+SEARCH_CANDIDATES = 3
+#: How much of a pull request's description is searched for "Closes #<task>".
+MAX_BODY_SCAN = 20_000
 
 #: Conclusions that let a pull request through; everything else completed is a failure.
 PASSING = frozenset({"success", "neutral", "skipped"})
 _SHA = re.compile(r"[0-9a-f]{7,64}")
+#: `[#12]` in a pull request title: AGENTS.md rule 8's `[#<issue>] <goal>`.
+_TITLE_REF = re.compile(r"\[#([1-9][0-9]{0,9})\]")
+#: "Fixes #12", "closes: #12", "Resolves #12" in a description: the link Foreman's G0 gate
+#: reads (protocol.ts LINK_RE). Linear: no quantifier can retry another's characters.
+_BODY_REF = re.compile(r"\b(?:fixes|closes|resolves)\s*(?::\s*)?#([0-9]{1,10})\b", re.IGNORECASE)
 
 PullState = Literal["open", "closed"]
 
@@ -78,6 +98,15 @@ class PullRequest:
     #: Login owning the head repository; None when that repository was deleted.
     head_owner: str | None
     title: str
+    #: GitHub user id owning the head repository (a login can change hands; an id can't).
+    head_owner_id: int | None = None
+    #: `owner/name` of the repository the pull request asks to merge into.
+    base_repo: str = ""
+    created_at: datetime | None = None
+    closed_at: datetime | None = None
+    merged_at: datetime | None = None
+    #: Task numbers it names: `[#<n>]` in its title, "Closes #<n>" in its description.
+    refs: frozenset[int] = frozenset()
 
     @property
     def is_open(self) -> bool:
@@ -88,11 +117,37 @@ def pull_url(number: int) -> str:
     return f"https://github.com/{UPSTREAM_REPO}/pull/{number}"
 
 
+def _time(value: object) -> datetime | None:
+    """A GitHub timestamp ("2026-08-10T09:00:00Z"), or None when it isn't one."""
+    if not isinstance(value, str):
+        return None
+    try:
+        moment = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return moment if moment.tzinfo is not None else moment.replace(tzinfo=UTC)
+
+
+def task_refs(title: object, body: object) -> frozenset[int]:
+    """The task numbers a pull request names: `[#<n>]` in its title, or a closing link
+    ("Closes #<n>", "Fixes #<n>", "Resolves #<n>") in its description."""
+    found: set[int] = set()
+    if isinstance(title, str):
+        found.update(int(number) for number in _TITLE_REF.findall(title))
+    if isinstance(body, str):
+        found.update(int(number) for number in _BODY_REF.findall(body[:MAX_BODY_SCAN]))
+    return frozenset(found)
+
+
+def _positive_int(value: object) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
+
+
 def _parse_pull(raw: Any) -> PullRequest | None:
     if not isinstance(raw, dict):
         return None
-    number, state, head = raw.get("number"), raw.get("state"), raw.get("head")
-    if not (isinstance(number, int) and not isinstance(number, bool) and number > 0):
+    number, state, head = _positive_int(raw.get("number")), raw.get("state"), raw.get("head")
+    if number is None:
         return None
     if state not in ("open", "closed") or not isinstance(head, dict):
         return None
@@ -102,6 +157,9 @@ def _parse_pull(raw: Any) -> PullRequest | None:
     repo = head.get("repo")
     owner = repo.get("owner") if isinstance(repo, dict) else None
     login = owner.get("login") if isinstance(owner, dict) else None
+    base = raw.get("base")
+    base_repo = base.get("repo") if isinstance(base, dict) else None
+    base_name = base_repo.get("full_name") if isinstance(base_repo, dict) else None
     title = raw.get("title")
     merged = raw.get("merged") is True or isinstance(raw.get("merged_at"), str)
     return PullRequest(
@@ -113,7 +171,27 @@ def _parse_pull(raw: Any) -> PullRequest | None:
         head_ref=ref,
         head_owner=login if isinstance(login, str) else None,
         title=strip_controls(title)[:200] if isinstance(title, str) else "",
+        head_owner_id=_positive_int(owner.get("id")) if isinstance(owner, dict) else None,
+        base_repo=base_name if isinstance(base_name, str) else "",
+        created_at=_time(raw.get("created_at")),
+        closed_at=_time(raw.get("closed_at")),
+        merged_at=_time(raw.get("merged_at")),
+        refs=task_refs(title, raw.get("body")),
     )
+
+
+def best_pull(pulls: Iterable[PullRequest]) -> PullRequest | None:
+    """An open pull request first, else the latest merged one, else the latest closed."""
+    candidates = list(pulls)
+    for wanted in (
+        lambda pull: pull.is_open,
+        lambda pull: pull.merged,
+        lambda pull: True,
+    ):
+        matching = [pull for pull in candidates if wanted(pull)]
+        if matching:
+            return max(matching, key=lambda pull: pull.number)
+    return None
 
 
 def _status(raw: object) -> CheckRunStatus:
@@ -186,13 +264,21 @@ def failure_notes(pull: PullRequest, runs: list[CheckRun], branch: str) -> str:
     return "\n".join(lines)
 
 
+@dataclass(frozen=True)
+class _Failure:
+    """A read that failed, remembered in the cache so asking again fails at once."""
+
+    reason: str
+
+
 class _TTLCache:
-    """A small thread-safe cache with a per-entry lifetime."""
+    """A small thread-safe cache with a per-entry lifetime. When it is full, the least
+    recently used entry makes room: one entry goes, never the whole cache."""
 
     def __init__(self, clock: Callable[[], float]) -> None:
         self._clock = clock
         self._lock = threading.Lock()
-        self._entries: dict[tuple[str, ...], tuple[float, object]] = {}
+        self._entries: OrderedDict[tuple[str, ...], tuple[float, object]] = OrderedDict()
 
     def get(self, key: tuple[str, ...]) -> tuple[bool, object]:
         with self._lock:
@@ -200,16 +286,15 @@ class _TTLCache:
             if entry is None or entry[0] <= self._clock():
                 self._entries.pop(key, None)
                 return False, None
+            self._entries.move_to_end(key)
             return True, entry[1]
 
     def put(self, key: tuple[str, ...], value: object, ttl: float) -> None:
         with self._lock:
-            now = self._clock()
-            if len(self._entries) >= MAX_CACHE_ENTRIES:
-                self._entries = {k: v for k, v in self._entries.items() if v[0] > now}
-                if len(self._entries) >= MAX_CACHE_ENTRIES:
-                    self._entries.clear()
-            self._entries[key] = (now + ttl, value)
+            self._entries.pop(key, None)
+            while len(self._entries) >= MAX_CACHE_ENTRIES:
+                self._entries.popitem(last=False)
+            self._entries[key] = (self._clock() + ttl, value)
 
     def clear(self) -> None:
         with self._lock:
@@ -225,17 +310,29 @@ class GitHubReads:
         *,
         env: Mapping[str, str] | None = None,
         clock: Callable[[], float] = time.monotonic,
+        timeout: float = READ_TIMEOUT_SECONDS,
     ) -> None:
         self._client = client
         self._env = env
+        self._clock = clock
+        self._timeout = timeout
         self._cache = _TTLCache(clock)
         self._client_lock = threading.Lock()
+        self._breaker_lock = threading.Lock()
+        self._failures = 0
+        self._paused_until = float("-inf")
 
     @property
     def client(self) -> httpx.Client:
         with self._client_lock:
             if self._client is None:
-                self._client = make_client()
+                # No step of a read (connecting, sending, waiting, reading) may take
+                # longer than the whole budget, and bounded_send holds the read to it.
+                self._client = httpx.Client(
+                    follow_redirects=False,
+                    timeout=httpx.Timeout(self._timeout),
+                    headers={"User-Agent": USER_AGENT},
+                )
             return self._client
 
     def clear_cache(self) -> None:
@@ -272,7 +369,7 @@ class GitHubReads:
             secret_headers=frozenset({"Authorization"}),
         )
         try:
-            return bounded_send(self.client, call)
+            return bounded_send(self.client, call, total_timeout=self._timeout)
         except TransportFailure as exc:
             raise GitHubUnavailable(f"GitHub didn't answer ({exc.reason})") from None
 
@@ -283,27 +380,57 @@ class GitHubReads:
         except (ValueError, UnicodeDecodeError):
             raise GitHubUnavailable("GitHub answered with something that isn't JSON") from None
 
+    def _paused(self) -> bool:
+        with self._breaker_lock:
+            return self._clock() < self._paused_until
+
+    def _count(self, *, failed: bool) -> None:
+        """One read's outcome, for the breaker: a success resets the count of failures
+        in a row; the BREAKER_FAILURES-th failure stops reads for BREAKER_SECONDS."""
+        with self._breaker_lock:
+            if not failed:
+                self._failures = 0
+                return
+            self._failures += 1
+            if self._failures >= BREAKER_FAILURES:
+                self._paused_until = self._clock() + BREAKER_SECONDS
+                if self._failures == BREAKER_FAILURES:
+                    logger.warning(
+                        "GitHub failed %d reads in a row; not asking it again for %d s",
+                        BREAKER_FAILURES,
+                        int(BREAKER_SECONDS),
+                    )
+
     def _cached(self, key: tuple[str, ...], ttl: float, fetch: Callable[[], object]) -> object:
         hit, value = self._cache.get(key)
         if hit:
+            if isinstance(value, _Failure):
+                raise GitHubUnavailable(value.reason)
             return value
-        value = fetch()
+        if self._paused():
+            raise GitHubUnavailable("GitHub can't be reached right now")
+        try:
+            value = fetch()
+        except GitHubUnavailable as exc:
+            self._count(failed=True)
+            self._cache.put(key, _Failure(str(exc)), FAILURE_TTL_SECONDS)
+            raise
+        self._count(failed=False)
         self._cache.put(key, value, ttl)
         return value
 
-    def find_pull(self, login: str, branch: str) -> PullRequest | None:
-        """The upstream pull request from `<login>:<branch>`: an open one first, else
-        the latest merged one, else the latest closed one; None when there is none."""
+    def find_pulls(self, login: str, branch: str) -> list[PullRequest]:
+        """Every upstream pull request from `<login>:<branch>`, whatever its state."""
         if not is_valid_login(login):
-            return None
+            return []
 
-        def fetch() -> PullRequest | None:
+        def fetch() -> list[PullRequest]:
             response = self._get(
                 f"/repos/{UPSTREAM_REPO}/pulls",
                 {"head": f"{login}:{branch}", "state": "all", "per_page": "20"},
             )
             if response.status == 422:
-                return None
+                return []
             if not response.ok:
                 raise GitHubUnavailable(f"GitHub answered {response.status}")
             raw = self._json(response)
@@ -312,22 +439,57 @@ class GitHubReads:
             ]
             for pull in pulls:  # the same objects answer a lookup by number for a while
                 self._cache.put(("pull", str(pull.number)), pull, PULL_TTL_SECONDS)
-            for wanted in (
-                lambda pull: pull.is_open,
-                lambda pull: pull.merged,
-                lambda pull: True,
-            ):
-                matching = [pull for pull in pulls if wanted(pull)]
-                if matching:
-                    return max(matching, key=lambda pull: pull.number)
-            return None
+            return pulls
 
         found = self._cached(("pulls", login.lower(), branch), PULL_TTL_SECONDS, fetch)
-        return found if isinstance(found, PullRequest) else None
+        return list(found) if isinstance(found, list) else []
 
-    def pull(self, number: int, *, fresh: bool = False) -> PullRequest | None:
-        """Upstream pull request #`number`, or None when it doesn't exist. `fresh` skips
-        the cache (a submit checks the pull request as it is now) and refills it."""
+    def find_pull(self, login: str, branch: str) -> PullRequest | None:
+        """The upstream pull request from `<login>:<branch>`: an open one first, else
+        the latest merged one, else the latest closed one; None when there is none."""
+        return best_pull(self.find_pulls(login, branch))
+
+    def search_pulls(self, login: str, task_id: int, since: datetime) -> list[PullRequest]:
+        """`login`'s pull requests on verastd/forge-app opened since `since` that name task
+        `task_id` (`[#<id>]` in the title or "Closes #<id>" in the description), for a
+        pull request from another branch. GitHub's search answers which ones (cached for
+        60 s); the newest few are then read in full, since a search hit says nothing
+        about where the pull request comes from."""
+        if not is_valid_login(login):
+            return []
+        stamp = since.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S+00:00")
+
+        def fetch() -> list[tuple[int, frozenset[int]]]:
+            response = self._get(
+                "/search/issues",
+                {
+                    "q": f"repo:{UPSTREAM_REPO} is:pr author:{login} created:>={stamp}",
+                    "sort": "created",
+                    "order": "desc",
+                    "per_page": "30",
+                },
+            )
+            if not response.ok:
+                raise GitHubUnavailable(f"GitHub answered {response.status}")
+            raw = self._json(response)
+            items = raw.get("items") if isinstance(raw, dict) else None
+            hits: list[tuple[int, frozenset[int]]] = []
+            for item in items if isinstance(items, list) else []:
+                if not isinstance(item, dict) or "pull_request" not in item:
+                    continue
+                number = _positive_int(item.get("number"))
+                if number is not None:
+                    hits.append((number, task_refs(item.get("title"), item.get("body"))))
+            return hits
+
+        found = self._cached(("search", login.lower(), stamp), SEARCH_TTL_SECONDS, fetch)
+        hits = found if isinstance(found, list) else []
+        numbers = [number for number, refs in hits if task_id in refs][:SEARCH_CANDIDATES]
+        return [pull for pull in map(self.pull, numbers) if pull is not None]
+
+    def pull(self, number: int) -> PullRequest | None:
+        """Upstream pull request #`number`, or None when it doesn't exist (cached for
+        60 s either way, so asking about many numbers costs GitHub one read each)."""
 
         def fetch() -> PullRequest | None:
             response = self._get(f"/repos/{UPSTREAM_REPO}/pulls/{number}")
@@ -337,12 +499,7 @@ class GitHubReads:
                 raise GitHubUnavailable(f"GitHub answered {response.status}")
             return _parse_pull(self._json(response))
 
-        key = ("pull", str(number))
-        if fresh:
-            found: object = fetch()
-            self._cache.put(key, found, PULL_TTL_SECONDS)
-        else:
-            found = self._cached(key, PULL_TTL_SECONDS, fetch)
+        found = self._cached(("pull", str(number)), PULL_TTL_SECONDS, fetch)
         return found if isinstance(found, PullRequest) else None
 
     def check_runs(self, sha: str) -> list[CheckRun]:
@@ -394,33 +551,3 @@ class GitHubReads:
 
         found = self._cached(("fork", login.lower()), FORK_TTL_SECONDS, fetch)
         return found if isinstance(found, ForkStatus) else ForkStatus(exists=False)
-
-    def task_issues(self) -> list[dict[str, Any]]:
-        """Open issues on verastd/forge-app labelled `agent-ready` and `status:open` (pull
-        requests left out), for FORGE_TASK_SOURCE=github. Cached for 5 minutes."""
-
-        def fetch() -> list[dict[str, Any]]:
-            issues: list[dict[str, Any]] = []
-            for page in range(1, TASK_PAGES + 1):
-                response = self._get(
-                    f"/repos/{UPSTREAM_REPO}/issues",
-                    {
-                        "labels": ",".join(TASK_LABELS),
-                        "state": "open",
-                        "per_page": "100",
-                        "page": str(page),
-                    },
-                )
-                if not response.ok:
-                    raise GitHubUnavailable(f"GitHub answered {response.status}")
-                raw = self._json(response)
-                batch = raw if isinstance(raw, list) else []
-                issues.extend(
-                    item for item in batch if isinstance(item, dict) and "pull_request" not in item
-                )
-                if len(batch) < 100:
-                    break
-            return issues
-
-        found = self._cached(("task-issues",), TASKS_TTL_SECONDS, fetch)
-        return list(found) if isinstance(found, list) else []

@@ -192,5 +192,7 @@ parsed as untrusted input all the same.
   checked every 500 ms. Cheap at the pilot's scale; a crowded cave would
   want it done server-side, alongside the position filter above.
 - **Voice needs HTTPS.** Browsers only open the microphone on a secure
-  origin; and a `connect-src` Content-Security-Policy, if one is ever added,
-  must allow the LiveKit origin.
+  origin. The site's `connect-src` Content-Security-Policy (added with the
+  agent hand-off, ADR-005; `connectSources` in `apps/web/next.config.mjs`)
+  allows the LiveKit host from `LIVEKIT_URL`, read at build time, so that
+  variable must be set when the app is built.

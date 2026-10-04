@@ -40,9 +40,9 @@ from forge_api.services.rail_adapters.base import (
     RailAdapter,
     RailCredential,
     VendorResponse,
-    json_body,
     send,
     session_ref,
+    started_body,
 )
 
 BASE_URL = "https://app.all-hands.dev"
@@ -128,7 +128,7 @@ class OpenHandsAdapter(RailAdapter):
             rejected_statuses=frozenset(),
             rejected=rejected,
         )
-        body = json_body(response, vendor=self.vendor)
+        body = started_body(response)
         status = body.get("status")
         if status == "ERROR":
             detail = body.get("detail")

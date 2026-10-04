@@ -213,6 +213,9 @@ class BridgeStatus(BaseModel):
     compareUrl: str | None = None  # holder only
     checksPassed: int | None = None
     checksTotal: int | None = None
+    # Holder only: POST /feedback would really send the notes on (the last start went to
+    # a rail that takes follow-ups, with the same saved credential, by fingerprint).
+    canRelay: bool | None = None
 
 
 class CheckRun(BaseModel):

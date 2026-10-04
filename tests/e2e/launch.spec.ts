@@ -4,20 +4,28 @@ import { OPEN_RAILS, RAIL_REGISTRY, railMeta } from '../../packages/shared/dist/
 import {
   CONNECT_PATH,
   FORK_URL,
+  SESSION_HOSTS,
   canRelayNotes,
   credentialFields,
   describeClaimError,
+  describeRelayError,
   describeStartError,
   describeTaskError,
   githubAppInstallUrl,
   githubAppSlug,
   keyName,
+  lastStartRail,
+  notRelayedSentence,
   plainText,
   readStartOutcome,
+  relayedSince,
   safeHttpsUrl,
+  sessionLink,
   setupStepLink,
   setupSteps,
+  showsCompareLink,
   startedSentence,
+  startedSince,
 } from '../../apps/web/src/lib/handoff';
 import {
   CLAUDE_CLI_PROMPT_CAP,
@@ -118,9 +126,11 @@ test.describe('the "Open my agent" links (lib/launch.ts)', () => {
     const launch = launchFor('antigravity', input({ taskId: 7 }));
     expect(launch.href).toBeNull();
     expect(launch.kind).toBe('steps');
+    // An older fork lacks the connector settings, and the connector wants a sign-in first (WEB-M6).
     expect(launch.steps).toEqual([
-      'Open your fork in Antigravity.',
-      'The FORGE connector is already set up in the repo.',
+      "If your fork is older than October 2026, press Sync fork on GitHub first so it has FORGE's connector settings.",
+      'Open your fork in Antigravity. The FORGE connector is already set up in the repo.',
+      'The first time, sign in to FORGE: in Settings → Customizations, press Authenticate next to forge, then paste the code your browser shows and press Submit.',
       'Ask it: Start FORGE task #7',
     ]);
     expect(startTaskAsk(7)).toBe('Start FORGE task #7');
@@ -438,5 +448,224 @@ test.describe('the hand-off helpers (lib/handoff.ts)', () => {
     expect(credentialFields('routine', 'Anthropic').map((field) => field.name)).toEqual(['routineUrl', 'key']);
     expect(credentialFields('github', 'GitHub')).toEqual([]);
     expect(credentialFields(undefined, 'GitHub')).toEqual([]);
+  });
+});
+
+/**
+ * The Phase 4 review's fixes in `lib/handoff.ts` (unit F3c). Each test names
+ * the finding it holds closed.
+ */
+test.describe('the hand-off helpers after the Phase 4 review', () => {
+  const jules = railMeta('jules');
+  const cursor = railMeta('cursor');
+  const devin = railMeta('devin');
+
+  /** What the API sent back from a vendor in review-creds CR-2 (a backslash past httpx's host check). */
+  const BACKSLASHED = [
+    'https://evil.example\\@jules.google.com/session/1',
+    'https://evil.example\\.cursor.com/agents/bc-1',
+    'https://evil.example\\@github.com/o/forge-app/agents/1',
+  ];
+
+  test('safeHttpsUrl refuses backslashes, whitespace and controls, and checks the host the browser would visit (CR-2)', () => {
+    for (const value of [
+      ...BACKSLASHED,
+      'https://jules.google.com/session 1',
+      'https://jules.google.com/\tsession/1',
+      'https://jules.google.com/session/1\n',
+      'https://jules.google.com/session/\u00001',
+      'https://jules.google.com/ x',
+    ]) {
+      expect(safeHttpsUrl(value), JSON.stringify(value)).toBeNull();
+      expect(safeHttpsUrl(value, ['jules.google.com', 'cursor.com', 'github.com']), JSON.stringify(value)).toBeNull();
+    }
+    // The allowlist takes a host or any host under it, as the API's `https_url` does.
+    expect(safeHttpsUrl('https://app.devin.ai/sessions/1', ['devin.ai'])).toBe('https://app.devin.ai/sessions/1');
+    expect(safeHttpsUrl('https://devin.ai/sessions/1', ['devin.ai'])).toBe('https://devin.ai/sessions/1');
+    expect(safeHttpsUrl('https://notdevin.ai/sessions/1', ['devin.ai'])).toBeNull();
+    expect(safeHttpsUrl('https://devin.ai.evil.example/x', ['devin.ai'])).toBeNull();
+    // A percent-escaped backslash never makes a host the browser accepts.
+    expect(safeHttpsUrl('https://evil.example%5c.jules.google.com/x', ['jules.google.com'])).toBeNull();
+  });
+
+  test('"Watch it work" only ever opens the vendor of the rail that started (CR-2)', () => {
+    expect(sessionLink('https://jules.google.com/session/42', 'jules')).toBe('https://jules.google.com/session/42');
+    expect(sessionLink('https://cursor.com/agents/bc-1', 'cursor')).toBe('https://cursor.com/agents/bc-1');
+    expect(sessionLink('https://app.devin.ai/sessions/7', 'devin')).toBe('https://app.devin.ai/sessions/7');
+    expect(sessionLink('https://github.com/o/forge-app/agents/1', 'copilot')).toBe('https://github.com/o/forge-app/agents/1');
+    // Another vendor's host is not this rail's session.
+    expect(sessionLink('https://cursor.com/agents/bc-1', 'jules')).toBeNull();
+    expect(sessionLink('https://evil.example/session/42', 'jules')).toBeNull();
+    for (const value of BACKSLASHED) {
+      for (const rail of ['jules', 'cursor', 'copilot'] as const) {
+        expect(sessionLink(value, rail), `${rail} ${value}`).toBeNull();
+      }
+      expect(sessionLink(value, null)).toBeNull();
+    }
+    // With no start rail to go by, any start rail's vendor will do, and nothing else.
+    expect(sessionLink('https://jules.google.com/session/42', 'claude-code')).toBe('https://jules.google.com/session/42');
+    expect(sessionLink('https://evil.example/x', undefined)).toBeNull();
+    expect(Object.keys(SESSION_HOSTS).sort()).toEqual(
+      RAIL_REGISTRY.filter((rail) => rail.mode === 'start').map((rail) => rail.id).sort(),
+    );
+  });
+
+  test("a key step links only to the vendor's own key page, whatever the API says (WEB-L6)", () => {
+    const step = 'Create an API key in Jules settings.';
+    expect(setupStepLink({ id: 'jules', keyUrl: 'https://jules.google.com/settings' }, step, null)).toEqual({
+      href: 'https://jules.google.com/settings',
+      external: true,
+    });
+    for (const keyUrl of [
+      'javascript:alert(document.domain)',
+      'data:text/html,<b>key</b>',
+      'http://jules.google.com/settings',
+      'https://jules.google.com.evil.example/settings',
+      'https://evil.example/jules.google.com/settings',
+      'https://evil.example\\@jules.google.com/settings',
+      'https://user@jules.google.com/settings',
+      // Another rail's key page is not this rail's.
+      'https://cursor.com/dashboard',
+    ]) {
+      expect(setupStepLink({ id: 'jules', keyUrl }, step, null), keyUrl).toBeNull();
+    }
+    // A rail this build doesn't know has no key page to check against.
+    expect(setupStepLink({ id: 'claude-code', keyUrl: 'https://claude.ai/x' }, step, null)).toBeNull();
+  });
+
+  test('with the connector off, the open rails drop "Connect your agent to FORGE once" (WEB-M6)', () => {
+    const claudeCode = railMeta('claude-code');
+    const connect = claudeCode.setup.filter((step) => step.startsWith('Connect your agent to FORGE once'));
+    expect(connect).toHaveLength(1);
+    expect(setupSteps(claudeCode, false, true)).toEqual(claudeCode.setup);
+    expect(setupSteps(claudeCode, false, false)).toEqual(claudeCode.setup.filter((step) => !connect.includes(step)));
+  });
+
+  test('the new refusals read as plain sentences (contract additions)', () => {
+    expect(describeClaimError({ code: 'tier_too_low' })).toBe(
+      'This task needs a contributor tier above T0; it opens up as you ship work.',
+    );
+    expect(describeClaimError({ code: 'claim_cooldown', retryAfterSeconds: 23 * 3600 + 5 })).toBe(
+      "This task was yours less than a day ago, so you can't claim it again just yet; someone else can take it meanwhile. Try again in about 24 hours.",
+    );
+    expect(describeClaimError({ code: 'claim_rate_limit', retryAfterSeconds: 600 })).toBe(
+      "You've claimed as many tasks as FORGE allows in a day. Try again in about 10 minutes.",
+    );
+    expect(describeClaimError({ code: 'claim_rate_limit' })).toBe(
+      "You've claimed as many tasks as FORGE allows in a day. Wait a little, then try again.",
+    );
+    expect(describeStartError({ code: 'already_started' }, jules)).toBe(
+      "Google Jules already started on this task a moment ago, so FORGE didn't start it twice.",
+    );
+    expect(describeTaskError({ code: 'submit_limit', retryAfterSeconds: 45 })).toBe(
+      "You've handed in links too often just now. Try again in about 1 minute.",
+    );
+    expect(describeTaskError({ code: 'pr_not_for_task' }, 3)).toBe(
+      "That pull request isn't for this task. FORGE takes one from your fork, opened after you claimed the task, on the task's branch or with “[#3]” in its title or “Closes #3” in its description.",
+    );
+    expect(describeTaskError('pr_not_for_task')).toContain("isn't for this task");
+    // Every new code is its own sentence, never the catch-all.
+    for (const code of ['tier_too_low', 'claim_cooldown', 'claim_rate_limit']) {
+      expect(describeClaimError(code), code).not.toBe("That didn't save, so nothing was changed. Please try again.");
+    }
+    for (const code of ['submit_limit', 'pr_not_for_task', 'invalid_pr_url', 'pr_not_found', 'not_your_pr']) {
+      expect(describeTaskError(code), code).not.toBe("That didn't work, so nothing changed. Please try again.");
+    }
+  });
+
+  test('no answer is never "nothing changed" (CR-3, WEB-L7)', () => {
+    expect(describeStartError({ code: 'upstream_timeout' }, jules)).toBe(
+      "FORGE didn't hear back in time, so Google Jules may have started. Check “Where it is” below before you start it again.",
+    );
+    expect(describeClaimError('upstream_timeout')).not.toContain('nothing');
+    expect(describeTaskError('upstream_timeout')).not.toContain('nothing');
+    // The Copilot callback may bounce these back in the query string.
+    expect(readStartOutcome({ startError: 'upstream_timeout' })).toMatchObject({ failure: { code: 'upstream_timeout' } });
+    expect(readStartOutcome({ startError: 'already_started' })).toMatchObject({ failure: { code: 'already_started' } });
+  });
+
+  test('a Copilot setup failure points at steps shown below it (WEB-L2)', () => {
+    expect(describeStartError({ code: 'rail_setup_needed' }, railMeta('copilot'), { steps: 'below' })).toBe(
+      "GitHub Copilot isn't connected to your fork yet. Finish the setup steps below, then try again.",
+    );
+  });
+
+  test('relay failures say what happened, and "a key you saved" only when that is it (WEB-M8)', () => {
+    const sentences = [
+      notRelayedSentence(jules.label),
+      describeRelayError({ code: 'dispatch_limit', limit: 10, retryAfterSeconds: 1200 }, cursor),
+      describeRelayError({ code: 'dispatch_limit' }, cursor),
+      describeRelayError({ code: 'rail_failed', upstreamStatus: 503 }, devin),
+      describeRelayError({ code: 'rail_failed' }, devin),
+      describeRelayError({ code: 'not_holder' }, jules),
+      describeRelayError({ code: 'something_new' }, jules),
+    ];
+    expect(sentences).toEqual([
+      "Nothing was sent: Google Jules didn't take the notes just now. Try again in a few minutes. If your agent has the FORGE connector, it can read these itself.",
+      "FORGE has called agents for you 10 times in the last hour, the most it allows, so nothing was sent. Try again in about 20 minutes.",
+      "FORGE has called agents for you as often as it allows in an hour, so nothing was sent. Wait a little, then try again.",
+      "Cognition didn't take the notes (error 503), so nothing was sent. Try again in a minute.",
+      "Cognition didn't take the notes, so nothing was sent. Try again in a minute.",
+      "This task isn't yours any more, so nothing changed. Claim it again first.",
+      "That didn't work, so nothing was sent. Please try again.",
+    ]);
+    for (const sentence of sentences) {
+      expect(sentence).not.toContain('only with a key you saved');
+    }
+    // A refused key is the one case that is about the saved key.
+    expect(describeRelayError({ code: 'credential_rejected' }, jules)).toBe(
+      "Google didn't accept your saved key, so nothing was sent. Start Google Jules again with your key to send notes later.",
+    );
+  });
+
+  const NOW = Date.parse('2026-10-04T12:00:00Z');
+  const event = (minutesAgo: number, kind: string, extra: Record<string, unknown> = {}) => ({
+    at: new Date(NOW - minutesAgo * 60_000).toISOString(),
+    kind,
+    source: 'forge',
+    message: kind,
+    ...extra,
+  });
+  type Events = Parameters<typeof startedSince>[0]['events'];
+
+  test('reading the status: a recent start, a recent relay, the rail that started (WEB-L2, CR-3, WEB-M8)', () => {
+    const events = [
+      event(30, 'claimed'),
+      event(20, 'dispatched', { rail: 'jules' }),
+      event(12, 'dispatched', { rail: 'copilot' }),
+      event(5, 'opened', { rail: 'claude-code' }),
+      event(3, 'relayed', { rail: 'jules' }),
+    ] as unknown as Events;
+    expect(startedSince({ events }, 'copilot', NOW - 15 * 60_000)).toBe(true);
+    // `?started=copilot` is believed for ten minutes, not twelve.
+    expect(startedSince({ events }, 'copilot', NOW - 10 * 60_000)).toBe(false);
+    expect(startedSince({ events }, 'jules', NOW - 10 * 60_000)).toBe(false);
+    expect(startedSince({ events: [] }, 'copilot', 0)).toBe(false);
+    expect(relayedSince({ events }, 'jules', NOW - 4 * 60_000)).toBe(true);
+    expect(relayedSince({ events }, 'jules', NOW - 2 * 60_000)).toBe(false);
+    expect(relayedSince({ events }, 'cursor', 0)).toBe(false);
+    // The last start, whatever was opened since; the status's own rail when no start is listed.
+    expect(lastStartRail({ events, rail: 'claude-code' })).toBe('copilot');
+    expect(lastStartRail({ events: [] as unknown as Events, rail: 'devin' })).toBe('devin');
+    expect(lastStartRail({ events: [] as unknown as Events, rail: 'claude-code' })).toBeNull();
+    expect(lastStartRail({ events: [] as unknown as Events })).toBeNull();
+  });
+
+  test('the compare link waits until the task went to an agent or an agent pushed (WEB-L3)', () => {
+    expect(showsCompareLink({ events: [event(5, 'claimed')] as unknown as Events })).toBe(false);
+    expect(
+      showsCompareLink({
+        events: [event(5, 'claimed'), event(1, 'progress', { source: 'agent', stage: 'working' })] as unknown as Events,
+      }),
+    ).toBe(false);
+    for (const events of [
+      [event(5, 'dispatched', { rail: 'jules' })],
+      [event(5, 'opened', { rail: 'claude-code' })],
+      [event(1, 'progress', { source: 'agent', stage: 'pushed' })],
+    ]) {
+      expect(showsCompareLink({ events: events as unknown as Events })).toBe(true);
+    }
+    // Only the agent's own word that it pushed counts, not FORGE's.
+    expect(showsCompareLink({ events: [event(1, 'progress', { stage: 'pushed' })] as unknown as Events })).toBe(false);
   });
 });

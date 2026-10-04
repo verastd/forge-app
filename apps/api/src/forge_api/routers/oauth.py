@@ -2,10 +2,11 @@
 revocation for MCP clients; check/approve/deny for the web's consent page; the caller's
 connected agents.
 
-Thin: parse, call services/oauth.py, return. Every route 404s while `mcp_connector` is
-off and 503s while FORGE_PUBLIC_ORIGIN or FORGE_OAUTH_SECRET is missing. The public
-paths (`/.well-known/*`, `/oauth/*`) are reached through the web origin's rewrites;
-`/api/oauth/*` is called by the web server with the caller's assertion, like the BFF.
+Thin: parse, call services/oauth.py, return. Every route 404s while `mcp_connector` or
+`github_signin` is off and 503s while FORGE_PUBLIC_ORIGIN or FORGE_OAUTH_SECRET is
+missing. The public paths (`/.well-known/*`, `/oauth/*`) are reached through the web
+origin's rewrites; `/api/oauth/*` is called by the web server with the caller's
+assertion, like the BFF (`check` needs none: it only describes the request).
 
 `POST /register` and `POST /token` are the same handlers as `/oauth/register` and
 `/oauth/token`: MCP 2025-03-26's default paths, which a client that didn't keep the
@@ -124,7 +125,13 @@ def authorize_approve(
     return oauth_service.approve_authorization(config, db, params, caller, now=int(clock()))
 
 
-@router.post("/api/oauth/authorize/deny", response_model=AuthorizeDecision, responses=_REJECTED)
+@router.post(
+    "/api/oauth/authorize/deny",
+    response_model=AuthorizeDecision,
+    responses=_REJECTED,
+    # Like approve: only the signed-in person's own Cancel sends them back to the client.
+    dependencies=[Depends(require_identity)],
+)
 def authorize_deny(
     params: AuthorizeParams, config: Config, response: Response
 ) -> AuthorizeDecision:

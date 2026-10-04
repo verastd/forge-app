@@ -40,7 +40,7 @@ remain private-reporting-only.
 
 FORGE is in **beta**. There is no older supported version line; report
 against `main` / whatever is currently deployed to staging or beta. Nothing
-is in production yet (see `README.md` "Current status").
+is in production yet (see `README.md` "Project status").
 
 ### Sign-in and session code is security-critical, and explicitly in scope
 
@@ -52,14 +52,15 @@ plus the agent hand-off and the FORGE connector that ADR-005 adds
 (`docs/adr/ADR-005-agent-handoff.md`):
 
 - `packages/auth/` — PKCE, session/transaction sealing and opening, the
-  API assertion.
+  API assertion, and revoking Copilot's one-time GitHub token.
 - `apps/web/src/app/auth/` — the `/auth/signin`, `/auth/callback`,
   `/auth/signout` and `/auth/demo` routes, and `/auth/github/agent`, the
   one-time GitHub authorization that starts Copilot on a contributor's
-  fork (spent on that one start, never stored).
-- `apps/web/src/app/bff/` — the same-origin proxy that mints the API
-  assertion for `/apps/data`'s data, the Contribute page's Bridge calls
-  and the connected-agents list.
+  fork (spent on that one start, never stored, then revoked).
+- `apps/web/src/app/bff/` (with `apps/web/src/lib/bff-forward.ts`, which
+  does the minting) — the same-origin proxy that mints the API assertion
+  for `/apps/data`'s data, the Contribute page's Bridge calls and the
+  connected-agents list.
 - `apps/web/src/app/api/lobby/` — the lobby's LiveKit room-token route,
   which signs who each voice and name tag in the Apps lobby belongs to.
 - `apps/web/src/middleware.ts` — the `/me`, `/apps/data` and
@@ -74,15 +75,16 @@ plus the agent hand-off and the FORGE connector that ADR-005 adds
   that assertion, and the `FORGE_ADMIN_IDS` operator check.
 - `.gitleaksignore` — fingerprints the secret scan skips (known false
   positives only). Core-owned, so no PR can suppress a finding about itself.
-- `CLAUDE.md` and `.gemini/` — files coding agents load as their
-  instructions, each pointing at `AGENTS.md`. Core-owned, so no PR can
-  rewrite what every contributor's agent reads.
+- `AGENTS.md`, `CLAUDE.md` and `.gemini/` — the operating manual coding
+  agents follow, and the files they load as their instructions, each
+  pointing at `AGENTS.md`. Core-owned, so no PR can rewrite what every
+  contributor's agent reads.
 - `.codex/`, `.agents/`, `.cursor/` and `.github/agents/` — agent config:
   they tell every contributor's agent where the FORGE connector is, and
   the custom agents in `.agents/agents/` and `.github/agents/` how to work
   a task, so a PR that repoints them would phish every contributor.
-  `.mcp.json`, `.vscode/` and `.claude/` are protected the same way,
-  whether or not the repo has them yet.
+  `.mcp.json`, `.vscode/` and `.claude/` are protected the same way; the
+  repo doesn't include any of them yet.
 - `apps/api/src/forge_api/services/oauth.py`, `services/mcp_server.py`,
   `routers/oauth.py`, `routers/mcp.py` and `apps/web/src/app/oauth/` — the
   FORGE connector: its OAuth server (registration, consent, tokens,
@@ -92,10 +94,18 @@ plus the agent hand-off and the FORGE connector that ADR-005 adds
   — the encrypted store of contributors' saved agent keys, and the only
   code that sends a key (or Copilot's one-time GitHub authorization) to a
   vendor.
+- `apps/web/src/lib/bff-forward.ts`, `apps/web/src/lib/api.ts`,
+  `apps/web/src/lib/handoff.ts`, `apps/web/src/components/contribute/`,
+  `apps/api/src/forge_api/services/bridge.py`, `routers/bridge.py`,
+  `models.py` and `main.py` — every place a pasted or saved agent key, or
+  the Copilot token, passes through on its way to the vault or a vendor
+  (the form, the browser's request, the BFF, the API's dispatch and relay),
+  and the checks on the session and key links shown back.
 - `apps/web/src/app/connect/`, `apps/web/src/lib/launch.ts`, the brief
   (`packages/shared/src/brief.ts`, `services/brief.py`), the rail registry
-  (`packages/shared/src/rails.ts`, `services/rails.py`) and the connector's
-  tools (`services/bridge_mcp.py`) — what every agent is told, and the
+  (`packages/shared/src/rails.ts`, `services/rails.py`), the connector's
+  tools (`services/bridge_mcp.py`) and the task fixtures
+  (`apps/api/src/forge_api/fixtures/`) — what every agent is told, and the
   links that send people to an agent or a key page.
 
 These same paths are cold-account-owned in `CODEOWNERS` and listed in
@@ -112,8 +122,8 @@ missing, the headlines:
 
 - **Sensitive-path review is cold-account approval, not two-person
   control.** `CODEOWNERS` lists `@verastd` and `@forge-cold` on `.github/`,
-  `contracts/`, `packages/contracts-client/`, the `auth*`/`pay*` routers,
-  and every path listed above, but GitHub accepts an
+  `CODEOWNERS` itself, `contracts/`, `packages/contracts-client/`, the
+  `auth*`/`pay*` routers, and every path listed above, but GitHub accepts an
   approval from any one listed owner and
   both accounts belong to the same person. What it buys is a forced
   sign-in to a hardware-2FA account — friction against a stolen session.

@@ -46,7 +46,7 @@ export default async function MeSettingsPage() {
           FORGE stores only your GitHub id, login, name and avatar, sealed in an encrypted cookie
           for 7 days, plus what you choose to give it on your profile: agent keys you ask it to
           remember (kept encrypted) and the agents you connect. It keeps no GitHub token: when you
-          start GitHub Copilot from a task, GitHub&apos;s one-time approval is used once and dropped.
+          start GitHub Copilot from a task, GitHub&apos;s one-time approval is used once, then revoked.
         </p>
         {!session.demo && (
           <p>

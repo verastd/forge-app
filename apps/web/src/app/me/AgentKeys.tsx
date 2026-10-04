@@ -4,7 +4,8 @@
  * "Your agent keys" on /me: the keys FORGE saved, encrypted, because you
  * ticked "Remember it" when you started an agent ("Start it for me"). Only
  * the hint the API sends is ever shown (the last few characters), never a
- * key. Remove deletes one for good.
+ * key. Remove deletes one for good. With the vault off, FORGE can't use the
+ * keys it saved, but they are still listed so they can be removed.
  */
 
 import { useCallback, useEffect, useState } from 'react';
@@ -99,36 +100,41 @@ export function AgentKeys({ practice }: { practice: boolean }) {
     );
   } else {
     body = (
-      <ul className={styles.items}>
-        {list.credentials.map((credential) => {
-          const label = railMeta(credential.rail).label;
-          return (
-            <li key={credential.rail} className={styles.item}>
-              <div className={styles.itemText}>
-                <p className={styles.itemName}>{label}</p>
-                <p className="faint">
-                  Key ending {plainText(credential.hint, 16)} · saved {formatDate(credential.savedAt)} ·{' '}
-                  {credential.lastUsedAt === undefined
-                    ? 'not used yet'
-                    : `last used ${formatDate(credential.lastUsedAt)}`}
-                </p>
-              </div>
-              <button
-                type="button"
-                className="btn btn-sm btn-ghost"
-                onClick={() => {
-                  remove(credential.rail);
-                }}
-                disabled={removing !== null}
-                aria-busy={removing === credential.rail || undefined}
-                aria-label={`Remove your ${label} key`}
-              >
-                {removing === credential.rail ? 'Removing…' : 'Remove'}
-              </button>
-            </li>
-          );
-        })}
-      </ul>
+      <>
+        {!list.vault && (
+          <p className="muted">FORGE can&apos;t use saved keys right now; you can still remove them.</p>
+        )}
+        <ul className={styles.items}>
+          {list.credentials.map((credential) => {
+            const label = railMeta(credential.rail).label;
+            return (
+              <li key={credential.rail} className={styles.item}>
+                <div className={styles.itemText}>
+                  <p className={styles.itemName}>{label}</p>
+                  <p className="faint">
+                    Key ending {plainText(credential.hint, 16)} · saved {formatDate(credential.savedAt)} ·{' '}
+                    {credential.lastUsedAt === undefined
+                      ? 'not used yet'
+                      : `last used ${formatDate(credential.lastUsedAt)}`}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-ghost"
+                  onClick={() => {
+                    remove(credential.rail);
+                  }}
+                  disabled={removing !== null}
+                  aria-busy={removing === credential.rail || undefined}
+                  aria-label={`Remove your ${label} key`}
+                >
+                  {removing === credential.rail ? 'Removing…' : 'Remove'}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      </>
     );
   }
 

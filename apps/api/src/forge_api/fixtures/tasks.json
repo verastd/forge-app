@@ -54,7 +54,7 @@
     "size": "XS",
     "rewardClass": "R1",
     "rewardUsd": 50,
-    "tierFloor": "T0",
+    "tierFloor": "T2",
     "url": "https://github.com/verastd/forge-app/issues/4",
     "labels": ["agent-ready", "status:open", "size:XS", "bounty:R1"],
     "acceptanceCriteria": [

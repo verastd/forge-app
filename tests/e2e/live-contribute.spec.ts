@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import type { APIRequestContext, BrowserContext, Page, Request } from '@playwright/test';
+import type { APIRequestContext, BrowserContext, Locator, Page, Request, Route } from '@playwright/test';
 
 import { openTransaction } from '../../packages/auth/dist/index.js';
 import { RAIL_REGISTRY } from '../../packages/shared/dist/index.js';
@@ -189,10 +189,95 @@ test.describe('claiming, on the live build', () => {
     await expect(page.getByRole('region', { name: 'Where it is' }).getByText('FORGE: You claimed this task.')).toBeVisible();
     // The 45-second march and its beta note are gone from the build we ship.
     await expect(page.getByText(/Beta note|simulated/)).toHaveCount(0);
+    // Keyboard and screen-reader users land on what the claim opened (review-web L4).
+    await expect(page.getByRole('heading', { name: 'Get your agent on it' })).toBeFocused();
+  });
+
+  test('a claim FORGE’s rules turn down says which rule, in plain words', async ({ page, context, baseURL }) => {
+    await signInAs(context, baseURL ?? '', IDENTITY);
+    await serviceDown(page);
+    await openBridge(page);
+    await serve(page, '**/bff/bridge/tasks/1', detail());
+    const answers: Array<[number, unknown, Record<string, string>, string]> = [
+      [403, { error: 'tier_too_low', tierFloor: 'T2' }, {}, 'This task needs a contributor tier above T0; it opens up as you ship work.'],
+      [
+        409,
+        { error: 'claim_cooldown', retryAfter: 82_800 },
+        { 'retry-after': '82800' },
+        "This task was yours less than a day ago, so you can't claim it again just yet; someone else can take it meanwhile. Try again in about 23 hours.",
+      ],
+      [
+        429,
+        { error: 'claim_rate_limit' },
+        { 'retry-after': '3600' },
+        "You've claimed as many tasks as FORGE allows in a day. Try again in about 60 minutes.",
+      ],
+    ];
+    let next = 0;
+    await page.route('**/bff/bridge/claim', async (route) => {
+      const [code, body, headers] = answers[next] ?? [500, {}, {}];
+      next += 1;
+      await route.fulfill({ status: code, contentType: 'application/json', headers, body: JSON.stringify(body) });
+    });
+    await page.goto('/contribute/task/1');
+    for (const [, , , sentence] of answers) {
+      await page.getByRole('button', { name: 'Claim this' }).click();
+      await expect(page.getByText(sentence)).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Get your agent on it' })).toHaveCount(0);
+    }
+  });
+
+  test('a task the API doesn’t have says so, with no "Try again" that can’t work (review-web L1)', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    await serviceDown(page);
+    await openBridge(page);
+    await serve(page, '**/api/bridge/tasks/999', { error: 'task_not_found', taskId: 999 }, 404);
+    await page.goto('/contribute/task/999');
+    await expect(page.getByRole('heading', { name: "This task doesn't exist (any more)" })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Try again' })).toHaveCount(0);
+    await expect(page.getByRole('link', { name: 'Back to the task list' })).toBeVisible();
+
+    // Signed in, through the BFF, the same.
+    await signInAs(context, baseURL ?? '', IDENTITY);
+    await serve(page, '**/bff/bridge/tasks/999', { error: 'task_not_found', taskId: 999 }, 404);
+    await page.reload();
+    await expect(page.getByRole('heading', { name: "This task doesn't exist (any more)" })).toBeVisible();
+
+    // Anything else that fails is still the "try again" kind.
+    await serve(page, '**/bff/bridge/tasks/999', { error: 'bridge-disabled' }, 404);
+    await page.reload();
+    await expect(page.getByRole('heading', { name: "We can't open that task just now" })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Try again' })).toBeVisible();
   });
 });
 
 test.describe('"Open my agent", signed in', () => {
+  test('the links and the fallback carry the API’s own brief, not one compiled here (review-web L5)', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    // What the API would send after a brief change the web build hasn't caught up with.
+    const fromApi = `${WITH_LOGIN.brief}\n\n(The API's brief, newer than this web build.)`;
+    await signInAs(context, baseURL ?? '', IDENTITY);
+    await serviceDown(page);
+    await openBridge(page);
+    await serve(page, '**/bff/bridge/tasks/1', { ...detail(MINE), brief: fromApi });
+    await serve(page, '**/bff/bridge/rails', rails());
+    await serve(page, '**/bff/bridge/status/1', status());
+    await page.goto('/contribute/task/1');
+    await expect(page.getByRole('heading', { name: 'Get your agent on it' })).toBeVisible();
+
+    expect(new URL((await href(page, 'Open Claude Code on the web')) ?? '').searchParams.get('prompt')).toBe(fromApi);
+    expect(new URL((await href(page, 'Open Codex app')) ?? '').searchParams.get('prompt')).toBe(fromApi);
+    const fallback = page.locator('details', { has: page.getByText('Using another agent? Copy the brief') });
+    await fallback.getByText('Using another agent? Copy the brief').click();
+    expect(await fallback.locator('pre').textContent()).toBe(fromApi);
+  });
+
   test('every link carries your own brief, and the fork wherever the agent takes one', async ({
     page,
     context,
@@ -290,11 +375,11 @@ test.describe('"Start it for me", signed in', () => {
     await expect(page.getByText('Google Jules is working on it.')).toHaveCount(0);
     await expect(panel.getByLabel('Your Jules API key')).toHaveValue('');
     await expect(page.getByText('test-only-jules-credential')).toHaveCount(0);
+    // "Remember it" was left as it came, unticked, so FORGE is not asked to keep the key (review-web M2).
     expect(sent).toEqual({
       taskId: 1,
       rail: 'jules',
       credential: { key: 'test-only-jules-credential' },
-      saveCredential: true,
     });
   });
 
@@ -347,22 +432,32 @@ test.describe('"Start it for me", signed in', () => {
     baseURL,
   }) => {
     await holdingTaskOne(page, context, baseURL);
-    await serve(page, '**/bff/bridge/dispatch', {
-      mode: 'start',
-      rail: 'jules',
-      brief: WITH_LOGIN.brief,
-      startedAt: new Date().toISOString(),
-      sessionUrl: 'https://jules.google.com/session/42',
-      sessionRef: 'sessions/42',
-      credentialSaved: true,
+    let sent: unknown = null;
+    await page.route('**/bff/bridge/dispatch', async (route) => {
+      sent = route.request().postDataJSON();
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          mode: 'start',
+          rail: 'jules',
+          brief: WITH_LOGIN.brief,
+          startedAt: new Date().toISOString(),
+          sessionUrl: 'https://jules.google.com/session/42',
+          sessionRef: 'sessions/42',
+          credentialSaved: true,
+        }),
+      });
     });
 
     await page.getByRole('group', { name: 'Start it for me' }).getByRole('button', { name: /^Google Jules/ }).click();
     const panel = page.getByRole('region', { name: 'Start Google Jules' });
     await panel.getByLabel('Your Jules API key').fill('test-only-jules-credential');
+    await panel.getByLabel('Remember it, encrypted, so next time is one click').check();
     await panel.getByRole('button', { name: 'Start Google Jules' }).click();
 
     await expect(panel.getByText('Google Jules is working on it.')).toBeVisible();
+    expect(sent).toMatchObject({ rail: 'jules', saveCredential: true });
     await expect(panel.getByRole('link', { name: /Watch it work/ })).toHaveAttribute('href', 'https://jules.google.com/session/42');
     await expect(panel.getByText('Your key is saved, encrypted, for next time.')).toBeVisible();
     await expect(panel.getByText(/Practice/)).toHaveCount(0);
@@ -388,6 +483,124 @@ test.describe('"Start it for me", signed in', () => {
       "Google didn't accept your saved key, so FORGE removed it. Add it again and try once more.",
     );
     await expect(panel.getByLabel('Your Jules API key')).toBeVisible();
+  });
+
+  test('pressing Start again after a start went through shows that start, and starts nothing twice', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    await holdingTaskOne(page, context, baseURL);
+    await serve(
+      page,
+      '**/bff/bridge/dispatch',
+      { error: 'already_started', rail: 'jules', sessionUrl: 'https://jules.google.com/session/42' },
+      409,
+    );
+    await page.getByRole('group', { name: 'Start it for me' }).getByRole('button', { name: /^Google Jules/ }).click();
+    const panel = page.getByRole('region', { name: 'Start Google Jules' });
+    await panel.getByLabel('Your Jules API key').fill('test-only-jules-credential');
+    await panel.getByRole('button', { name: 'Start Google Jules' }).click();
+
+    await expect(
+      panel.getByText("Google Jules already started on this task a moment ago, so FORGE didn't start it twice."),
+    ).toBeVisible();
+    await expect(panel.getByRole('link', { name: /Watch it work/ })).toHaveAttribute(
+      'href',
+      'https://jules.google.com/session/42',
+    );
+    await expect(panel.getByRole('alert')).toBeEmpty();
+  });
+
+  test('a start the BFF stopped waiting on is checked before anything is said (review-creds CR-3)', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    let pressed = false;
+    let letStatusAnswer = (): void => undefined;
+    const statusMayAnswer = new Promise<void>((resolve) => {
+      letStatusAnswer = () => resolve();
+    });
+    await holdingTaskOne(page, context, baseURL);
+    await page.route('**/bff/bridge/dispatch', async (route) => {
+      pressed = true;
+      // The BFF's own 45 s ran out with the API still at the vendor.
+      await route.fulfill({ status: 504, contentType: 'application/json', body: JSON.stringify({ error: 'upstream_timeout' }) });
+    });
+    await page.unroute('**/bff/bridge/status/1');
+    await page.route('**/bff/bridge/status/1', async (route) => {
+      if (!pressed) {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(status()) });
+        return;
+      }
+      await statusMayAnswer;
+      // The API finished the start after all.
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(
+          status({
+            stage: 'agent_working',
+            rail: 'jules',
+            sessionUrl: 'https://jules.google.com/session/9',
+            events: [
+              { at: inHours(-1), kind: 'claimed', source: 'forge', message: 'You claimed this task.' },
+              { at: new Date().toISOString(), kind: 'dispatched', source: 'forge', message: 'FORGE started Google Jules.', rail: 'jules' },
+            ],
+          }),
+        ),
+      });
+    });
+
+    await page.getByRole('group', { name: 'Start it for me' }).getByRole('button', { name: /^Google Jules/ }).click();
+    const panel = page.getByRole('region', { name: 'Start Google Jules' });
+    await panel.getByLabel('Your Jules API key').fill('test-only-jules-credential');
+    await panel.getByRole('button', { name: 'Start Google Jules' }).click();
+    try {
+      await expect(panel.getByText('It may have started. Checking…')).toBeVisible();
+    } finally {
+      letStatusAnswer();
+    }
+    await expect(panel.getByText('Google Jules is working on it.')).toBeVisible();
+    await expect(panel.getByRole('link', { name: /Watch it work/ })).toHaveAttribute('href', 'https://jules.google.com/session/9');
+    await expect(page.getByText(/nothing changed/)).toHaveCount(0);
+  });
+
+  test('the page waits longer than the BFF, and no answer at all is checked too (review-creds CR-3, review-web L7)', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    await signInAs(context, baseURL ?? '', IDENTITY);
+    await serviceDown(page);
+    await openBridge(page);
+    await serve(page, '**/bff/bridge/tasks/1', detail(MINE));
+    await serve(page, '**/bff/bridge/rails', rails());
+    await serve(page, '**/bff/bridge/status/1', status());
+    // The start never answers: neither the API nor the BFF.
+    await page.route('**/bff/bridge/dispatch', () => undefined);
+    await page.clock.install();
+    await page.goto('/contribute/task/1');
+    await expect(page.getByRole('heading', { name: 'Get your agent on it' })).toBeVisible();
+
+    await page.getByRole('group', { name: 'Start it for me' }).getByRole('button', { name: /^Google Jules/ }).click();
+    const panel = page.getByRole('region', { name: 'Start Google Jules' });
+    await panel.getByLabel('Your Jules API key').fill('test-only-jules-credential');
+    await panel.getByRole('button', { name: 'Start Google Jules' }).click();
+    await expect(panel.getByRole('button', { name: 'Starting…' })).toBeDisabled();
+
+    // Past the BFF's 45 s the page is still listening, for the BFF's own answer.
+    await page.clock.runFor(46_000);
+    await expect(panel.getByRole('button', { name: 'Starting…' })).toBeDisabled();
+    await expect(panel.getByRole('alert')).toBeEmpty();
+
+    // Past its own limit, it checks the status rather than say nothing changed.
+    await page.clock.runFor(15_000);
+    await expect(panel.getByRole('alert')).toHaveText(
+      "FORGE didn't hear back, and this task shows no start yet. Check “Where it is” below in a minute before you start Google Jules again.",
+    );
+    await expect(page.getByText(/nothing changed/)).toHaveCount(0);
   });
 
   test('the routine panel offers FORGE’s routine prompt once, closed', async ({ page, context, baseURL }) => {
@@ -440,14 +653,64 @@ test.describe('"Start it for me", signed in', () => {
 });
 
 test.describe('the outcome the Copilot callback sends back', () => {
+  /** The status after a real Copilot start: FORGE's own `dispatched` line, `minutesAgo` old. */
+  const copilotStarted = (minutesAgo: number) =>
+    status({
+      stage: 'agent_working',
+      rail: 'copilot',
+      events: [
+        { at: inHours(-1), kind: 'claimed', source: 'forge', message: 'You claimed this task.' },
+        {
+          at: new Date(Date.now() - minutesAgo * 60_000).toISOString(),
+          kind: 'dispatched',
+          source: 'forge',
+          message: 'FORGE started GitHub Copilot.',
+          rail: 'copilot',
+        },
+      ],
+    });
+
   test('?started=copilot is said once, and the address bar drops it', async ({ page, context, baseURL }) => {
-    await holdingTaskOne(page, context, baseURL, { path: '/contribute/task/1?started=copilot' });
+    await holdingTaskOne(page, context, baseURL, { path: '/contribute/task/1?started=copilot', status: copilotStarted(1) });
     await expect(page.getByText('GitHub Copilot is working on it.')).toBeVisible();
     await expect(page).toHaveURL(/\/contribute\/task\/1$/);
 
     await page.reload();
     await expect(page.getByRole('heading', { name: 'Get your agent on it' })).toBeVisible();
     await expect(page.getByText('GitHub Copilot is working on it.')).toHaveCount(0);
+  });
+
+  test('a ?started=copilot the status doesn’t back up is ignored (review-web L2)', async ({ page, context, baseURL }) => {
+    // Anyone can link here with ?started=copilot; this task has no Copilot start at all...
+    await holdingTaskOne(page, context, baseURL, { path: '/contribute/task/1?started=copilot' });
+    await expect(page.getByRole('region', { name: 'Where it is' }).getByText('FORGE: You claimed this task.')).toBeVisible();
+    await expect(page.getByText('GitHub Copilot is working on it.')).toHaveCount(0);
+
+    // ...and one from half an hour ago is not this one either.
+    const stale = await context.newPage();
+    await serviceDown(stale);
+    await openBridge(stale);
+    await serve(stale, '**/bff/bridge/tasks/1', detail(MINE));
+    await serve(stale, '**/bff/bridge/rails', rails());
+    await serve(stale, '**/bff/bridge/status/1', copilotStarted(30));
+    await stale.goto('/contribute/task/1?started=copilot');
+    await expect(stale.getByRole('region', { name: 'Where it is' }).getByText('FORGE: FORGE started GitHub Copilot.')).toBeVisible();
+    await expect(stale.getByText('GitHub Copilot is working on it.')).toHaveCount(0);
+  });
+
+  test('a Copilot setup failure brings the Copilot setup steps with it (review-web L2)', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    await holdingTaskOne(page, context, baseURL, { path: '/contribute/task/1?start_error=rail_setup_needed' });
+    const outcome = page.getByRole('alert').filter({ hasText: 'GitHub Copilot' });
+    await expect(outcome.getByText("GitHub Copilot isn't connected to your fork yet. Finish the setup steps below, then try again.")).toBeVisible();
+    await expect(outcome.getByRole('link', { name: 'Fork forge-app on GitHub.' })).toHaveAttribute(
+      'href',
+      'https://github.com/verastd/forge-app/fork',
+    );
+    await expect(outcome.getByText("Install FORGE's GitHub app on your fork.")).toBeVisible();
   });
 
   test('?start_error= reads as a sentence, and nothing in the query string is shown as text', async ({
@@ -494,10 +757,9 @@ test.describe('after the hand-off', () => {
       'href',
       'https://jules.google.com/session/42',
     );
-    await expect(progress.getByRole('link', { name: 'Open the pull request on GitHub' })).toHaveAttribute(
-      'href',
-      'https://github.com/verastd/forge-app/compare/main...octo-contributor:task/1-polish',
-    );
+    await expect(
+      progress.getByRole('link', { name: 'When your agent has pushed its branch: open the pull request' }),
+    ).toHaveAttribute('href', 'https://github.com/verastd/forge-app/compare/main...octo-contributor:task/1-polish');
     const agentLine = progress.getByRole('listitem').filter({ hasText: 'Pushed the fix' });
     await expect(agentLine).toContainText('Your agent: Pushed the fix <img src=x onerror="window.__forgeInjected=1"> evil');
     expect(await agentLine.textContent()).not.toMatch(/[\u202E\u0007]/);
@@ -506,16 +768,65 @@ test.describe('after the hand-off', () => {
   });
 
   test('links that are not plain https are not links', async ({ page, context, baseURL }) => {
+    for (const sessionUrl of [
+      'javascript:alert(1)',
+      // httpx reads the host as jules.google.com; a browser goes to evil.example (review-creds CR-2).
+      'https://evil.example\\@jules.google.com/session/1',
+      // Another vendor's site is not where this rail's session lives.
+      'https://cursor.com/agents/bc-1',
+    ]) {
+      const view = await context.newPage();
+      await holdingTaskOne(view, context, baseURL, {
+        status: status({
+          stage: 'agent_working',
+          detail: 'Google Jules is working on it.',
+          rail: 'jules',
+          sessionUrl,
+          compareUrl: 'https://evil.example/verastd/forge-app/compare',
+          events: [
+            { at: inHours(-1), kind: 'claimed', source: 'forge', message: 'You claimed this task.' },
+            { at: inHours(-0.5), kind: 'dispatched', source: 'forge', message: 'FORGE started Google Jules.', rail: 'jules' },
+          ],
+        }),
+      });
+      const progress = view.getByRole('region', { name: 'Where it is' });
+      await expect(progress.getByText('Google Jules is working on it.')).toBeVisible();
+      await expect(progress.getByRole('link'), sessionUrl).toHaveCount(0);
+      await view.close();
+    }
+  });
+
+  test('the compare link waits until the task has gone to an agent (review-web L3)', async ({ page, context, baseURL }) => {
     await holdingTaskOne(page, context, baseURL, {
       status: status({
-        stage: 'agent_working',
-        sessionUrl: 'javascript:alert(1)',
-        compareUrl: 'https://evil.example/verastd/forge-app/compare',
+        compareUrl: 'https://github.com/verastd/forge-app/compare/main...octo-contributor:task/1-polish',
       }),
     });
     const progress = page.getByRole('region', { name: 'Where it is' });
-    await expect(progress.getByText('This task is yours for the next 47 hours.')).toBeVisible();
-    await expect(progress.getByRole('link')).toHaveCount(0);
+    await expect(progress.getByText('FORGE: You claimed this task.')).toBeVisible();
+    // Right after the claim there is no branch to compare yet.
+    await expect(progress.getByRole('link', { name: /open the pull request/i })).toHaveCount(0);
+  });
+
+  test('a session link from the API passes the same check after a start (review-creds CR-2)', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    await holdingTaskOne(page, context, baseURL);
+    await serve(page, '**/bff/bridge/dispatch', {
+      mode: 'start',
+      rail: 'jules',
+      brief: WITH_LOGIN.brief,
+      startedAt: new Date().toISOString(),
+      sessionUrl: 'https://evil.example\\@jules.google.com/session/42',
+    });
+    await page.getByRole('group', { name: 'Start it for me' }).getByRole('button', { name: /^Google Jules/ }).click();
+    const panel = page.getByRole('region', { name: 'Start Google Jules' });
+    await panel.getByLabel('Your Jules API key').fill('test-only-jules-credential');
+    await panel.getByRole('button', { name: 'Start Google Jules' }).click();
+    await expect(panel.getByText('Google Jules is working on it.')).toBeVisible();
+    await expect(panel.getByRole('link', { name: /Watch it work/ })).toHaveCount(0);
   });
 
   test('failing checks after a start rail: send the notes to it', async ({ page, context, baseURL }) => {
@@ -554,6 +865,8 @@ test.describe('after the hand-off', () => {
       prUrl: 'https://github.com/verastd/forge-app/pull/31',
       checksPassed: 1,
       checksTotal: 2,
+      // The API says a relay would really happen: the saved key that started Jules is still there.
+      canRelay: true,
     }));
 
     const progress = page.getByRole('region', { name: 'Where it is' });
@@ -562,8 +875,9 @@ test.describe('after the hand-off', () => {
       'href',
       'https://github.com/verastd/forge-app/pull/31',
     );
-    // A pull request exists, so no compare link any more.
-    await expect(progress.getByRole('link', { name: 'Open the pull request on GitHub' })).toHaveCount(0);
+    // A pull request exists, so no compare link any more, and nothing to hand in.
+    await expect(progress.getByRole('link', { name: /open the pull request/i })).toHaveCount(0);
+    await expect(progress.getByText("Opened a pull request FORGE can't see?")).toHaveCount(0);
     await progress.getByRole('button', { name: 'Send the notes to Google Jules' }).click();
     await expect(progress.getByText('Sent to Google Jules. It takes another pass from here.')).toBeVisible();
     expect(notesSent).toBe(1);
@@ -595,6 +909,157 @@ test.describe('after the hand-off', () => {
       await expect(copy).not.toHaveAttribute('open');
     });
   }
+
+  /** Signed in, holding task 1 after a Jules start, with its checks failing; `feedback` answers the relay. */
+  async function failedAfterJules(
+    page: Page,
+    context: BrowserContext,
+    baseURL: string | undefined,
+    statusExtra: Record<string, unknown>,
+    feedback?: (route: Route) => Promise<void>,
+  ): Promise<Locator> {
+    await signInAs(context, baseURL ?? '', IDENTITY);
+    await serviceDown(page);
+    await openBridge(page);
+    await serve(page, '**/bff/bridge/checks/1', {
+      taskId: 1,
+      state: 'failed',
+      checks: [{ name: 'Acceptance tests', status: 'completed', conclusion: 'failure' }],
+      notes: 'Acceptance tests failed.',
+      prUrl: 'https://github.com/verastd/forge-app/pull/33',
+    });
+    if (feedback !== undefined) await page.route('**/bff/bridge/feedback/1', feedback);
+    await holdingTaskOneAfterSetup(
+      page,
+      status({ stage: 'in_checks', rail: 'jules', prUrl: 'https://github.com/verastd/forge-app/pull/33', ...statusExtra }),
+    );
+    return page.getByRole('region', { name: 'Where it is' });
+  }
+
+  test('no "Send the notes" unless the API says the relay would happen (review-web M8)', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    // After Jules, but the saved key is gone, or a different one started it: no canRelay.
+    const progress = await failedAfterJules(page, context, baseURL, {});
+    await expect(progress.getByText('1 of 1 checks failed.')).toBeVisible();
+    await expect(progress.getByText('If your agent has the FORGE connector, it can read these itself.')).toBeVisible();
+    await expect(progress.getByRole('button', { name: /Send the notes/ })).toHaveCount(0);
+  });
+
+  test('a relay that didn’t happen says why, never "only with a key you saved" (review-web M8)', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    const answers: Array<[number, unknown, Record<string, string>]> = [
+      [200, { relayed: false, notes: 'Acceptance tests failed.' }, {}],
+      [429, { error: 'dispatch_limit', limit: 10 }, { 'retry-after': '1200' }],
+      [502, { error: 'rail_failed', status: 503 }, {}],
+    ];
+    let next = 0;
+    const progress = await failedAfterJules(page, context, baseURL, { canRelay: true }, async (route) => {
+      const [code, body, headers] = answers[next] ?? [500, {}, {}];
+      next += 1;
+      await route.fulfill({ status: code, contentType: 'application/json', headers, body: JSON.stringify(body) });
+    });
+    const send = progress.getByRole('button', { name: 'Send the notes to Google Jules' });
+
+    await send.click();
+    await expect(
+      progress.getByText(
+        "Nothing was sent: Google Jules didn't take the notes just now. Try again in a few minutes. If your agent has the FORGE connector, it can read these itself.",
+      ),
+    ).toBeVisible();
+    await send.click();
+    await expect(progress.getByRole('alert')).toHaveText(
+      'FORGE has called agents for you 10 times in the last hour, the most it allows, so nothing was sent. Try again in about 20 minutes.',
+    );
+    await send.click();
+    await expect(progress.getByRole('alert')).toHaveText(
+      "Google didn't take the notes (error 503), so nothing was sent. Try again in a minute.",
+    );
+    await expect(progress.getByText(/only with a key you saved/)).toHaveCount(0);
+    expect(next).toBe(3);
+  });
+
+  test('a relay with no answer checks before it says anything (review-creds CR-3)', async ({ page, context, baseURL }) => {
+    let relayed = false;
+    const progress = await failedAfterJules(page, context, baseURL, { canRelay: true }, async (route) => {
+      relayed = true;
+      // The BFF waited its 45 s and the API never answered: it may have sent them.
+      await route.fulfill({ status: 504, contentType: 'application/json', body: JSON.stringify({ error: 'upstream_timeout' }) });
+    });
+    // The status the page reads next shows the relay went through after all.
+    await page.unroute('**/bff/bridge/status/1');
+    await page.route('**/bff/bridge/status/1', async (route) => {
+      const events = relayed
+        ? [{ at: new Date().toISOString(), kind: 'relayed', source: 'forge', message: 'Sent the check notes to Google Jules.', rail: 'jules' }]
+        : [];
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(
+          status({ stage: 'in_checks', rail: 'jules', prUrl: 'https://github.com/verastd/forge-app/pull/33', canRelay: true, events }),
+        ),
+      });
+    });
+    await progress.getByRole('button', { name: 'Send the notes to Google Jules' }).click();
+    await expect(progress.getByText('Sent to Google Jules. It takes another pass from here.')).toBeVisible();
+    await expect(progress.getByText(/nothing changed|nothing was sent/)).toHaveCount(0);
+  });
+
+  test('a pull request FORGE can’t see can be handed in by its link (review-web M5)', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    await holdingTaskOne(page, context, baseURL);
+    const answers: Array<[number, unknown, Record<string, string>, string]> = [
+      [400, { error: 'pr_not_for_task' }, {}, "That pull request isn't for this task."],
+      [400, { error: 'invalid_pr_url' }, {}, "That isn't a link to a pull request on verastd/forge-app."],
+      [404, { error: 'pr_not_found', prNumber: 78 }, {}, 'GitHub has no pull request at that link.'],
+      [403, { error: 'not_your_pr', prNumber: 78 }, {}, "That pull request comes from someone else's fork."],
+      [429, { error: 'submit_limit' }, { 'retry-after': '30' }, "You've handed in links too often just now. Try again in about 1 minute."],
+    ];
+    const sent: unknown[] = [];
+    await page.route('**/bff/bridge/submit/1', async (route) => {
+      sent.push(route.request().postDataJSON());
+      const answer = answers[sent.length - 1];
+      if (answer !== undefined) {
+        const [code, body, headers] = answer;
+        await route.fulfill({ status: code, contentType: 'application/json', headers, body: JSON.stringify(body) });
+        return;
+      }
+      await page.unroute('**/bff/bridge/status/1');
+      await serve(page, '**/bff/bridge/status/1', status({ stage: 'in_checks', prUrl: 'https://github.com/verastd/forge-app/pull/78' }));
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(status({ stage: 'in_checks', prUrl: 'https://github.com/verastd/forge-app/pull/78' })),
+      });
+    });
+
+    const progress = page.getByRole('region', { name: 'Where it is' });
+    const handIn = progress.locator('details', { has: page.getByText("Opened a pull request FORGE can't see?") });
+    await expect(handIn).not.toHaveAttribute('open');
+    await handIn.getByText("Opened a pull request FORGE can't see?").click();
+    const link = handIn.getByLabel("Your pull request's link");
+    for (const [, , , sentence] of answers) {
+      await link.fill('https://github.com/verastd/forge-app/pull/78');
+      await handIn.getByRole('button', { name: 'Hand it in' }).click();
+      await expect(handIn.getByRole('alert')).toContainText(sentence);
+    }
+    await link.fill('https://github.com/verastd/forge-app/pull/78');
+    await handIn.getByRole('button', { name: 'Hand it in' }).click();
+    await expect(progress.getByRole('link', { name: 'Your pull request on GitHub' })).toHaveAttribute(
+      'href',
+      'https://github.com/verastd/forge-app/pull/78',
+    );
+    expect(sent.at(-1)).toEqual({ prUrl: 'https://github.com/verastd/forge-app/pull/78' });
+    expect(sent).toHaveLength(answers.length + 1);
+  });
 
   test('a status with no holder means it is not yours any more', async ({ page, context, baseURL }) => {
     // The page asks for the status as soon as it shows the task as yours, so
@@ -649,6 +1114,184 @@ test.describe('after the hand-off', () => {
     await expect(page.getByRole('status')).toContainText('Released. The task is back on the board.');
     await expect(page.getByRole('button', { name: 'Claim this' })).toBeEnabled();
     expect(released).toBe(1);
+  });
+});
+
+test.describe('no answer to a claim, a release or a pull request handed in', () => {
+  const MAY_HAVE = "FORGE didn't hear back in time, so it may have gone through. Reload the page to see where things stand.";
+
+  test('a claim the BFF stopped waiting on reads the task again, and finds it yours (review-creds CR-3)', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    await signInAs(context, baseURL ?? '', IDENTITY);
+    await serviceDown(page);
+    await openBridge(page);
+    await serve(page, '**/bff/bridge/tasks/1', detail());
+    await serve(page, '**/bff/bridge/rails', rails());
+    await serve(page, '**/bff/bridge/status/1', status());
+    await page.route('**/bff/bridge/claim', async (route) => {
+      // The API made the claim; the BFF's own 25 s ran out before it said so.
+      await page.unroute('**/bff/bridge/tasks/1');
+      await serve(page, '**/bff/bridge/tasks/1', detail(MINE));
+      await route.fulfill({ status: 504, contentType: 'application/json', body: JSON.stringify({ error: 'upstream_timeout' }) });
+    });
+    await page.goto('/contribute/task/1');
+    await page.getByRole('button', { name: 'Claim this' }).click();
+
+    await expect(page.getByText(MAY_HAVE)).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Get your agent on it' })).toBeVisible();
+    await expect(page.getByText(/yours for \d+h/)).toBeVisible();
+  });
+
+  test('a claim with no answer at all: the page waits past the BFF, then reads the task again (review-creds CR-3)', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    await signInAs(context, baseURL ?? '', IDENTITY);
+    await serviceDown(page);
+    await openBridge(page);
+    let taskReads = 0;
+    await page.route('**/bff/bridge/tasks/1', async (route) => {
+      taskReads += 1;
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(detail()) });
+    });
+    // The claim never answers: neither the API nor the BFF.
+    await page.route('**/bff/bridge/claim', () => undefined);
+    await page.clock.install();
+    await page.goto('/contribute/task/1');
+    await page.getByRole('button', { name: 'Claim this' }).click();
+    await expect(page.getByRole('button', { name: 'Claiming…' })).toBeDisabled();
+    const readsBefore = taskReads;
+
+    // Past the browser's usual 8 s, and short of the BFF's 25 s: still listening.
+    await page.clock.runFor(9_000);
+    await expect(page.getByRole('button', { name: 'Claiming…' })).toBeDisabled();
+    // Past its own 30 s: the claim may have gone through, so the task is read again.
+    await page.clock.runFor(22_000);
+    await expect(page.getByText(MAY_HAVE)).toBeVisible();
+    await expect.poll(() => taskReads).toBeGreaterThan(readsBefore);
+    await expect(page.getByRole('button', { name: 'Claim this' })).toBeEnabled();
+    await expect(page.getByText(/nothing (was )?changed/)).toHaveCount(0);
+  });
+
+  test('a release with no answer reads the status again, and finds it released (review-creds CR-3)', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    await holdingTaskOne(page, context, baseURL);
+    let released = false;
+    await page.unroute('**/bff/bridge/status/1');
+    await page.route('**/bff/bridge/status/1', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(
+          released ? status({ events: [], holder: undefined, leaseEndsAt: undefined, detail: 'Nobody holds it.' }) : status(),
+        ),
+      }),
+    );
+    await page.route('**/bff/bridge/release/1', async (route) => {
+      // The API let it go; the answer was lost on the way back.
+      released = true;
+      await route.abort();
+    });
+
+    await page.getByRole('button', { name: 'Release this task' }).click();
+    await page.getByRole('button', { name: 'Yes, release it' }).click();
+    await expect(page.getByText(MAY_HAVE)).toBeVisible();
+    await expect(
+      page.getByText("This task isn't yours any more: it was released, or its time ran out.", { exact: false }),
+    ).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Claim this' })).toBeEnabled();
+  });
+
+  test('a pull request handed in with no answer reads the status again, and shows it if FORGE has it (review-creds CR-3)', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    let submitted = false;
+    let letStatusAnswer = (): void => undefined;
+    const statusMayAnswer = new Promise<void>((resolve) => {
+      letStatusAnswer = () => resolve();
+    });
+    await holdingTaskOne(page, context, baseURL);
+    await page.unroute('**/bff/bridge/status/1');
+    await page.route('**/bff/bridge/status/1', async (route) => {
+      if (submitted) {
+        // Held until the page has said what it knows, so that can be read first.
+        await statusMayAnswer;
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(
+          submitted ? status({ stage: 'in_checks', prUrl: 'https://github.com/verastd/forge-app/pull/78' }) : status(),
+        ),
+      });
+    });
+    await page.route('**/bff/bridge/submit/1', async (route) => {
+      // FORGE took the pull request; the answer was lost on the way back.
+      submitted = true;
+      await route.abort();
+    });
+
+    const progress = page.getByRole('region', { name: 'Where it is' });
+    const handIn = progress.locator('details', { has: page.getByText("Opened a pull request FORGE can't see?") });
+    await handIn.getByText("Opened a pull request FORGE can't see?").click();
+    await handIn.getByLabel("Your pull request's link").fill('https://github.com/verastd/forge-app/pull/78');
+    await handIn.getByRole('button', { name: 'Hand it in' }).click();
+    try {
+      await expect(handIn.getByRole('alert')).toHaveText(MAY_HAVE);
+    } finally {
+      letStatusAnswer();
+    }
+    await expect(progress.getByRole('link', { name: 'Your pull request on GitHub' })).toHaveAttribute(
+      'href',
+      'https://github.com/verastd/forge-app/pull/78',
+    );
+  });
+
+  test('releasing and handing in wait past the BFF too, then say it may have gone through (review-creds CR-3)', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    await signInAs(context, baseURL ?? '', IDENTITY);
+    await serviceDown(page);
+    await openBridge(page);
+    await serve(page, '**/bff/bridge/tasks/1', detail(MINE));
+    await serve(page, '**/bff/bridge/rails', rails());
+    await serve(page, '**/bff/bridge/status/1', status());
+    // Neither answers: not the API, not the BFF.
+    await page.route('**/bff/bridge/release/1', () => undefined);
+    await page.route('**/bff/bridge/submit/1', () => undefined);
+    await page.clock.install();
+    await page.goto('/contribute/task/1');
+    await expect(page.getByRole('heading', { name: 'Get your agent on it' })).toBeVisible();
+
+    await page.getByRole('button', { name: 'Release this task' }).click();
+    await page.getByRole('button', { name: 'Yes, release it' }).click();
+    await page.clock.runFor(9_000);
+    await expect(page.getByRole('button', { name: 'Releasing…' })).toBeDisabled();
+    await page.clock.runFor(22_000);
+    await expect(page.getByText(MAY_HAVE)).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Yes, release it' })).toBeEnabled();
+
+    const progress = page.getByRole('region', { name: 'Where it is' });
+    const handIn = progress.locator('details', { has: page.getByText("Opened a pull request FORGE can't see?") });
+    await handIn.getByText("Opened a pull request FORGE can't see?").click();
+    await handIn.getByLabel("Your pull request's link").fill('https://github.com/verastd/forge-app/pull/78');
+    await handIn.getByRole('button', { name: 'Hand it in' }).click();
+    await page.clock.runFor(9_000);
+    await expect(handIn.getByRole('button', { name: 'Handing it in…' })).toBeDisabled();
+    await page.clock.runFor(22_000);
+    await expect(handIn.getByRole('alert')).toHaveText(MAY_HAVE);
+    await expect(page.getByText(/nothing (was )?changed/)).toHaveCount(0);
   });
 });
 
@@ -710,6 +1353,7 @@ test.describe('/me: your agent keys and connected agents', () => {
     const keys = page.getByRole('region', { name: 'Your agent keys' });
     await expect(keys.getByText('Google Jules')).toBeVisible();
     await expect(keys.getByText(/Key ending …a1b2 · saved/)).toBeVisible();
+    await expect(keys.getByText(/can't use saved keys/)).toHaveCount(0);
     await keys.getByRole('button', { name: 'Remove your Google Jules key' }).click();
     await expect(keys.getByText('Removed your Google Jules key. FORGE no longer has it.')).toBeVisible();
     await expect(keys.getByText(/No saved keys/)).toBeVisible();
@@ -720,6 +1364,30 @@ test.describe('/me: your agent keys and connected agents', () => {
     await agents.getByRole('button', { name: 'Disconnect Claude evil' }).click();
     await expect(agents.getByText('Disconnected Claude evil. It can no longer reach FORGE as you.')).toBeVisible();
     await expect(agents.getByRole('link', { name: 'Connect your agent to FORGE' })).toHaveAttribute('href', '/connect');
+  });
+
+  test('with the vault off, saved keys are still listed, with a word that FORGE can’t use them', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    await signInAs(context, baseURL ?? '', IDENTITY);
+    await serviceDown(page);
+    await serve(page, '**/bff/bridge/me/keys', {
+      credentials: [{ rail: 'jules', hint: '…a1b2', savedAt: '2026-09-30T10:00:00Z' }],
+      vault: false,
+    });
+    await serve(page, '**/bff/bridge/me/keys/jules', { credentials: [], vault: false });
+    await serve(page, '**/bff/oauth/grants', { agents: [] });
+    await page.goto('/me');
+
+    const keys = page.getByRole('region', { name: 'Your agent keys' });
+    await expect(keys.getByText("FORGE can't use saved keys right now; you can still remove them.")).toBeVisible();
+    await expect(keys.getByText(/Key ending …a1b2 · saved .* · not used yet/)).toBeVisible();
+    await keys.getByRole('button', { name: 'Remove your Google Jules key' }).click();
+    await expect(keys.getByText('Removed your Google Jules key. FORGE no longer has it.')).toBeVisible();
+    await expect(keys.getByText(/This FORGE server doesn't save keys/)).toBeVisible();
+    await expect(keys.getByText(/can't use saved keys/)).toHaveCount(0);
   });
 
   for (const [code, httpStatus] of [

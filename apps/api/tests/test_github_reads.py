@@ -2,11 +2,18 @@
 a state and notes, the caches, the read token, and failing soft."""
 
 import logging
+import socket
+import threading
+import time
+from datetime import UTC, datetime
+from functools import partial
+from typing import Any
 
 import httpx
 import pytest
 
 from forge_api.models import CheckRun
+from forge_api.services import github_reads
 from forge_api.services.github_reads import (
     MAX_CACHE_ENTRIES,
     GitHubReads,
@@ -17,12 +24,14 @@ from forge_api.services.github_reads import (
     _TTLCache,
     check_state,
     failure_notes,
+    task_refs,
 )
 
 from .bridge_helpers import FakeGitHub, json_response
 
 LOGIN = "octo-contributor"
 BRANCH = "task/1-polish-the-csv-export-in-the-data-app"
+SINCE = datetime(2026, 8, 10, 9, 0, tzinfo=UTC)
 
 
 class Ticker:
@@ -104,19 +113,21 @@ def test_an_invalid_login_never_reaches_github(github: FakeGitHub, reads: GitHub
     assert github.requests == []
 
 
-def test_failures_raise_github_unavailable(github: FakeGitHub, reads: GitHubReads) -> None:
+def test_failures_raise_github_unavailable(github: FakeGitHub, ticker: Ticker) -> None:
     for fail in (500, 403, "timeout"):
         github.fail = fail
-        reads.clear_cache()
+        reads = github.reads(ticker)  # a fresh breaker for each kind of failure
         for read in (
-            lambda: reads.find_pull(LOGIN, BRANCH),
-            lambda: reads.pull(1),
-            lambda: reads.check_runs("a" * 40),
-            lambda: reads.fork(LOGIN),
-            lambda: reads.task_issues(),
+            partial(reads.find_pull, LOGIN, BRANCH),
+            partial(reads.pull, 1),
+            partial(reads.check_runs, "a" * 40),
+            partial(reads.fork, LOGIN),
+            partial(reads.search_pulls, LOGIN, 1, SINCE),
         ):
+            before = len(github.requests)
             with pytest.raises(GitHubUnavailable):
                 read()
+            assert len(github.requests) == before + 1
 
 
 def test_a_422_on_the_head_lookup_means_no_pull_request(reads: GitHubReads) -> None:
@@ -217,6 +228,7 @@ def test_only_a_refused_token_is_retried(
         assert warnings_from_reads(caplog) == []
         # An anonymous retry that fails too is a failure, after exactly one retry.
         github.fail = 401
+        signed.clear_cache()  # the 403 is remembered for a minute otherwise
         with pytest.raises(GitHubUnavailable):
             signed.pull(1)
     assert len(github.requests) == 4
@@ -330,18 +342,6 @@ def test_fork_status(github: FakeGitHub, reads: GitHubReads, ticker: Ticker) -> 
     assert reads.fork("plain").exists is False
 
 
-def test_task_issues_skip_pull_requests_and_page(github: FakeGitHub, reads: GitHubReads) -> None:
-    github.issues = [{"number": n, "title": "t"} for n in range(1, 151)] + [
-        {"number": 0, "pull_request": {}}
-    ]
-    assert len(reads.task_issues()) == 150
-    assert [r.url.params["page"] for r in github.requests] == ["1", "2"]
-    assert github.requests[0].url.params["labels"] == "agent-ready,status:open"
-    github.issues = [{"number": n, "title": "t"} for n in range(1, 401)]
-    reads.clear_cache()
-    assert len(reads.task_issues()) == 300  # at most three pages
-
-
 def test_parse_pull_rejects_odd_shapes() -> None:
     assert _parse_pull("x") is None
     assert _parse_pull({"number": True, "state": "open", "head": {}}) is None
@@ -359,18 +359,192 @@ def test_the_cache_stays_bounded() -> None:
     cache = _TTLCache(ticker)
     for index in range(MAX_CACHE_ENTRIES):
         cache.put((str(index),), index, 10)
-    ticker.now += 11  # all expired: the next put sweeps them
+    ticker.now += 11  # all expired
     cache.put(("fresh",), 1, 10)
     assert cache.get(("fresh",)) == (True, 1)
     assert cache.get(("0",)) == (False, None)
     for index in range(MAX_CACHE_ENTRIES):
         cache.put((f"live{index}",), index, 100)
-    cache.put(("overflow",), 1, 100)  # none expired: start over
+    cache.put(("overflow",), 1, 100)  # full: the least recently used entry makes room
     assert cache.get(("overflow",)) == (True, 1)
     assert cache.get(("live0",)) == (False, None)
+
+
+def test_a_full_cache_drops_one_entry_never_everything() -> None:
+    """mcp M3: one user asking about thousands of numbers flushed everyone's cache."""
+    ticker = Ticker()
+    cache = _TTLCache(ticker)
+    cache.put(("pull", "12"), "watched", 100)
+    for index in range(MAX_CACHE_ENTRIES - 1):
+        cache.put(("pull", f"junk{index}"), index, 100)
+    assert cache.get(("pull", "12")) == (True, "watched")  # used: now the newest
+    cache.put(("pull", "one-more"), 1, 100)
+    assert cache.get(("pull", "12")) == (True, "watched")
+    assert cache.get(("pull", "junk0")) == (False, None)  # the least recently used went
+    assert cache.get(("pull", "junk1")) == (True, 1)
 
 
 def test_the_default_client_is_made_once() -> None:
     reads = GitHubReads(env={})
     assert reads.client is reads.client
     assert reads.client.follow_redirects is False
+
+
+def test_a_read_gets_five_seconds_in_all(
+    github: FakeGitHub, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """B-M6: no step of a read may wait longer than 5 s, and bounded_send holds the
+    whole read to the same 5 s (it was 5 s to connect, then 20 s more)."""
+    assert GitHubReads(env={}).client.timeout == httpx.Timeout(5.0)
+    budgets: list[float] = []
+    real_send = github_reads.bounded_send
+
+    def spy(client: httpx.Client, call: Any, **kwargs: Any) -> Any:
+        budgets.append(kwargs["total_timeout"])
+        return real_send(client, call, **kwargs)
+
+    monkeypatch.setattr(github_reads, "bounded_send", spy)
+    github.reads().pull(1)
+    assert budgets == [5.0]
+
+
+def test_a_silent_github_is_given_up_on_within_the_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """B-M6: a GitHub that accepts the connection and never answers (the reviewer's
+    blackhole) costs a read its budget, not more."""
+    listener = socket.create_server(("127.0.0.1", 0))
+    held: list[socket.socket] = []
+    accepting = threading.Thread(target=lambda: held.append(listener.accept()[0]), daemon=True)
+    accepting.start()
+    monkeypatch.setattr(github_reads, "API_URL", f"http://127.0.0.1:{listener.getsockname()[1]}")
+    try:
+        started = time.monotonic()
+        with pytest.raises(GitHubUnavailable):
+            GitHubReads(env={}, timeout=0.5).pull(1)
+        assert time.monotonic() - started < 3
+    finally:
+        accepting.join(timeout=5)
+        for connection in held:
+            connection.close()
+        listener.close()
+
+
+def test_a_failed_read_is_remembered_for_a_minute(github: FakeGitHub, ticker: Ticker) -> None:
+    """B-M6: asking again while GitHub is failing fails at once."""
+    reads = github.reads(ticker)
+    github.fail = 502
+    for _ in range(3):
+        with pytest.raises(GitHubUnavailable):
+            reads.pull(1)
+    assert len(github.requests) == 1
+    github.fail = None
+    ticker.now += 61
+    assert reads.pull(1) is None  # asked again: no such pull request
+    assert len(github.requests) == 2
+
+
+def test_five_failures_in_a_row_stop_reads_for_a_minute(github: FakeGitHub, ticker: Ticker) -> None:
+    """B-M6: the breaker. A success resets the count; the fifth failure in a row stops
+    every read, whatever it asks about, for 60 s."""
+    reads = github.reads(ticker)
+    github.fail = 500
+    for number in range(1, 5):
+        with pytest.raises(GitHubUnavailable):
+            reads.pull(number)
+    github.fail = None
+    assert reads.pull(5) is None  # a success: the count starts again
+    github.fail = 500
+    for number in range(6, 11):
+        with pytest.raises(GitHubUnavailable):
+            reads.pull(number)
+    asked = len(github.requests)
+    assert asked == 10
+    github.fail = None
+    with pytest.raises(GitHubUnavailable, match="can't be reached right now"):
+        reads.fork(LOGIN)
+    with pytest.raises(GitHubUnavailable):
+        reads.check_runs("a" * 40)
+    assert len(github.requests) == asked
+    ticker.now += 60
+    assert reads.fork(LOGIN).exists is False
+    assert len(github.requests) == asked + 1
+
+
+def test_a_task_number_in_a_title_or_a_closing_link_names_it() -> None:
+    """B-M1, B-M11: `[#<id>]` in the title, or Closes/Fixes/Resolves #<id> in the
+    description (Foreman's G0 link), as GitHub's own keywords are written."""
+    assert task_refs("[#12] Export", None) == {12}
+    assert task_refs("Export (#12)", "see #12") == frozenset()
+    assert task_refs(None, "Fixes #3\ncloses: #4 and RESOLVES #5") == {3, 4, 5}
+    assert task_refs("[#0] x", "Fixesss #6 closes#7") == {7}
+    started = time.perf_counter()
+    assert task_refs("[#" + "1" * 70_000, "fixes" + " " * 70_000 + "x") == frozenset()
+    assert time.perf_counter() - started < 0.5  # linear, and a long description is cut
+
+
+def test_a_pull_request_carries_what_matching_needs() -> None:
+    """B-M1, mcp L2: base repository, the head owner's GitHub id, and the times."""
+    pull = _parse_pull(
+        {
+            "number": 7,
+            "state": "closed",
+            "title": "[#1] Export",
+            "body": "Closes #1",
+            "created_at": "2026-08-10T09:30:00Z",
+            "closed_at": "2026-08-11T10:00:00Z",
+            "merged_at": None,
+            "base": {"repo": {"full_name": "verastd/forge-app"}},
+            "head": {
+                "sha": "a" * 40,
+                "ref": "x",
+                "repo": {"owner": {"login": "octo", "id": 1001}},
+            },
+        }
+    )
+    assert pull is not None
+    assert (pull.base_repo, pull.head_owner_id, pull.refs) == ("verastd/forge-app", 1001, {1})
+    assert pull.created_at == datetime(2026, 8, 10, 9, 30, tzinfo=UTC)
+    assert pull.closed_at == datetime(2026, 8, 11, 10, 0, tzinfo=UTC)
+    assert pull.merged is False and pull.merged_at is None
+    odd = _parse_pull(
+        {
+            "number": 8,
+            "state": "open",
+            "created_at": "yesterday",
+            "base": "main",
+            "head": {"sha": "b" * 40, "ref": "y", "repo": {"owner": {"id": True}}},
+        }
+    )
+    assert odd is not None
+    assert (odd.created_at, odd.base_repo, odd.head_owner_id) == (None, "", None)
+
+
+def test_the_search_reads_only_the_newest_pull_requests_naming_the_task(
+    github: FakeGitHub, ticker: Ticker
+) -> None:
+    """B-M11: hits are read in full by number, at most three, and only those naming the
+    task; an invalid login never reaches GitHub."""
+    for number in range(30, 36):
+        github.add_pull(number, LOGIN, f"branch-{number}", body="Fixes #1")
+    github.add_pull(40, LOGIN, "other", title="[#2] Something else")
+    reads = github.reads(ticker)
+    found = reads.search_pulls(LOGIN, 1, SINCE)
+    assert [pull.number for pull in found] == [35, 34, 33]
+    assert reads.search_pulls("bad login", 1, SINCE) == []
+    searches = [request for request in github.requests if request.url.path == "/search/issues"]
+    assert len(searches) == 1
+    assert searches[0].url.params["sort"] == "created"
+
+
+def test_the_search_skips_hits_that_are_not_pull_requests() -> None:
+    """B-M11: an issue (no `pull_request` key) or junk in the answer is never read."""
+    items = [
+        {"number": 7, "title": "[#1] An issue, not a pull request"},
+        "junk",
+        {"number": "8", "title": "[#1] A number that isn't one", "pull_request": {}},
+    ]
+    client = httpx.Client(
+        transport=httpx.MockTransport(lambda request: json_response(200, {"items": items}))
+    )
+    assert GitHubReads(client=client, env={}).search_pulls(LOGIN, 1, SINCE) == []
