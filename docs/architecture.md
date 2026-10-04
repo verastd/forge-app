@@ -82,9 +82,10 @@ browser holds, sealed and opened by `packages/auth`.
    `enc: A256GCM`; claims: GitHub id, login, display name, avatar URL,
    `demo: false`) and set with a 7-day absolute lifetime. The transaction
    cookie is cleared on every path out of the callback, success or failure.
-   `middleware.ts` gates `/me/:path*`, `/apps/data/:path*`, the connector's
-   consent page `/oauth/authorize` and the new-proposal form `/propose/new`
-   on a valid session, redirecting to `/signin?next=<path>` otherwise.
+   `middleware.ts` gates `/me/:path*`, `/apps/:path*` (the lobby itself and
+   every app on it), the connector's consent page `/oauth/authorize` and the
+   new-proposal form `/propose/new` on a valid session, redirecting to
+   `/signin?next=<path and query>` otherwise.
 4. Once the session is set, the callback tells the API that this GitHub
    account is a member (`POST /api/members/hello`, with the assertion; see
    [The Propose floor](#the-propose-floor)). It runs after the redirect has
@@ -736,11 +737,30 @@ LiveKit). It is a free-roam cave whose wall is a 32 × 90 grid of app slots,
 2,880 in all. The Data app is lit in slot 0, the bottom panel straight ahead
 of where everyone starts; every other slot is dark, waiting for a proposal.
 
+It needs a sign-in, like the apps on it: the middleware sends a signed-out
+visitor to `/signin?next=%2Fapps` (query and all, so `/apps?from=data` comes
+back as itself).
+
 **The page works without the 3D view.** `src/app/apps/page.tsx` renders the
 heading and a directory on the server: one link per lit app in the registry,
 and a count of the empty slots. With no JavaScript, no WebGL, the
 `apps_lobby` flag off, or a view that stopped, the directory is still the
-page, and still the way into every app.
+page, and still the way into every app. While the 3D wall is the page (from
+the server's first render, through loading, to the wall on screen) both are
+out of sight but still in the page for screen readers, and the directory
+shows only while a keyboard user has focus in it (`:has(:focus-visible)`).
+
+**The chrome around it.** On `/apps` only, the site nav steps out of the
+cave's way (`src/components/LobbyNav.tsx`). On a desktop it is the usual bar
+on arrival and slides up once the wall is up, coming back while the pointer
+is in a 20 px strip along the top edge or over the bar, while focus is in it
+(the strip is also a button, so Tab from the top lands in the nav), and
+while the account menu or the bell's panel is open, then leaving 600 ms
+after none of that holds; away, it floats and is `inert`. On a touch screen,
+or at 640 px and under, it is a "Menu" button in the top left corner that
+opens the nav as a panel. Without the wall the page is a normal page, so the
+nav is the normal bar. The cave's own way out is Exit, beside it: a link
+home, on screen whenever the wall is the page.
 
 **The pieces.**
 
@@ -755,7 +775,10 @@ page, and still the way into every app.
   probe, the scene inside an error boundary, the presence feed, the mic
   button, the touch stick and lift buttons, and what a tap does.
 - `src/components/lobby/scene/`: the scene itself, plain three.js with no
-  React (`createCave.ts`, with `controls.ts`, `peers.ts` and `screen.ts`).
+  React (`createCave.ts`, with `controls.ts`, `peers.ts`, `screen.ts`,
+  `readout.ts` for an empty slot's readout and its light, and `palette.ts`,
+  the cave's colours: FORGE's amber, the same values as the `--cave-*`
+  custom properties on `Lobby.module.css`'s `.root`).
   `LobbyScene.tsx` loads it with `next/dynamic` and `ssr: false`, so three.js
   is downloaded on `/apps` only, and never in any route's first load.
 - `src/components/lobby/presence/`: the presence feeds (below).
@@ -778,8 +801,11 @@ under the crosshair or the last tap, or `empty:<slot>`), `data-motion`
 (`full`, or `reduced` while the visitor prefers reduced motion: no drift,
 flicker or bob), `data-feed` (`none`, `local` or `livekit`: the feed presence
 is actually running on), `data-peers` (the people drawn in the room, so not
-anyone whose position hasn't arrived) and `data-voice` (`unavailable`, `off`
-or `on`).
+anyone whose position hasn't arrived), `data-voice` (`unavailable`, `off`
+or `on`), and `data-hover-slot` and `data-hover-glow` (the empty slot whose
+readout is showing, or empty, and whether its light is `on` or `off`). The
+site nav's header on `/apps` carries `data-nav-mode` and `data-nav` (`shown`
+or `hidden`).
 
 **Moving and opening.** Drag to look; WASD, the arrow keys or the touch
 stick to walk; Space and Shift, or the lift buttons, to rise and fall. The
@@ -788,13 +814,18 @@ tap on a lit panel saves the camera in `sessionStorage`
 (`forge.lobby.pos.v2`, so per tab) and opens the app; so does leaving the
 lobby any other way. Any visit to `/apps` in that tab, the browser's Back
 included, starts from the saved camera; a tab with nothing saved starts at
-the centre. The app's `AppBar` links back to `/apps?from=<slug>`, which
-also puts keyboard focus on that app's link in the directory (with no saved
-camera, it faces the app's slot). A tap on a dark slot opens
-`/propose?slot=<index>`, where one line after the heading and lede says the
-slot is free. When the page chrome changes (lobby, app, or site), focus
-moves to the new page's `<h1>`, or to the element the page marks
-`data-arrival-focus` (the directory link, coming back from an app).
+the centre. The app's `AppBar` links back to `/apps?from=<slug>` (with no
+saved camera, it faces the app's slot). The cave is its own experience:
+nothing in it leaves but a lit app and Exit. A tap on a dark slot stays in
+the cave and only says "Empty slot"; the mouse over one (or, on a touch
+screen, a tap on one, for 3 s) shows its readout in its panel, its number
+(the slot index), row and column, and height, in the grid's own amber, and
+lights the rock behind it with one light made with the scene, whose
+intensity alone changes. When the page chrome changes (lobby, app, or site),
+focus moves to the new page's `<h1>`, or to the element the page marks
+`data-arrival-focus`: coming back from an app to a lobby without its wall,
+that app's directory link; with the wall, nothing, so the hidden `<h1>`
+takes it, and the camera keys work from there.
 
 **The screen's video.** The Data panel shows a 1280×720 H.264 loop
 (`public/lobby/lobby-screen.mp4`, 5.1 MB), or a 640×360 encode of it
@@ -809,7 +840,8 @@ scheme), because the scene samples the pixels for the room's light.
 **Presence and voice.** One feed per visit, picked by `createPresenceFeed`
 in `presence/`:
 
-- signed out: `none`. The cave, alone, and nobody sees you.
+- signed out (a session that expired mid-visit; the middleware keeps
+  everyone else out): `none`. The cave, alone, and nobody sees you.
 - the practice build (`NEXT_PUBLIC_FORGE_DEMO=1`), signed in: `local`, a
   `BroadcastChannel('forge.lobby')` between tabs of one browser, with no
   server and no voice. It exists so the practice app, and e2e, can show

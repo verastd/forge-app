@@ -9,6 +9,7 @@ import {
   holdFlags,
   lobbyRoot,
   openLobby,
+  serveFlags,
   slotOnScreen,
   tapScene,
 } from './helpers/lobby';
@@ -265,6 +266,28 @@ test.describe('on a phone', () => {
     await expect(page).toHaveURL(/\/propose$/);
   });
 });
+
+for (const phone of [false, true]) {
+  test.describe(phone ? 'a fallback state, on a phone' : 'a fallback state, on a desktop', () => {
+    test.use(phone ? { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true } : {});
+
+    test('the page is a normal page: the normal nav stays, and there is no Exit', async ({ page }) => {
+      await serveFlags(page, { apps_lobby: false });
+      await gotoLobby(page);
+      const header = lobbyHeader(page);
+      await expect(lobbyRoot(page)).toHaveAttribute('data-lobby-state', 'off');
+      await expect(header).toHaveAttribute('data-nav-mode', 'bar');
+      // Long past the 600 ms a bar that slides away would wait.
+      await page.waitForTimeout(2_500);
+      await expect(header).toHaveAttribute('data-nav', 'shown');
+      await expect(mainNav(page)).toBeVisible();
+      await expect(header.locator('.nav-inner')).not.toHaveAttribute('inert', /.*/);
+      await expect(page.getByRole('button', { name: 'Menu', exact: true })).toBeHidden();
+      await expect(page.getByRole('button', { name: 'Show the site menu' })).toHaveCount(0);
+      await expect(exit(page)).toHaveCount(0);
+    });
+  });
+}
 
 test('every other page keeps the normal nav: no menu button, no strip, nothing that slides', async ({ page }) => {
   for (const path of ['/', '/contribute', '/propose']) {

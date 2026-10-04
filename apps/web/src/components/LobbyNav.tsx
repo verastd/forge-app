@@ -38,7 +38,7 @@ import styles from './LobbyNav.module.css';
 /** A touch screen or a narrow one: the nav is a menu button. Lobby.module.css's Exit makes room for it under the same query. */
 const COMPACT_QUERY = '(pointer: coarse), (max-width: 640px)';
 /** How long the bar stays down once nothing holds it. */
-export const HIDE_DELAY_MS = 600;
+const HIDE_DELAY_MS = 600;
 
 function subscribeCompact(onChange: () => void): () => void {
   const query = window.matchMedia(COMPACT_QUERY);
