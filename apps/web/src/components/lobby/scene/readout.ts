@@ -159,13 +159,14 @@ export function createSlotReadout(scene: THREE.Scene, opts: SlotReadoutOptions):
     }
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
+    // Sized to read from the spawn point, 25 m off: the longest third line (row 89, 276.6 m) still clears the ticks.
     ctx.font = `700 148px ${family}`;
-    ctx.fillText(number, TEX_W / 2, TEX_H * 0.38);
-    ctx.font = `600 88px ${family}`;
-    ctx.fillText(place, TEX_W / 2, TEX_H * 0.61);
-    ctx.globalAlpha = 0.8;
-    ctx.font = `600 64px ${family}`;
-    ctx.fillText(status, TEX_W / 2, TEX_H * 0.8);
+    ctx.fillText(number, TEX_W / 2, TEX_H * 0.37);
+    ctx.font = `600 96px ${family}`;
+    ctx.fillText(place, TEX_W / 2, TEX_H * 0.6);
+    ctx.globalAlpha = 0.85;
+    ctx.font = `600 72px ${family}`;
+    ctx.fillText(status, TEX_W / 2, TEX_H * 0.79);
     ctx.restore();
     texture.needsUpdate = true;
   };
