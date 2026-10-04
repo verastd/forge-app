@@ -7,9 +7,12 @@
  * readout).
  *
  * Angles follow @forge/lobby's camera.ts: yaw grows turning right, pitch
- * grows looking down. The look eases toward its target (faster when the
- * visitor asked for reduced motion); walking is an acceleration with drag,
- * clamped into the cave each step.
+ * grows looking down. A drag takes hold of the cave and pulls it, as a
+ * photo sphere or a map does: drag right and the view turns left, drag down
+ * and it tilts up (the operator found the camera-steering way round
+ * unintuitive). The arrow keys still steer: → turns right. The look eases
+ * toward its target (faster when the visitor asked for reduced motion);
+ * walking is an acceleration with drag, clamped into the cave each step.
  */
 
 import * as THREE from 'three';
@@ -134,9 +137,10 @@ export function createControls(motion: Motion, opts: ControlsOptions): Controls 
   });
   on(canvas, 'pointermove', (event) => {
     if (drag && event.pointerId === drag.id) {
-      motion.tYaw += (event.clientX - drag.x) * LOOK_PER_PIXEL;
+      // Grab and pull: the view turns against the drag.
+      motion.tYaw -= (event.clientX - drag.x) * LOOK_PER_PIXEL;
       motion.tPitch = THREE.MathUtils.clamp(
-        motion.tPitch + (event.clientY - drag.y) * LOOK_PER_PIXEL,
+        motion.tPitch - (event.clientY - drag.y) * LOOK_PER_PIXEL,
         CAMERA_LIMITS.minPitch,
         CAMERA_LIMITS.maxPitch,
       );
