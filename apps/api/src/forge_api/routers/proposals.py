@@ -8,6 +8,9 @@ tier's assertion (`require_identity`, 401 without one), and the settings and `/a
 routes an allowlisted GitHub id (`require_admin`, 403 admin_only). Every identity-bearing
 route records its caller as a member first (routers/members.py).
 
+`POST /{id}/admin/house-draft` (Phase 6) asks the house model for a new draft of a passed
+proposal's task and answers 202 with the HouseDraft: services/house.py does the work.
+
 Bodies are read by routers/members.json_body, so a bad one is `400 invalid_request` with
 `fields`. A proposal number that isn't one is 404 proposal_not_found, like a missing one;
 a paging cursor that isn't one (`?decidedBefore=`, `?before=`) is 400 invalid_request.
@@ -22,6 +25,7 @@ from forge_api.models import (
     CommentRequest,
     ConsentRequest,
     DraftTaskRequest,
+    HouseDraft,
     NewProposal,
     ProposalCommentPage,
     ProposalDetail,
@@ -258,3 +262,16 @@ def draft_task(
 )
 def publish_task(proposal_id: str, floor: Floor, admin: AdminMember) -> ProposalDetail:
     return floor.publish(admin, proposals_service.parse_id(proposal_id))
+
+
+@router.post(
+    "/{proposal_id}/admin/house-draft",
+    status_code=202,
+    response_model=HouseDraft,
+    response_model_exclude_none=True,
+)
+def house_draft(proposal_id: str, floor: Floor, admin: AdminMember) -> HouseDraft:
+    """Ask the house model for a new draft (no body): 202 with the house's state, queued.
+    409 wrong_state unless passed and not yet published, 409 house_busy, 503 house_off,
+    429 rate_limited (with Retry-After)."""
+    return floor.request_house_draft(admin, proposals_service.parse_id(proposal_id))

@@ -1,0 +1,16 @@
+{
+  "name": "bug-wizard-copy",
+  "kind": "sample",
+  "title": "Plain words in the report-a-problem steps",
+  "pitch": "The steps you go through to report a problem use developer words that most of us don't understand. Please reword every step in plain English, keep each one short, and don't break whatever the team reads from the reports that come in.",
+  "expect": {
+    "verdict": [
+      "ready",
+      "needs_clarification"
+    ],
+    "sizes": [
+      "XS",
+      "S"
+    ]
+  }
+}

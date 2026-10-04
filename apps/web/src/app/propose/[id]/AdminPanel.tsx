@@ -12,12 +12,22 @@
  * panel says where the switch is. The draft task's tier floor is T0, the only
  * one open while every contributor is T0; its plain summary starts as the
  * mover's pitch and is what agents read as the task, which the form says.
+ *
+ * Phase 6: from the moment it passes, the house model's draft (`./HouseDraft`)
+ * sits above the form, and read-only once the task is published. What the
+ * block says of the form comes from comparing the house's draft with the
+ * form and with the saved draft. The form's text never changes under the
+ * admin, with one exception: the house's first fill of the plain draft the
+ * pass made, while the form still shows that plain draft untouched. Any other
+ * change to the saved draft (a re-draft, another admin's save) leaves the form
+ * as it is, and the block offers "Use the house draft".
  */
 
 import Link from 'next/link';
 import { useState } from 'react';
+import type { Dispatch, SetStateAction } from 'react';
 import { PROPOSAL_LIMITS, REWARD_CLASSES, SIZES } from '@forge/shared';
-import type { DraftTask, DraftTaskRequest, RewardClass, Size } from '@forge/shared';
+import type { DraftTask, DraftTaskRequest, HouseDraft, RewardClass, Size } from '@forge/shared';
 
 import { SIZE_FILTER_LABEL, tierFloorLabel } from '../../../lib/format';
 import type { DisplayDetail } from '../../../lib/proposals';
@@ -25,12 +35,17 @@ import {
   OPEN_TIER_FLOOR,
   checkDraft,
   criteriaLines,
+  draftFormKey,
   draftFormOf,
+  houseFormOf,
+  housePlace,
   publishTitleProblem,
 } from '../../../lib/proposals-format';
 import type { DraftField, DraftForm, ProposalAction } from '../../../lib/proposals-format';
 import { CountedField } from '../fields';
 import styles from '../propose.module.css';
+import { HOUSE_STATUS_ID, HOUSE_USE_ID, HouseDraftBlock } from './HouseDraft';
+import type { HouseForm, HouseMode } from './HouseDraft';
 import { Busy, OutcomeLine, useFocusNext } from './problem';
 import type { Outcome } from './problem';
 
@@ -47,28 +62,36 @@ export function AdminPanel({
   testTimers,
   busy,
   outcome,
+  houseUnchecked,
   onEndDebate,
   onCloseVote,
   onSaveDraft,
   onPublish,
+  onHouseDraft,
 }: {
   detail: DisplayDetail;
   /** Whether Test timers are on (`/me`): null until known. */
   testTimers: boolean | null;
   busy: ProposalAction | null;
   outcome: Outcome | null;
+  /** The page's reads keep failing, so it can't check on the house model's draft: the block says so while it drafts. */
+  houseUnchecked: boolean;
   onEndDebate: () => Promise<boolean>;
   onCloseVote: () => Promise<boolean>;
   onSaveDraft: (draft: DraftTaskRequest) => Promise<boolean>;
   onPublish: (draft: DraftTaskRequest) => Promise<boolean>;
+  /** "Draft it again": the house model drafts the task once more. */
+  onHouseDraft: () => Promise<boolean>;
 }) {
-  const { proposal, draft } = detail;
+  const { proposal, draft, house } = detail;
   const focusNext = useFocusNext();
   const [confirming, setConfirming] = useState<'end' | 'close' | null>(null);
   const working = busy !== null;
   const taskId = detail.taskId ?? draft?.taskId;
   const drafting = proposal.state === 'passed' && taskId === undefined;
   const running = proposal.state === 'debate' || proposal.state === 'voting';
+  /** Past drafting (published: building or shipped), the house's draft stays, read-only. */
+  const published = !drafting && (proposal.state === 'passed' || proposal.state === 'building' || proposal.state === 'shipped');
 
   const confirm = (run: () => Promise<boolean>): void => {
     if (working) return;
@@ -171,10 +194,26 @@ export function AdminPanel({
 
       {drafting &&
         (draft === undefined ? (
-          <p className="muted">The draft task isn&apos;t here yet. Reload the page in a moment.</p>
+          <>
+            {house !== undefined && (
+              <HouseSection house={house} mode="edit" busy={busy} unchecked={houseUnchecked} onDraftAgain={onHouseDraft} />
+            )}
+            <p className="muted">The draft task isn&apos;t here yet. Reload the page in a moment.</p>
+          </>
         ) : (
-          <DraftTaskForm key={proposal.id} draft={draft} busy={busy} onSave={onSaveDraft} onPublish={onPublish} />
+          <Drafting
+            key={proposal.id}
+            draft={draft}
+            house={house}
+            busy={busy}
+            houseUnchecked={houseUnchecked}
+            onSave={onSaveDraft}
+            onPublish={onPublish}
+            onHouseDraft={onHouseDraft}
+          />
         ))}
+
+      {published && house !== undefined && <HouseSection house={house} mode="read" busy={busy} unchecked={houseUnchecked} />}
 
       {taskId !== undefined && (
         <p>
@@ -191,6 +230,148 @@ export function AdminPanel({
   );
 }
 
+/** The house model's draft in the admin panel, under its own heading. */
+function HouseSection({
+  house,
+  mode,
+  busy,
+  unchecked,
+  form,
+  onDraftAgain,
+}: {
+  house: HouseDraft;
+  mode: Exclude<HouseMode, 'practice'>;
+  busy: ProposalAction | null;
+  unchecked: boolean;
+  form?: HouseForm | undefined;
+  onDraftAgain?: () => Promise<boolean>;
+}) {
+  return (
+    <div className={styles.houseGroup} role="group" aria-labelledby="house-heading">
+      <h3 id="house-heading" className={styles.subTitle}>
+        House draft
+      </h3>
+      <HouseDraftBlock house={house} mode={mode} busy={busy} unchecked={unchecked} form={form} onDraftAgain={onDraftAgain} />
+    </div>
+  );
+}
+
+type DraftErrors = Partial<Record<DraftField, string>>;
+
+/** What "Use the house draft" replaced, when that was unsaved changes, and what it put in the form instead (its key). */
+interface Replaced {
+  form: DraftForm;
+  filled: string;
+}
+
+/**
+ * A passed proposal before it is published: the house model's draft, then
+ * the draft task's form. The form's text lives here, so "Use the house draft"
+ * can fill it, and so the house block can say where the house's draft is.
+ *
+ * When the saved draft changes under the form, the form follows it only if it
+ * is still the plain draft the pass made, untouched: the house's first fill,
+ * while the page is open. Otherwise the form stays as it is, whatever changed
+ * the saved draft (a re-draft, another admin's save), and the house block
+ * offers "Use the house draft": the form's text never changes under the admin.
+ */
+function Drafting({
+  draft,
+  house,
+  busy,
+  houseUnchecked,
+  onSave,
+  onPublish,
+  onHouseDraft,
+}: {
+  draft: DraftTask;
+  house: HouseDraft | undefined;
+  busy: ProposalAction | null;
+  houseUnchecked: boolean;
+  onSave: (draft: DraftTaskRequest) => Promise<boolean>;
+  onPublish: (draft: DraftTaskRequest) => Promise<boolean>;
+  onHouseDraft: () => Promise<boolean>;
+}) {
+  const focusNext = useFocusNext();
+  const [form, setForm] = useState<DraftForm>(() => draftFormOf(draft));
+  const [errors, setErrors] = useState<DraftErrors>({});
+  /** The admin has changed the form since it was last filled (from the saved draft, or by the house block). */
+  const [edited, setEdited] = useState(false);
+  const [replaced, setReplaced] = useState<Replaced | null>(null);
+  const saved = draftFormKey(draftFormOf(draft));
+  /** The saved draft the form last saw, and whether it was the plain one the pass made (it has no criteria yet). */
+  const [followed, setFollowed] = useState(() => ({ key: saved, plain: draft.acceptanceCriteria.length === 0 }));
+
+  if (followed.key !== saved) {
+    // The saved draft changed: a save went through, or the house model (or another admin) changed it.
+    setFollowed({ key: saved, plain: draft.acceptanceCriteria.length === 0 });
+    if (followed.plain && draftFormKey(form) === followed.key) {
+      setForm(draftFormOf(draft));
+      setErrors({});
+      setEdited(false);
+      setReplaced(null);
+    }
+  }
+
+  /** The admin's own changes to the form. */
+  const edit: Dispatch<SetStateAction<DraftForm>> = (update) => {
+    setForm(update);
+    setEdited(true);
+    setReplaced(null);
+  };
+
+  const spec = house?.spec;
+  const place = spec === undefined ? null : housePlace(spec, form, draft);
+
+  const fillFromHouse = (): void => {
+    if (spec === undefined) return;
+    const filled: DraftForm = { ...form, ...houseFormOf(spec) };
+    // Unsaved changes it replaces can be put back ("Undo").
+    setReplaced(draftFormKey(form) === saved ? null : { form, filled: draftFormKey(filled) });
+    setForm(filled);
+    setErrors({});
+    setEdited(false);
+    // Focus goes to the line saying what happened, never into the form, where Enter would save it.
+    focusNext(HOUSE_STATUS_ID);
+  };
+
+  // "Undo" is offered while the form still holds just what "Use the house draft" put there, unsaved.
+  const undoUse =
+    replaced !== null && place !== null && place.inForm && !place.inSaved && draftFormKey(form) === replaced.filled
+      ? (): void => {
+          setForm(replaced.form);
+          setErrors({});
+          setEdited(true);
+          setReplaced(null);
+          focusNext(HOUSE_USE_ID);
+        }
+      : undefined;
+
+  return (
+    <>
+      {house !== undefined && (
+        <HouseSection
+          house={house}
+          mode="edit"
+          busy={busy}
+          unchecked={houseUnchecked}
+          form={place === null ? undefined : { ...place, edited, onUse: fillFromHouse, onUndo: undoUse }}
+          onDraftAgain={onHouseDraft}
+        />
+      )}
+      <DraftTaskForm
+        form={form}
+        onForm={edit}
+        errors={errors}
+        onErrors={setErrors}
+        busy={busy}
+        onSave={onSave}
+        onPublish={onPublish}
+      />
+    </>
+  );
+}
+
 const DRAFT_FIELD_ID: Readonly<Record<DraftField, string>> = {
   title: 'draft-title',
   civilianSummary: 'draft-summary',
@@ -198,25 +379,29 @@ const DRAFT_FIELD_ID: Readonly<Record<DraftField, string>> = {
 };
 
 function DraftTaskForm({
-  draft,
+  form,
+  onForm,
+  errors,
+  onErrors,
   busy,
   onSave,
   onPublish,
 }: {
-  draft: DraftTask;
+  form: DraftForm;
+  onForm: Dispatch<SetStateAction<DraftForm>>;
+  errors: DraftErrors;
+  onErrors: Dispatch<SetStateAction<DraftErrors>>;
   busy: ProposalAction | null;
   onSave: (draft: DraftTaskRequest) => Promise<boolean>;
   onPublish: (draft: DraftTaskRequest) => Promise<boolean>;
 }) {
-  const [form, setForm] = useState<DraftForm>(() => draftFormOf(draft));
-  const [errors, setErrors] = useState<Partial<Record<DraftField, string>>>({});
   const working = busy !== null;
   const lines = criteriaLines(form.criteria).length;
 
   const set = <K extends keyof DraftForm>(key: K) =>
     (value: DraftForm[K]): void => {
       if (working) return;
-      setForm((current) => ({ ...current, [key]: value }));
+      onForm((current) => ({ ...current, [key]: value }));
     };
 
   const checked = (publishing: boolean): DraftTaskRequest | null => {
@@ -226,11 +411,11 @@ function DraftTaskForm({
     if (branch !== null) found.title = branch;
     const first = (['title', 'civilianSummary', 'acceptanceCriteria'] as const).find((field) => found[field] !== undefined);
     if (!result.ok || first !== undefined) {
-      setErrors(found);
+      onErrors(found);
       if (first !== undefined) document.getElementById(DRAFT_FIELD_ID[first])?.focus();
       return null;
     }
-    setErrors({});
+    onErrors({});
     return result.value;
   };
 

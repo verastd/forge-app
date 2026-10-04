@@ -1,9 +1,20 @@
 import { expect, test } from '@playwright/test';
 
-import { NotificationListSchema, PROPOSAL_STATES, ProposalDetailSchema } from '../../packages/shared/dist/index.js';
-import type { ProposalCard, ProposalDetail, ProposalList } from '../../packages/shared/dist/index.js';
+import {
+  HOUSE_FAILURE_REASONS,
+  HOUSE_OFF_REASONS,
+  HOUSE_STATUSES,
+  HOUSE_VERDICTS,
+  HouseDraftSchema,
+  NotificationListSchema,
+  PROPOSAL_EVENT_KINDS,
+  PROPOSAL_STATES,
+  ProposalDetailSchema,
+} from '../../packages/shared/dist/index.js';
+import type { HouseDraft, HouseSpec, ProposalCard, ProposalDetail, ProposalList } from '../../packages/shared/dist/index.js';
 import { HELLO_TIMEOUT_MS, MEMBERS_HELLO_PATH, sayHello } from '../../apps/web/src/app/auth/callback/members-hello';
 import { ApiError, RequestError, mayHaveHappened as contributeMayHaveHappened } from '../../apps/web/src/lib/api';
+import { formatDate } from '../../apps/web/src/lib/format';
 import { Freshness } from '../../apps/web/src/lib/freshness';
 import {
   DisplayDetailSchema,
@@ -13,10 +24,16 @@ import {
   failureOf,
   mayHaveHappened,
   postComment,
+  requestHouseDraft,
   secondProposal,
 } from '../../apps/web/src/lib/proposals';
 import {
   FLOOR_SECTIONS,
+  HOUSE_DRAFTS_PER_PROPOSAL,
+  HOUSE_FORM_LINE,
+  HOUSE_MODEL_SHOWN,
+  HOUSE_VERDICT_LABEL,
+  HOUSE_VERDICT_TONE,
   OPEN_TIER_FLOOR,
   PROPOSAL_ERROR_CODES,
   checkComment,
@@ -30,18 +47,28 @@ import {
   decidedCursor,
   describeProposalError,
   didNotGoThrough,
+  draftFormKey,
   draftFormOf,
+  eventLabel,
   eventText,
   floorCards,
   floorHasMore,
   foldFloor,
   formatTimeLeft,
   groupBySection,
+  houseDraftAsked,
+  houseDraftedLine,
+  houseFormOf,
+  houseFormWords,
+  housePlace,
+  houseStatusLine,
   isActive,
   isAdminEvent,
+  isHouseWorking,
   mergeCards,
   mergeComments,
   nextDeadlineRead,
+  notReadBack,
   pausedLabel,
   publishTitleProblem,
   quorumLine,
@@ -58,6 +85,8 @@ import {
 } from '../../apps/web/src/lib/proposals-format';
 import type { FloorList, ProposalAction, ReadBack } from '../../apps/web/src/lib/proposals-format';
 import {
+  HOUSE_DRAFTED_MESSAGE,
+  PRACTICE_HOUSE_MODEL,
   PRACTICE_ME,
   PRACTICE_MEMBERS,
   PRACTICE_REVISION,
@@ -67,6 +96,7 @@ import {
   practiceConsent,
   practiceDetail,
   practiceFloor,
+  practiceHouse,
   practiceList,
   practiceSecond,
   practiceVote,
@@ -81,7 +111,8 @@ import { TICK_MS, subscribeTicker, tickerNow, tickerState } from '../../apps/web
  * Contribute hand-off: the floor's sections, the countdown, the plain
  * sentence for every error code, the checks on what members send, the bell's
  * link guard, the practice floor's rules, and the sign-in callback's
- * best-effort members hello.
+ * best-effort members hello. Phase 6 adds the house model's words, its
+ * lenient reading, "Draft it again" and the practice floor's house draft.
  */
 
 const SECOND = 1000;
@@ -233,6 +264,7 @@ test.describe('the error map', () => {
     'close_vote',
     'save_draft',
     'publish',
+    'house_draft',
     'settings',
     'notifications',
   ];
@@ -518,7 +550,13 @@ test.describe('the practice floor', () => {
     expect(passed.detail.proposal.state).toBe('passed');
     expect(passed.detail.proposal.deadline).toBeUndefined();
     expect(passed.detail.you).toMatchObject({ consent: 'consented', canConsent: false, canComment: false });
-    expect(passed.detail.events.map((entry) => entry.kind).slice(-4)).toEqual(['consented', 'consented', 'passed', 'task_drafted']);
+    expect(passed.detail.events.map((entry) => entry.kind).slice(-5)).toEqual([
+      'consented',
+      'consented',
+      'passed',
+      'task_drafted',
+      'house_drafted',
+    ]);
   });
 
   test('objecting is final and sends it to a vote after debate; the rules refuse the rest', () => {
@@ -933,5 +971,356 @@ test.describe('M1 and M3 (rules) · the pause and the 30-day quorum, in words', 
     );
     expect(quorumLine(1)).toContain('so it needs 1 ballot (Abstain counts).');
     expect(quorumLine(undefined)).toBe('Quorum counts the members active in the last 30 days when it was seconded, with its mover and seconder.');
+  });
+});
+
+/* --- Phase 6: the house model's draft (contract §10) ------------------------------------------ */
+
+const SPEC: HouseSpec = {
+  title: 'Show my properties on a map',
+  civilianSummary: 'A map view in the Data app.',
+  acceptanceCriteria: ['One pin per property', "A pin shows its property's row"],
+  size: 'M',
+  tierFloor: 'T1',
+  scopeIn: ['apps/web/src/app/apps/data/**'],
+  scopeOut: ['apps/api/**'],
+  risks: [],
+  questions: ['Should a pin show the address?'],
+  verdict: 'ready',
+  verdictReason: 'Clear, and small enough for one task.',
+};
+
+test.describe('Phase 6 · the house model in words', () => {
+  test('every status and reason has its sentence; done has none, the draft says the rest', () => {
+    expect(houseStatusLine({ status: 'off', reason: 'not_configured' })).toBe(
+      "The house model is off: FORGE's server has no key for it yet. Write the draft yourself.",
+    );
+    expect(houseStatusLine({ status: 'off', reason: 'switched_off' })).toBe(
+      "The house model is off: it is switched off on FORGE's server. Write the draft yourself.",
+    );
+    expect(houseStatusLine({ status: 'off' })).toBe('The house model is off. Write the draft yourself.');
+    // The schema doesn't pair reasons with statuses: one that doesn't go with `off` is left out.
+    expect(houseStatusLine({ status: 'off', reason: 'refused' })).toBe('The house model is off. Write the draft yourself.');
+    // Queued may be a wait to try again after a failure (review L8a): it isn't drafting yet.
+    expect(houseStatusLine({ status: 'queued' })).toBe('The house model will draft this task shortly…');
+    expect(houseStatusLine({ status: 'running' })).toBe('The house model is drafting this task…');
+    // The daily limit counts a UTC day (review L8c).
+    expect(houseStatusLine({ status: 'failed', reason: 'daily_limit' })).toBe(
+      'The house model reached its daily limit before it got to this task. Draft it again after midnight UTC, or write it yourself.',
+    );
+    expect(houseStatusLine({ status: 'done' })).toBeNull();
+    const failed = new Set<string>();
+    for (const reason of HOUSE_FAILURE_REASONS) {
+      const line = houseStatusLine({ status: 'failed', reason }) ?? '';
+      expect(line, reason).toMatch(/^[A-Z].*\.$/);
+      failed.add(line);
+    }
+    expect(failed.size).toBe(HOUSE_FAILURE_REASONS.length);
+    const unknown = "The house model hasn't drafted this task yet. Ask for a draft with Draft it again, or write it yourself.";
+    expect(houseStatusLine({ status: 'failed' })).toBe(unknown);
+    expect(failed.has(unknown)).toBe(false);
+    expect(houseStatusLine({ status: 'failed', reason: 'not_configured' })).toBe(unknown);
+    for (const reason of HOUSE_OFF_REASONS) expect(houseStatusLine({ status: 'off', reason }), reason).toContain(': ');
+    for (const status of HOUSE_STATUSES) expect(isHouseWorking(status), status).toBe(status === 'queued' || status === 'running');
+  });
+
+  test('every verdict has its chip, and who drafted it says when', () => {
+    expect(HOUSE_VERDICTS.map((verdict) => HOUSE_VERDICT_LABEL[verdict])).toEqual(['Ready', 'Needs answers from the mover', 'Not feasible']);
+    expect(HOUSE_VERDICTS.map((verdict) => HOUSE_VERDICT_TONE[verdict])).toEqual(['ok', 'warn', 'danger']);
+    expect(houseDraftedLine({ model: 'claude-opus-5-5', draftedAt: '2026-10-03T12:00:00Z' })).toBe(
+      `Drafted by claude-opus-5-5 on ${formatDate('2026-10-03T12:00:00Z')}.`,
+    );
+    expect(formatDate('2026-10-03T12:00:00Z')).toContain('2026');
+    expect(houseDraftedLine({ model: 'claude-opus-5-5' })).toBe('Drafted by claude-opus-5-5.');
+    expect(houseDraftedLine({ draftedAt: '2026-10-03T12:00:00Z' })).toBe(`Drafted by the house model on ${formatDate('2026-10-03T12:00:00Z')}.`);
+    expect(houseDraftedLine({ model: ' ' })).toBeNull();
+    expect(houseDraftedLine({})).toBeNull();
+    // Review L9: the API doesn't limit either, so a model name is cut short, and a date that isn't one is left out.
+    expect(HOUSE_MODEL_SHOWN).toBe(100);
+    expect(houseDraftedLine({ model: `m${'x'.repeat(10_000)}`, draftedAt: '2026-10-03T12:00:00Z' })).toBe(
+      `Drafted by m${'x'.repeat(98)}… on ${formatDate('2026-10-03T12:00:00Z')}.`,
+    );
+    expect(houseDraftedLine({ model: 'x'.repeat(100) })).toBe(`Drafted by ${'x'.repeat(100)}.`);
+    // Cut by characters, never inside one.
+    expect(houseDraftedLine({ model: '🚀'.repeat(150) })).toBe(`Drafted by ${'🚀'.repeat(99)}….`);
+    expect(houseDraftedLine({ model: 'claude-opus-5-5', draftedAt: `not-a-date-${'d'.repeat(500)}` })).toBe('Drafted by claude-opus-5-5.');
+    // With neither a model nor a date, there is nothing to say.
+    expect(houseDraftedLine({ draftedAt: 'yesterday' })).toBeNull();
+  });
+
+  test('"Use the house draft" takes the title, summary, criteria and size; the form key ignores spaces and blank lines', () => {
+    expect(houseFormOf(SPEC)).toEqual({
+      title: SPEC.title,
+      civilianSummary: SPEC.civilianSummary,
+      criteria: 'One pin per property\nA pin shows its property\'s row',
+      size: 'M',
+    });
+    const form = { ...draftFormOf({ ...SPEC, rewardClass: 'R2', tierFloor: 'T0' }), ...houseFormOf(SPEC) };
+    expect(form.rewardClass).toBe('R2');
+    expect(form.tierFloor).toBe(OPEN_TIER_FLOOR);
+    const messy = { ...form, title: `  ${form.title} `, criteria: `\n${form.criteria}\n\n  ` };
+    expect(draftFormKey(messy)).toBe(draftFormKey(form));
+    expect(draftFormKey({ ...form, rewardClass: 'R3' })).not.toBe(draftFormKey(form));
+    expect(draftFormKey({ ...form, size: 'XS' })).not.toBe(draftFormKey(form));
+  });
+
+  test('where its draft is comes from the texts, never from appliedToDraft; each place has its line (review M1–M3)', () => {
+    const own = { title: 'Map view', civilianSummary: 'Pins.', acceptanceCriteria: ['A pin each'], size: 'S' as const, tierFloor: 'T0' as const, rewardClass: 'R1' as const };
+    const filled = { ...own, title: SPEC.title, civilianSummary: SPEC.civilianSummary, acceptanceCriteria: SPEC.acceptanceCriteria, size: SPEC.size };
+    const houseForm = { ...draftFormOf(own), ...houseFormOf(SPEC) };
+    // The reward is the admin's, and spaces or blank lines don't count.
+    expect(housePlace(SPEC, houseForm, filled)).toEqual({ inForm: true, inSaved: true });
+    expect(housePlace(SPEC, { ...houseForm, rewardClass: 'R4', title: ` ${SPEC.title} `, criteria: `${houseForm.criteria}\n\n` }, filled)).toEqual({
+      inForm: true,
+      inSaved: true,
+    });
+    expect(housePlace(SPEC, houseForm, own)).toEqual({ inForm: true, inSaved: false });
+    expect(housePlace(SPEC, draftFormOf(filled), own)).toEqual({ inForm: true, inSaved: false });
+    expect(housePlace(SPEC, draftFormOf(own), filled)).toEqual({ inForm: false, inSaved: true });
+    expect(housePlace(SPEC, { ...houseForm, size: 'XS' }, own)).toEqual({ inForm: false, inSaved: false });
+
+    const use = (words: { offerUse: boolean }) => words.offerUse;
+    // In the form and saved: check it. In the form only: the status line says so, unsaved. Nothing to use either way.
+    expect(houseFormWords({ inForm: true, inSaved: true }, false, true)).toEqual({ line: HOUSE_FORM_LINE.inBoth, status: '', offerUse: false });
+    expect(houseFormWords({ inForm: true, inSaved: false }, true, false)).toEqual({ line: null, status: HOUSE_FORM_LINE.inFormOnly, offerUse: false });
+    // Not in the form: say what the form holds, and always offer "Use the house draft".
+    expect(houseFormWords({ inForm: false, inSaved: true }, true, true)).toEqual({ line: HOUSE_FORM_LINE.savedOverEdits, status: '', offerUse: true });
+    expect(houseFormWords({ inForm: false, inSaved: true }, true, false)).toEqual({ line: HOUSE_FORM_LINE.savedOverEarlier, status: '', offerUse: true });
+    expect(houseFormWords({ inForm: false, inSaved: false }, true, false)).toEqual({ line: HOUSE_FORM_LINE.changedSince, status: '', offerUse: true });
+    expect(houseFormWords({ inForm: false, inSaved: false }, false, true)).toEqual({ line: HOUSE_FORM_LINE.notReplaced, status: '', offerUse: true });
+    for (const inSaved of [false, true]) {
+      for (const applied of [false, true]) {
+        for (const edited of [false, true]) {
+          expect(use(houseFormWords({ inForm: false, inSaved }, applied, edited)), `${inSaved} ${applied} ${edited}`).toBe(true);
+          expect(use(houseFormWords({ inForm: true, inSaved }, applied, edited)), `${inSaved} ${applied} ${edited}`).toBe(false);
+        }
+      }
+    }
+    expect(HOUSE_FORM_LINE).toEqual({
+      inBoth: 'Its draft is in the form below. Check every line before you publish.',
+      inFormOnly: 'The house draft is in the form below. Nothing is saved until you save or publish.',
+      savedOverEdits: 'Its draft is saved, but the form below still has the changes you were making.',
+      savedOverEarlier: 'Its draft is saved, but the form below still has the earlier draft.',
+      changedSince: 'Its draft filled the draft task, but changes have been saved since.',
+      notReplaced: "You had already saved the draft, so it wasn't replaced.",
+    });
+  });
+
+  test('"Draft it again": each refusal in its own words', () => {
+    expect(describeProposalError('house_busy', 'house_draft')).toBe(
+      "The house model is already drafting this task, so nothing changed. Its new draft shows here when it's ready.",
+    );
+    expect(describeProposalError({ code: 'house_off', reason: 'not_configured' }, 'house_draft')).toBe(
+      "The house model is off (FORGE's server has no key for it yet), so nothing changed. Write the draft yourself.",
+    );
+    expect(describeProposalError({ code: 'house_off', reason: 'switched_off' }, 'house_draft')).toBe(
+      "The house model is off (it is switched off on FORGE's server), so nothing changed. Write the draft yourself.",
+    );
+    expect(describeProposalError({ code: 'house_off', reason: '<b>new</b>' }, 'house_draft')).toBe(
+      'The house model is off, so nothing changed. Write the draft yourself.',
+    );
+    expect(describeProposalError({ code: 'wrong_state', state: 'building' }, 'house_draft')).toBe(
+      "It can't be drafted again (it is being built): the house model drafts a task only after it passes and before it is published. Nothing changed.",
+    );
+    expect(HOUSE_DRAFTS_PER_PROPOSAL).toBe(5);
+    expect(describeProposalError({ code: 'rate_limited', limit: 5, retryAfterSeconds: 3 * 3600 }, 'house_draft')).toBe(
+      'The house model has drafted this proposal as often as FORGE allows in a day (5). Try again in about 3 hours.',
+    );
+    expect(describeProposalError({ code: 'rate_limited', limit: 30, retryAfterSeconds: 300 }, 'house_draft')).toBe(
+      'The house model has made as many drafts today as FORGE allows across the floor (30). Try again in about 5 minutes.',
+    );
+    expect(describeProposalError({ code: 'rate_limited' }, 'house_draft')).toBe(
+      'The house model has drafted as often as FORGE allows just now. Wait a little, then try again.',
+    );
+    // Review L8(d): the API names the limit it hit (`scope`), so a daily limit set to 5 reads as the daily one.
+    expect(describeProposalError({ code: 'rate_limited', limit: 5, scope: 'daily', retryAfterSeconds: 300 }, 'house_draft')).toBe(
+      'The house model has made as many drafts today as FORGE allows across the floor (5). Try again in about 5 minutes.',
+    );
+    expect(describeProposalError({ code: 'rate_limited', limit: 5, scope: 'proposal', retryAfterSeconds: 300 }, 'house_draft')).toBe(
+      'The house model has drafted this proposal as often as FORGE allows in a day (5). Try again in about 5 minutes.',
+    );
+    expect(describeProposalError({ code: 'rate_limited', scope: 'daily' }, 'house_draft')).toBe(
+      'The house model has made as many drafts today as FORGE allows across the floor. Wait a little, then try again.',
+    );
+    expect(describeProposalError({ code: 'rate_limited', scope: 'proposal' }, 'house_draft')).toBe(
+      'The house model has drafted this proposal as often as FORGE allows in a day. Wait a little, then try again.',
+    );
+    // Other actions never read it.
+    expect(describeProposalError({ code: 'rate_limited', limit: 10, scope: 'daily' }, 'comment')).toBe(
+      "You've commented on this proposal as often as FORGE allows in an hour (10). Wait a little, then try again.",
+    );
+    expect(describeProposalError('admin_only', 'house_draft')).toBe("Only FORGE's admins can do that.");
+    expect(didNotGoThrough('house_draft')).toBe("It didn't go through, so nothing changed. Please try again.");
+  });
+
+  test('"Draft it again" went through: drafting, "again" only after a draft, or finished already (review L8b, L4)', () => {
+    expect(houseDraftAsked(true, { status: 'queued' })).toBe("The house model is drafting it again. Its new draft shows below when it's ready.");
+    expect(houseDraftAsked(true, undefined)).toBe("The house model is drafting it again. Its new draft shows below when it's ready.");
+    expect(houseDraftAsked(false, { status: 'running' })).toBe("The house model is drafting this task. Its draft shows below when it's ready.");
+    for (const status of ['done', 'failed', 'off'] as const) {
+      expect(houseDraftAsked(true, { status }), status).toBe(
+        'It went through, and the house model has already finished. The house draft below shows how it went.',
+      );
+    }
+    // A lost answer whose read back failed too: the page can't say yet.
+    expect(notReadBack()).toBe("FORGE didn't hear back in time, so it may have gone through. The page couldn't check just now; it tries again shortly.");
+  });
+
+  test('after a lost answer, the read back says whether "Draft it again" went through: any change in the house (review L4)', () => {
+    type House = Pick<HouseDraft, 'status' | 'reason' | 'draftedAt'>;
+    const back = (house?: House): ReadBack => ({
+      proposal: { state: 'passed', title: 'Map' },
+      pitch: 'Pins.',
+      comments: [],
+      ...(house === undefined ? {} : { house }),
+    });
+    const when = '2026-10-03T09:30:00Z';
+    const asked = (before?: House) => ({ action: 'house_draft' as const, before });
+    const done = { status: 'done' as const, draftedAt: when };
+    // Can't tell without the house, before or after.
+    expect(wentThrough(asked(done), back(), 'x')).toBeNull();
+    expect(wentThrough(asked(undefined), back(done), 'x')).toBeNull();
+    // Drafting now.
+    expect(wentThrough(asked(done), back({ status: 'queued', draftedAt: when }), 'x')).toBe(true);
+    expect(wentThrough(asked(done), back({ status: 'running' }), 'x')).toBe(true);
+    // Just as it was: it didn't happen.
+    expect(wentThrough(asked(done), back(done), 'x')).toBe(false);
+    expect(wentThrough(asked({ status: 'failed' }), back({ status: 'failed' }), 'x')).toBe(false);
+    expect(wentThrough(asked({ status: 'failed', reason: 'refused', draftedAt: when }), back({ status: 'failed', reason: 'refused', draftedAt: when }), 'x')).toBe(false);
+    // So quick that a newer draft has landed already, or the new job has failed already (P15).
+    expect(wentThrough(asked(done), back({ status: 'done', draftedAt: '2026-10-04T08:00:00Z' }), 'x')).toBe(true);
+    expect(wentThrough(asked(done), back({ status: 'failed', reason: 'refused', draftedAt: when }), 'x')).toBe(true);
+    expect(wentThrough(asked({ status: 'failed', reason: 'unavailable' }), back({ status: 'failed', reason: 'refused' }), 'x')).toBe(true);
+    expect(wentThrough(asked({ status: 'failed' }), back({ status: 'failed', reason: 'daily_limit' }), 'x')).toBe(true);
+  });
+
+  test('the timeline: every kind in the contract has a label, an admin’s are "Admin", and house_drafted is a plain line', () => {
+    for (const kind of PROPOSAL_EVENT_KINDS) {
+      expect(eventLabel(kind), kind).toBe(kind.startsWith('admin_') || kind.startsWith('test_timers_') ? 'Admin' : null);
+    }
+    expect(eventLabel('house_drafted')).toBeNull();
+    expect(isAdminEvent('house_drafted')).toBe(false);
+    expect(eventLabel('proposal_archived')).toBeNull();
+    expect(eventLabel('__proto__')).toBeNull();
+    expect(eventLabel('constructor')).toBeNull();
+  });
+});
+
+test.describe('Phase 6 · a house draft that breaks the contract is dropped, and the proposal still shows', () => {
+  const HOUSE = { status: 'done', spec: SPEC, model: 'claude-opus-5-5', draftedAt: '2026-10-03T09:30:00Z', appliedToDraft: true };
+
+  test('a good one is kept; a bad one is dropped from what the page shows, while the contract itself stays strict', () => {
+    const good = DisplayDetailSchema.safeParse({ ...DETAIL, house: HOUSE });
+    expect(good.success && good.data.house).toEqual(HOUSE);
+    const none = DisplayDetailSchema.safeParse(DETAIL);
+    expect(none.success && none.data.house).toBeUndefined();
+    for (const [name, house] of [
+      ['an unknown status', { status: 'thinking' }],
+      ['null', null],
+      ['a number', 7],
+      ['too many criteria', { ...HOUSE, spec: { ...SPEC, acceptanceCriteria: Array.from({ length: 11 }, (_, index) => `C${index}`) } }],
+      ['no criteria', { ...HOUSE, spec: { ...SPEC, acceptanceCriteria: [] } }],
+      ['a title past 100 characters', { ...HOUSE, spec: { ...SPEC, title: 't'.repeat(101) } }],
+      ['an unknown reason', { status: 'failed', reason: 'exploded' }],
+      ['appliedToDraft as 1', { ...HOUSE, appliedToDraft: 1 }],
+    ] as const) {
+      expect(ProposalDetailSchema.safeParse({ ...DETAIL, house }).success, name).toBe(false);
+      const shown = DisplayDetailSchema.safeParse({ ...DETAIL, house });
+      expect(shown.success, name).toBe(true);
+      expect(shown.success && shown.data.house, name).toBeUndefined();
+      expect(shown.success && shown.data.proposal.title, name).toBe('Map');
+    }
+    // Review L5: `done` with no spec has nothing to show, so it reads as a task the house hasn't drafted yet.
+    const empty = DisplayDetailSchema.safeParse({ ...DETAIL, house: { status: 'done', model: 'claude-opus-5-5', appliedToDraft: true } });
+    expect(empty.success && empty.data.house).toEqual({ status: 'failed' });
+    expect(houseStatusLine({ status: 'failed' })).toBe(
+      "The house model hasn't drafted this task yet. Ask for a draft with Draft it again, or write it yourself.",
+    );
+  });
+
+  test('"Draft it again" posts with no body, and reads the answer as the house’s new state', async () => {
+    const sent = await withFetch(
+      () => Response.json({ status: 'queued' }, { status: 202 }),
+      async (calls) => {
+        const house = await requestHouseDraft(7);
+        expect(house).toEqual({ status: 'queued' });
+        return calls.map((call) => [call.url, call.init?.method, call.init?.body, call.init?.headers]);
+      },
+    );
+    expect(sent).toEqual([['/bff/proposals/7/admin/house-draft', 'POST', undefined, undefined]]);
+    // Anything else is no answer to show: the page reads the proposal again.
+    expect(await withFetch(() => Response.json({ status: 'pondering' }, { status: 202 }), () => requestHouseDraft(7))).toBeNull();
+    expect(await withFetch(() => new Response('', { status: 202 }), () => requestHouseDraft(7))).toBeNull();
+    // A refusal keeps its reason, so the page can say why the house is off.
+    const off = await withFetch(
+      () => Response.json({ error: 'house_off', reason: 'switched_off', message: 'Off.' }, { status: 503 }),
+      () => failureFrom(() => requestHouseDraft(7)),
+    );
+    expect(failureOf(off)).toEqual({ code: 'house_off', reason: 'switched_off' });
+    expect(mayHaveHappened(off)).toBe(false);
+    const odd = await withFetch(
+      () => Response.json({ error: 'house_off', reason: 'Not <a> code' }, { status: 503 }),
+      () => failureFrom(() => requestHouseDraft(7)),
+    );
+    expect(failureOf(odd)).toEqual({ code: 'house_off' });
+    // A rate limit keeps which limit it was (review L8d); anything but the two scopes is dropped.
+    for (const [scope, kept] of [
+      ['daily', { scope: 'daily' }],
+      ['proposal', { scope: 'proposal' }],
+      ['weekly', {}],
+      [7, {}],
+    ] as const) {
+      const limited = await withFetch(
+        () =>
+          Response.json({ error: 'rate_limited', retryAfter: 600, limit: 5, scope, message: 'Later.' }, { status: 429, headers: { 'retry-after': '600' } }),
+        () => failureFrom(() => requestHouseDraft(7)),
+      );
+      expect(failureOf(limited), String(scope)).toEqual({ code: 'rate_limited', retryAfterSeconds: 600, limit: 5, ...kept });
+    }
+  });
+});
+
+test.describe('Phase 6 · the practice floor’s house draft', () => {
+  const NOW = Date.parse('2026-10-04T12:00:00Z');
+
+  test('the passed sample has a finished house draft that keeps the contract, and its timeline says so', () => {
+    const floor = practiceFloor(NOW);
+    for (const signedIn of [false, true]) {
+      const passed = practiceDetail(floor, 1, signedIn);
+      expect(HouseDraftSchema.safeParse(passed?.house).success, `signed in: ${signedIn}`).toBe(true);
+      expect(passed?.house).toMatchObject({ status: 'done', model: PRACTICE_HOUSE_MODEL, appliedToDraft: true, spec: { verdict: 'ready' } });
+      expect(passed?.events.at(-1)).toMatchObject({ kind: 'house_drafted', message: HOUSE_DRAFTED_MESSAGE });
+      expect(passed?.events.at(-1)?.actor).toBeUndefined();
+    }
+    expect(Date.parse(practiceDetail(floor, 1, false)?.house?.draftedAt ?? '')).toBeLessThan(NOW);
+    // Nothing else has passed, so nothing else has one.
+    expect(practiceDetail(floor, 2, true)?.house).toBeUndefined();
+    expect(practiceDetail(floor, WALKTHROUGH_ID, true)?.house).toBeUndefined();
+  });
+
+  test('the walk-through: the house drafts its task the moment it passes', () => {
+    let floor = practiceFloor(NOW);
+    const seconded = practiceSecond(floor, WALKTHROUGH_ID, PRACTICE_REVISION, NOW + MINUTE);
+    if (!seconded.ok) throw new Error(seconded.code);
+    floor = seconded.floor;
+    expect(seconded.detail.house).toBeUndefined();
+    const passed = practiceConsent(floor, WALKTHROUGH_ID, true, NOW + 2 * MINUTE);
+    if (!passed.ok) throw new Error(passed.code);
+    const house = passed.detail.house;
+    expect(HouseDraftSchema.safeParse(house).success).toBe(true);
+    expect(house).toMatchObject({ status: 'done', appliedToDraft: true, spec: { verdict: 'needs_clarification', size: 'S', tierFloor: 'T0' } });
+    expect(house?.draftedAt).toBe('2026-10-04T12:02:00Z');
+    expect(house?.spec?.questions).toHaveLength(1);
+    expect(passed.detail.events.at(-1)).toMatchObject({ kind: 'house_drafted', message: HOUSE_DRAFTED_MESSAGE });
+    // And the floor remembers it.
+    expect(practiceDetail(passed.floor, WALKTHROUGH_ID, false)?.house).toEqual(house);
+  });
+
+  test('a sample with no canned draft gets a plain one that still keeps the contract', () => {
+    const house = practiceHouse({ id: 99, title: 'T'.repeat(120), pitch: `${'p'.repeat(600)}\n\nMore.` }, NOW);
+    expect(HouseDraftSchema.safeParse(house).success).toBe(true);
+    expect(house.spec?.title).toHaveLength(100);
+    expect(house.spec?.civilianSummary).toHaveLength(500);
+    expect(house.spec?.verdict).toBe('needs_clarification');
   });
 });

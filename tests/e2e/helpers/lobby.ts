@@ -168,7 +168,8 @@ export type FlagName =
   | 'apps_lobby'
   | 'mcp_connector'
   | 'agent_start'
-  | 'proposals';
+  | 'proposals'
+  | 'house_spec';
 
 /**
  * Serves a full, schema-valid flags payload in place of the API's: every
@@ -192,6 +193,7 @@ function allFlags(overrides: Partial<Record<FlagName, boolean>> = {}): Record<Fl
     mcp_connector: true,
     agent_start: true,
     proposals: true,
+    house_spec: true,
     ...overrides,
   };
 }

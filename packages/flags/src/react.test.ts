@@ -47,6 +47,7 @@ const ALL_ON: FlagConfig = {
   mcp_connector: true,
   agent_start: true,
   proposals: true,
+  house_spec: true,
 };
 
 function json(body: unknown, status = 200): Response {
@@ -79,10 +80,11 @@ afterEach(() => {
 
 describe('fetchFlags', () => {
   it('parses what the flag service answers', async () => {
-    const fetchImpl = vi.fn(async () => json({ ...DEFAULT_FLAGS, proposals: true }));
+    const fetchImpl = vi.fn(async () => json({ ...DEFAULT_FLAGS, proposals: true, house_spec: true }));
     await expect(fetchFlags('http://api.test/api/flags', { fetchImpl })).resolves.toEqual({
       ...DEFAULT_FLAGS,
       proposals: true,
+      house_spec: true,
     });
     expect(fetchImpl).toHaveBeenCalledWith('http://api.test/api/flags', expect.objectContaining({ signal: expect.any(AbortSignal) }));
   });

@@ -2,7 +2,7 @@
  * Field-for-field drift guard between these zod schemas and the Pydantic
  * models in apps/api/src/forge_api/models.py.
  *
- * tests/fixtures/wire-golden.json describes every Bridge, Proposals and
+ * tests/fixtures/wire-golden.json describes every Bridge, Proposals, house and
  * notifications model (field names, type, optional, enum values in order, and
  * length limits); apps/api/tests/test_wire_models.py holds the Pydantic side to
  * the same file. A field renamed, retyped, made optional, given a new enum
@@ -191,6 +191,14 @@ describe('wire shapes, against tests/fixtures/wire-golden.json', () => {
     ]) {
       expect(covered.has(name), name).toBe(true);
     }
+  });
+
+  it('covers every house model schema, and the detail that carries it', () => {
+    const covered = new Set(Object.keys(golden.models));
+    for (const name of ['HouseSpec', 'HouseDraft']) {
+      expect(covered.has(name), name).toBe(true);
+    }
+    expect(golden.models.ProposalDetail?.house).toEqual({ type: 'object', ref: 'HouseDraft', optional: true });
   });
 
   it('cannot describe a type the wire does not use', () => {

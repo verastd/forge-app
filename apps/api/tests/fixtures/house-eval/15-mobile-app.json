@@ -1,0 +1,9 @@
+{
+  "name": "mobile-app",
+  "kind": "too_big",
+  "title": "FORGE as a phone app",
+  "pitch": "Rebuild the whole of FORGE as an app for iPhone and Android, with everything the website has, working offline, and with push notifications for every proposal and task.",
+  "expect": {
+    "verdict": "not_feasible"
+  }
+}

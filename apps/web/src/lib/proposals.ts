@@ -15,10 +15,12 @@
  *   anything the API accepts.
  * - Every answer is checked against the shared zod schemas (`@forge/shared`):
  *   a payload the contract rejects is not an answer. Timeline and bell
- *   `kind`s are the one exception, read leniently ({@link DisplayDetailSchema},
+ *   `kind`s are one exception, read leniently ({@link DisplayDetailSchema},
  *   {@link DisplayNotificationListSchema}): the page never branches on them,
  *   so a kind the API added before this build knows it reads as its message
- *   rather than taking the page down.
+ *   rather than taking the page down. The house model's draft (`house`, an
+ *   admin's only, Phase 6) is the other: one that breaks the contract is
+ *   dropped, and the rest of the proposal still shows.
  * - Every answer with a readable `Date` header sets the page's server clock
  *   (`./server-clock`), which the countdowns run on.
  *
@@ -36,6 +38,7 @@
  */
 
 import {
+  HouseDraftSchema,
   NotificationListSchema,
   NotificationSchema,
   ProposalCardSchema,
@@ -47,6 +50,7 @@ import {
 } from '@forge/shared';
 import type {
   DraftTaskRequest,
+  HouseDraft,
   NewProposal,
   ProposalCommentPage,
   ProposalList,
@@ -86,8 +90,25 @@ const AnyKind = ProposalEventSchema.shape.message;
 
 /** A timeline line whose `kind` may be one this build doesn't know: it shows as its message. */
 export const DisplayEventSchema = ProposalEventSchema.extend({ kind: AnyKind });
-/** ProposalDetail, read leniently: only the timeline's kinds are open. */
-export const DisplayDetailSchema = ProposalDetailSchema.extend({ events: DisplayEventSchema.array() });
+/**
+ * The house model's draft, when there is one: a malformed one (a status this
+ * build doesn't know, a spec past its limits, null) is dropped rather than
+ * taking the proposal down with it. `done` with no spec has nothing to show,
+ * so it reads as a task the house hasn't drafted yet (`failed`, no reason).
+ */
+const DisplayHouseSchema = HouseDraftSchema.transform(
+  (house): HouseDraft => (house.status === 'done' && house.spec === undefined ? { status: 'failed' } : house),
+)
+  .optional()
+  .catch(undefined);
+/**
+ * ProposalDetail, read leniently: the timeline's kinds are open, and a
+ * `house` that breaks the contract is dropped. Everything else is the contract.
+ */
+export const DisplayDetailSchema = ProposalDetailSchema.extend({
+  events: DisplayEventSchema.array(),
+  house: DisplayHouseSchema,
+});
 export type DisplayDetail = ReturnType<typeof DisplayDetailSchema.parse>;
 export type DisplayEvent = ReturnType<typeof DisplayEventSchema.parse>;
 
@@ -175,6 +196,8 @@ function failureFrom(body: Record<string, unknown>, retryAfter: string | null, s
     ...(fields.length === 0 ? {} : { fields }),
     ...(revision === undefined || revision === 0 ? {} : { revision }),
     ...(limit === undefined || limit === 0 ? {} : { limit }),
+    ...(typeof body.reason === 'string' && CODE.test(body.reason) ? { reason: body.reason } : {}),
+    ...(body.scope === 'proposal' || body.scope === 'daily' ? { scope: body.scope } : {}),
   };
 }
 
@@ -410,6 +433,18 @@ export async function saveDraftTask(id: number, draft: DraftTaskRequest): Promis
 export async function publishDraftTask(id: number): Promise<DisplayDetail | null> {
   if (isDemoMode()) throw practiceRefusal(`practice proposal ${id}`);
   return detailFrom(await write(`${BFF_PROPOSALS}/${id}/admin/publish-task`, 'POST', {}));
+}
+
+/**
+ * "Draft it again" (Phase 6 contract §1): the house model drafts the task once
+ * more. The request has no body; the API answers 202 with the house's new
+ * state (queued). Null means "read it again": the answer wasn't one.
+ */
+export async function requestHouseDraft(id: number): Promise<HouseDraft | null> {
+  if (isDemoMode()) throw practiceRefusal(`practice proposal ${id}`);
+  const answer = await send(`${BFF_PROPOSALS}/${id}/admin/house-draft`, { method: 'POST' }, WRITE_TIMEOUT_MS);
+  const parsed = HouseDraftSchema.safeParse(answer);
+  return parsed.success ? parsed.data : null;
 }
 
 /* --- the bell ---------------------------------------------------------------------------- */

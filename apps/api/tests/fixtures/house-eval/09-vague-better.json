@@ -1,0 +1,9 @@
+{
+  "name": "vague-better",
+  "kind": "vague",
+  "title": "Make it better for new people",
+  "pitch": "New people find the app confusing. Make it better for them.",
+  "expect": {
+    "verdict": "needs_clarification"
+  }
+}

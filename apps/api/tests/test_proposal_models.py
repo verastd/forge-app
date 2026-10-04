@@ -164,6 +164,7 @@ def test_every_timeline_kind_in_order() -> None:
         "test_timers_off",
         "floor_paused",
         "floor_resumed",
+        "house_drafted",
     )
 
 

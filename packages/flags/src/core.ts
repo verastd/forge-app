@@ -28,6 +28,7 @@ export const DEFAULT_FLAGS: FlagConfig = {
   mcp_connector: false,
   agent_start: false,
   proposals: false,
+  house_spec: false,
 };
 
 /**

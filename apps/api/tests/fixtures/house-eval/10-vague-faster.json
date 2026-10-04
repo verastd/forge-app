@@ -1,0 +1,9 @@
+{
+  "name": "vague-faster",
+  "kind": "vague",
+  "title": "Faster lobby",
+  "pitch": "The lobby feels slow sometimes. Fix it.",
+  "expect": {
+    "verdict": "needs_clarification"
+  }
+}

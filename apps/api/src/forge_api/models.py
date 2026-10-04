@@ -22,7 +22,15 @@ from collections.abc import Mapping
 from types import MappingProxyType
 from typing import Annotated, Final, Literal, get_args
 
-from pydantic import BaseModel, Field, SecretStr, StrictBool, StrictInt, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+    StrictBool,
+    StrictInt,
+    field_validator,
+)
 
 Size = Literal["XS", "S", "M"]
 RewardClass = Literal["none", "R1", "R2", "R3", "R4"]
@@ -98,6 +106,9 @@ ProposalEventKind = Literal[
     # then opened again with every running deadline moved later by the time it was closed.
     "floor_paused",
     "floor_resumed",
+    # The house model drafted the task of a passed proposal (HouseDraft). Public; its
+    # failures are not.
+    "house_drafted",
 ]
 VoteChoice = Literal["yes", "no", "abstain"]
 #: Where a member of the eligible set stands in debate (ProposalYou.consent).
@@ -113,6 +124,19 @@ NotificationKind = Literal[
     "task_published",
 ]
 
+#: What the house model makes of a request (HouseSpec.verdict).
+HouseVerdict = Literal["ready", "needs_clarification", "not_feasible"]
+#: Where the house stands on one proposal (HouseDraft.status).
+HouseStatus = Literal["off", "queued", "running", "done", "failed"]
+#: Why the house is `off`: no ANTHROPIC_API_KEY, or its flag is off.
+HouseOffReason = Literal["not_configured", "switched_off"]
+#: Why the latest house job `failed`.
+HouseFailureReason = Literal[
+    "refused", "invalid_output", "unavailable", "too_large", "bad_request", "daily_limit"
+]
+#: Every HouseDraft.reason: the off reasons, then the failure reasons.
+HouseReason = Literal[HouseOffReason, HouseFailureReason]
+
 #: The runtime tuples behind the literals above — the same names in packages/shared, in
 #: the same order.
 START_RAILS: tuple[StartRail, ...] = get_args(StartRail)
@@ -124,6 +148,11 @@ PROPOSAL_EVENT_KINDS: tuple[ProposalEventKind, ...] = get_args(ProposalEventKind
 VOTE_CHOICES: tuple[VoteChoice, ...] = get_args(VoteChoice)
 CONSENT_CHOICES: tuple[ConsentChoice, ...] = get_args(ConsentChoice)
 NOTIFICATION_KINDS: tuple[NotificationKind, ...] = get_args(NotificationKind)
+HOUSE_VERDICTS: tuple[HouseVerdict, ...] = get_args(HouseVerdict)
+HOUSE_STATUSES: tuple[HouseStatus, ...] = get_args(HouseStatus)
+HOUSE_OFF_REASONS: tuple[HouseOffReason, ...] = get_args(HouseOffReason)
+HOUSE_FAILURE_REASONS: tuple[HouseFailureReason, ...] = get_args(HouseFailureReason)
+HOUSE_REASONS: tuple[HouseReason, ...] = get_args(HouseReason)
 
 #: A member whose proposal is in one of these can't move another (409
 #: one_active_proposal). Every other state is decided.
@@ -154,6 +183,35 @@ _CommentText = Annotated[str, Field(min_length=1, max_length=PROPOSAL_LIMITS["co
 _Summary = Annotated[str, Field(min_length=1, max_length=PROPOSAL_LIMITS["summary"])]
 _Criterion = Annotated[str, Field(min_length=1, max_length=PROPOSAL_LIMITS["criterion"])]
 
+#: The most characters each text in a house spec may have, and the most entries each list
+#: may hold; every text needs at least one character and every spec at least one
+#: criterion, while the other lists may be empty. HOUSE_SPEC_LIMITS in packages/shared,
+#: with the same keys. The title, summary and criteria limits are the draft task's, so a
+#: spec always fits the draft it fills.
+HOUSE_SPEC_LIMITS: Final[Mapping[str, int]] = MappingProxyType(
+    {
+        "title": PROPOSAL_LIMITS["title"],
+        "summary": PROPOSAL_LIMITS["summary"],  # civilianSummary
+        "criteria": PROPOSAL_LIMITS["criteria"],  # acceptance criteria per spec
+        "criterion": PROPOSAL_LIMITS["criterion"],  # characters per criterion
+        "scope": 20,  # entries in scopeIn, and in scopeOut
+        "path": 200,  # characters per scope entry: a repo path or glob
+        "risks": 10,  # entries in risks
+        "risk": 300,  # characters per risk
+        "questions": 10,  # entries in questions
+        "question": 300,  # characters per question
+        "verdictReason": 500,
+    }
+)
+
+_HouseTitle = Annotated[str, Field(min_length=1, max_length=HOUSE_SPEC_LIMITS["title"])]
+_HouseSummary = Annotated[str, Field(min_length=1, max_length=HOUSE_SPEC_LIMITS["summary"])]
+_HouseCriterion = Annotated[str, Field(min_length=1, max_length=HOUSE_SPEC_LIMITS["criterion"])]
+_ScopeEntry = Annotated[str, Field(min_length=1, max_length=HOUSE_SPEC_LIMITS["path"])]
+_Risk = Annotated[str, Field(min_length=1, max_length=HOUSE_SPEC_LIMITS["risk"])]
+_Question = Annotated[str, Field(min_length=1, max_length=HOUSE_SPEC_LIMITS["question"])]
+_VerdictReason = Annotated[str, Field(min_length=1, max_length=HOUSE_SPEC_LIMITS["verdictReason"])]
+
 
 class FlagConfig(BaseModel):
     """Feature flags (PRD Appendix H.2 — the deploy-safety linchpin)."""
@@ -166,6 +224,9 @@ class FlagConfig(BaseModel):
     mcp_connector: bool
     agent_start: bool
     proposals: bool
+    # The house model drafts every passed proposal's task (also needs `proposals` and
+    # ANTHROPIC_API_KEY).
+    house_spec: bool
 
 
 class TaskCard(BaseModel):
@@ -491,6 +552,60 @@ class DraftTask(BaseModel):
     taskId: int | None = None  # the Contribute task, once published
 
 
+# ---------------------------------------------------------------------------
+# The house model (Phase 6 contract §2), behind the `house_spec` flag: FORGE's own model
+# drafts the task of every passed proposal, and an admin checks it before it goes on the
+# Contribute board. Unlike the rest of what the API answers, a spec carries limits,
+# because the API holds the model's output to them.
+# ---------------------------------------------------------------------------
+
+
+class HouseSpec(BaseModel):
+    """What the house model writes for one passed proposal, once cleaned: the model the API
+    validates the model's output with. Its title, summary, criteria and size fill the draft
+    task unless an admin has saved the draft already; tierFloor is only a suggestion (the
+    draft's floor stays T0). Strict, as zod is: a value of the wrong type is refused, never
+    coerced, and every field is required (a list may be empty, except the criteria). The
+    title must also show a visible character: the cleaner checks that (has_visible_text in
+    services/proposals.py), as for Proposals, while the models count characters only."""
+
+    model_config = ConfigDict(strict=True)
+
+    title: _HouseTitle
+    civilianSummary: _HouseSummary  # plain English, for members
+    # Each one checkable by a test, a CI check or a behaviour a reviewer can see.
+    acceptanceCriteria: list[_HouseCriterion] = Field(
+        min_length=1, max_length=HOUSE_SPEC_LIMITS["criteria"]
+    )
+    size: Size
+    tierFloor: TierFloor  # a suggestion
+    # Repo paths or globs the task expects to change, and the ones it must not touch.
+    scopeIn: list[_ScopeEntry] = Field(max_length=HOUSE_SPEC_LIMITS["scope"])
+    scopeOut: list[_ScopeEntry] = Field(max_length=HOUSE_SPEC_LIMITS["scope"])
+    risks: list[_Risk] = Field(max_length=HOUSE_SPEC_LIMITS["risks"])
+    questions: list[_Question] = Field(max_length=HOUSE_SPEC_LIMITS["questions"])  # for the mover
+    verdict: HouseVerdict
+    verdictReason: _VerdictReason
+
+
+class HouseDraft(BaseModel):
+    """The house's work on one proposal, as an admin sees it (ProposalDetail.house). Strict,
+    as zod is: `appliedToDraft` is a real boolean, never 0/1 or "true". A field left None
+    never reaches the wire: routes serialize with `response_model_exclude_none`."""
+
+    model_config = ConfigDict(strict=True)
+
+    status: HouseStatus
+    # Why it is `off` (HOUSE_OFF_REASONS), or why the latest job `failed`
+    # (HOUSE_FAILURE_REASONS).
+    reason: HouseReason | None = None
+    spec: HouseSpec | None = None  # the latest that succeeded, kept while a re-draft runs
+    model: str | None = None  # the model that wrote `spec`
+    draftedAt: str | None = None  # when `spec` was written (ISO 8601)
+    # Whether `spec` filled the draft task: not when an admin had saved the draft first.
+    appliedToDraft: bool | None = None
+
+
 class ProposalDetail(BaseModel):
     """GET /api/proposals/{id}."""
 
@@ -504,6 +619,8 @@ class ProposalDetail(BaseModel):
     events: list[ProposalEvent]
     you: ProposalYou | None = None  # identified callers only
     draft: DraftTask | None = None  # admins only
+    # Admins only, like `draft`: from the moment it passes, so also once building or shipped.
+    house: HouseDraft | None = None
     taskId: int | None = None  # the Contribute task, once published
     # The text's revision: 1, plus 1 for every edit. A second sends the one it read
     # (SecondRequest).

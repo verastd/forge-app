@@ -486,6 +486,137 @@
   min-width: 0;
 }
 
+/* --- the house model's draft (Phase 6) ------------------------------------------------- */
+
+/* In the admin panel: its heading, then the box. */
+.houseGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+/* The house model's work, in a box of its own: advice for the admin, not the task itself. Every
+   string in it is model output, and a path or a model name can be one long word: it wraps anywhere. */
+.house {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--spark-line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.houseVerdict {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+/* The verdict chip's label can be a few words: it wraps on a phone rather than overflowing. */
+.houseVerdict :global(.chip) {
+  white-space: normal;
+}
+
+.houseProblem {
+  padding: 10px 12px;
+  border-left: 3px solid var(--danger-line);
+  background: var(--danger-soft);
+  color: var(--text);
+  font-weight: 650;
+}
+
+.houseSection {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.houseHeading {
+  font-size: 0.86rem;
+  font-weight: 750;
+  color: var(--text);
+}
+
+.houseList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding-left: 1.3em;
+  color: var(--text-muted);
+}
+
+.housePath {
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  color: var(--text);
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.houseTaskTitle {
+  font-weight: 700;
+  color: var(--text);
+}
+
+/* Where the house's draft is, beside the form: a line, the status line, and "Use the house draft". */
+.houseForm {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+/* The status line with "Undo" beside it. While the line is empty (and out of sight), it takes no room. */
+.houseUse {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  min-width: 0;
+}
+
+.houseUseIdle {
+  display: contents;
+}
+
+.houseStatus {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+
+.houseStatus:focus {
+  outline: none;
+}
+
+.houseStatus:focus-visible {
+  outline: 2px solid var(--spark);
+  outline-offset: 3px;
+}
+
+/* Under reduced motion the spinner holds still: drafting can take half an hour, and the words say it all. */
+@media (prefers-reduced-motion: reduce) {
+  .house :global(.spinner) {
+    animation: none !important;
+  }
+}
+
+/* A member's own view whose last read failed: it stays on screen, and says it may be out of date. */
+.staleView {
+  padding: 10px 14px;
+  border: 1px solid var(--warn-line);
+  border-radius: var(--radius-sm);
+  background: var(--warn-soft);
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
 /* --- forms --------------------------------------------------------------------------- */
 
 .form {

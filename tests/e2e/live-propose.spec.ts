@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import type { BrowserContext, Page, Route } from '@playwright/test';
 
-import { PROPOSAL_ERROR_CODES, describeProposalError, didNotGoThrough } from '../../apps/web/src/lib/proposals-format';
+import { PROPOSAL_ERROR_CODES, describeProposalError, didNotGoThrough, notReadBack } from '../../apps/web/src/lib/proposals-format';
 import { plantPracticeSession, signInAs } from './helpers/session';
 
 /**
@@ -17,6 +17,14 @@ import { plantPracticeSession, signInAs } from './helpers/session';
  * The F5b sections prove the fixes for the Phase 5 pages review
  * (review-pages.md, M1–M6 and L1–L6) and the web side of the rules review's
  * API changes (F5-decisions.md): each turns a reviewer's probe around.
+ *
+ * The Phase 6 sections are the house model's draft (contract §10), as an
+ * admin sees it above the draft task: every status and reason in its own
+ * words, the 5 s reads while it drafts (with the page's clock), "Use the
+ * house draft", "Draft it again" and each of its refusals, the keyboard,
+ * 390 px, and that members never see it. The F6b sections, and the probes
+ * "turned around" in the Phase 6 ones, prove the fixes for the Phase 6 web
+ * review (review-house-web.md, H1, M1–M4 and L1–L10).
  *
  * What the BFF itself forwards (the assertion, no cookies, the practice
  * account refused) is in proposals-bff.spec.ts, on the demo server, whose
@@ -77,9 +85,9 @@ function detail(
   };
 }
 
-/** What the API answers anyone (no identity): the same proposal, without `you` or the draft task. */
+/** What the API answers anyone (no identity): the same proposal, without `you`, the draft task or the house's draft. */
 function publicOf(body: Json): Json {
-  const { you: _you, draft: _draft, ...rest } = body;
+  const { you: _you, draft: _draft, house: _house, ...rest } = body;
   return rest;
 }
 
@@ -800,6 +808,8 @@ test.describe('a proposal, as a member', () => {
       edit_limit: { status: 409, body: { limit: 20 } },
       tier_not_open: { status: 400 },
       task_title_needs_letters: { status: 400 },
+      house_busy: { status: 409 },
+      house_off: { status: 503, body: { reason: 'switched_off' } },
     };
     expect(Object.keys(EXTRA).sort()).toEqual([...PROPOSAL_ERROR_CODES].sort());
 
@@ -820,6 +830,7 @@ test.describe('a proposal, as a member', () => {
         ...(code === 'invalid_request' ? { fields: ['title'] } : {}),
         ...(code === 'proposal_changed' ? { revision: 2 } : {}),
         ...(code === 'edit_limit' ? { limit: 20 } : {}),
+        ...(code === 'house_off' ? { reason: 'switched_off' } : {}),
       };
       const alert = yourPart(page).getByRole('alert');
       // No answer is read again first: it shows the second didn't happen, so the page says so.
@@ -1627,5 +1638,1444 @@ test.describe('at 390 px, signed in', () => {
     await page.getByRole('button', { name: 'Notifications: 1 unread' }).click();
     await expect(page.getByRole('link', { name: new RegExp(title) })).toBeVisible();
     expect(await width()).toBeLessThanOrEqual(390);
+  });
+});
+
+/* --- Phase 6: the house model's draft (contract §10) ------------------------------------------ */
+
+const HOUSE_SPEC = {
+  title: 'Show my properties on a map in the Data app',
+  civilianSummary: 'A map view in the Data app: a pin for each property, a tap on a pin to see its row, and the same filters as the table.',
+  acceptanceCriteria: [
+    'The Data app has a Map view with one pin for each property in the list.',
+    "Tapping a pin shows that property's row.",
+    "The table's filters apply to the map.",
+  ],
+  size: 'M',
+  tierFloor: 'T1',
+  scopeIn: ['apps/web/src/app/apps/data/**', 'tests/e2e/data-app.spec.ts'],
+  scopeOut: ['apps/api/**'],
+  risks: ['A map library would be a new dependency, which needs approval.'],
+  questions: ['Should a pin show the address, or only open the row?'],
+  verdict: 'ready',
+  verdictReason: 'Clear, and small enough for one task.',
+};
+
+/** A second spec, as "Draft it again" might write it. */
+const HOUSE_SPEC_B = {
+  ...HOUSE_SPEC,
+  title: 'Add a Map tab to the Data app',
+  civilianSummary: 'A Map tab in the Data app, with a pin for each property.',
+  acceptanceCriteria: ['The Data app has a Map tab.', "A pin opens its property's row."],
+  size: 'S',
+  verdictReason: 'Clear, and smaller as a tab.',
+};
+
+/** The draft a pass makes: the proposal's title, its pitch as the summary, no criteria. */
+const PLAIN_DRAFT = {
+  title: 'Show my properties on a map',
+  civilianSummary: 'A map with a pin for each property.',
+  acceptanceCriteria: [],
+  size: 'S',
+  tierFloor: 'T0',
+  rewardClass: 'none',
+};
+
+/** The same draft once the house's spec filled it: its title, summary, criteria and size; T0 and the reward as they were. */
+const HOUSE_FILLED_DRAFT = {
+  title: HOUSE_SPEC.title,
+  civilianSummary: HOUSE_SPEC.civilianSummary,
+  acceptanceCriteria: HOUSE_SPEC.acceptanceCriteria,
+  size: 'M',
+  tierFloor: 'T0',
+  rewardClass: 'none',
+};
+
+/** The same draft once the second spec filled it again (nobody had saved it). */
+const HOUSE_B_FILLED_DRAFT = {
+  ...HOUSE_FILLED_DRAFT,
+  title: HOUSE_SPEC_B.title,
+  civilianSummary: HOUSE_SPEC_B.civilianSummary,
+  acceptanceCriteria: HOUSE_SPEC_B.acceptanceCriteria,
+  size: 'S',
+};
+
+/** An admin's own saved draft, which the house leaves alone. */
+const SAVED_DRAFT = {
+  title: 'Map view for properties',
+  civilianSummary: 'Pins on a map in the Data app.',
+  acceptanceCriteria: ['A pin for every property'],
+  size: 'S',
+  tierFloor: 'T0',
+  rewardClass: 'R1',
+};
+
+const HOUSE_LINE = "FORGE's house model drafted the task from this proposal. An admin checks it before it goes on the Contribute board.";
+/** The block while `queued` (it may be waiting to try again) and while `running`. */
+const QUEUED = 'The house model will draft this task shortly…';
+const DRAFTING = 'The house model is drafting this task…';
+const NOT_YET = "The house model hasn't drafted this task yet. Ask for a draft with Draft it again, or write it yourself.";
+/** The admin's outcome line once "Draft it again" went through: "again" only when there was a draft before. */
+const DRAFTING_AGAIN = "The house model is drafting it again. Its new draft shows below when it's ready.";
+const DRAFTING_FIRST = "The house model is drafting this task. Its draft shows below when it's ready.";
+/** Where the house's draft is, beside the form (F6b, review M1–M3). */
+const IN_THE_FORM = 'Its draft is in the form below. Check every line before you publish.';
+const USED = 'The house draft is in the form below. Nothing is saved until you save or publish.';
+const HELD = 'Its draft is saved, but the form below still has the changes you were making.';
+const EARLIER = 'Its draft is saved, but the form below still has the earlier draft.';
+const CHANGED_SINCE = 'Its draft filled the draft task, but changes have been saved since.';
+const NOT_REPLACED = "You had already saved the draft, so it wasn't replaced.";
+/** A member's own view whose last read through the BFF failed (F6b, review H1). */
+const STALE_VIEW = "Couldn't refresh your view just now. What you see may be out of date; it tries again shortly.";
+/** The house block after 3 failed reads in a row while it drafts (review L1). */
+const UNCHECKED = "Couldn't check on the house model's draft. Trying again every minute.";
+
+/** What an admin is writing in the draft form, unsaved, when something goes wrong. */
+const TYPED_SUMMARY = 'Half an hour of my own careful words about what the agent must do.';
+const TYPED_CRITERIA = 'First criterion I wrote.\nSecond criterion I wrote.';
+
+function doneHouse(overrides: Json = {}): Json {
+  return { status: 'done', spec: HOUSE_SPEC, model: 'claude-opus-5-5', draftedAt: '2026-10-03T09:30:00Z', appliedToDraft: true, ...overrides };
+}
+
+/** A passed proposal as an admin reads it: the draft task, and the house model's draft when there is one. */
+function passedWith(house: Json | undefined, options: { draft?: Json; proposal?: Json; you?: Json; extra?: Json } = {}): Json {
+  return detail({
+    proposal: { state: 'passed', deadline: undefined, ...options.proposal },
+    you: { isAdmin: true, ...options.you },
+    extra: { consentCount: 5, draft: options.draft ?? PLAIN_DRAFT, ...(house === undefined ? {} : { house }), ...options.extra },
+  });
+}
+
+/** `body` with one more timeline line, "Read <n>.", so a test can see that read land on screen. */
+function marked(body: Json, n: number): Json {
+  return { ...body, events: [...(body.events as Json[]), { at: at(-0.5), kind: 'commented', message: `Read ${n}.` }] };
+}
+
+const adminPanel = (page: Page) => page.getByRole('region', { name: 'Admin' });
+const houseBlock = (page: Page) => adminPanel(page).getByRole('group', { name: 'House draft' });
+const timelineOf = (page: Page) => page.getByRole('region', { name: 'Timeline' });
+/** The house block's status line beside the form: always there, filled once its draft is in the form, unsaved. */
+const houseStatus = (page: Page) => houseBlock(page).locator('#house-status');
+/** The page's "may be out of date" line: always there, filled while your own view couldn't be read again. */
+const staleView = (page: Page) => page.locator('#view-stale');
+
+/** Hide or show the tab, as the browser would say it. */
+async function setVisibility(page: Page, state: 'visible' | 'hidden'): Promise<void> {
+  await page.evaluate((value) => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => value });
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => value === 'hidden' });
+    document.dispatchEvent(new Event('visibilitychange'));
+  }, state);
+}
+
+/** An answer held back until the test lets it go. */
+function gate(): { wait: Promise<void>; open: () => void } {
+  let open = (): void => undefined;
+  const wait = new Promise<void>((resolve) => {
+    open = resolve;
+  });
+  return { wait, open };
+}
+
+/**
+ * An admin on proposal 7 whose BFF reads are answered by `reply(n)`, n counting from 1 (the page's first
+ * read), each marked "Read n." on the timeline. Resolves once the first has landed; returns every read.
+ */
+async function onHouseProposal(
+  page: Page,
+  context: BrowserContext,
+  baseURL: string | undefined,
+  reply: (n: number) => Json,
+): Promise<Sent[]> {
+  await signInAs(context, baseURL ?? '', ADMIN);
+  await serviceDown(page);
+  await openProposals(page);
+  await serve(page, '**/api/proposals/7', publicOf(reply(1)));
+  await serve(page, '**/bff/proposals/me', { isAdmin: true, testTimers: false });
+  const reads = await answer(page, '**/bff/proposals/7', (_sent, n) => ({ body: marked(reply(n), n) }));
+  await page.goto('/propose/7');
+  await expect(timelineOf(page).getByText('Read 1.')).toBeVisible();
+  return reads;
+}
+
+/**
+ * An admin on proposal 7 whose public reads always work, and whose BFF reads answer `body` unless `failure()`
+ * says otherwise. Resolves once the admin panel is up; returns the public reads and the BFF reads.
+ */
+async function onFlakyBff(
+  page: Page,
+  context: BrowserContext,
+  baseURL: string | undefined,
+  body: Json,
+  failure: () => Reply | null,
+): Promise<{ publicReads: Sent[]; bffReads: Sent[] }> {
+  await signInAs(context, baseURL ?? '', ADMIN);
+  await serviceDown(page);
+  await openProposals(page);
+  const publicReads = await serve(page, '**/api/proposals/7', publicOf(body));
+  await serve(page, '**/bff/proposals/me', { isAdmin: true, testTimers: false });
+  const bffReads = await answer(page, '**/bff/proposals/7', () => failure() ?? { body });
+  await page.goto('/propose/7');
+  await expect(adminPanel(page).getByLabel('Task title')).toBeVisible();
+  await expect(staleView(page)).toHaveText('');
+  return { publicReads, bffReads };
+}
+
+/** The admin writes in the draft form, and saves nothing. */
+async function typeOwnDraft(page: Page): Promise<void> {
+  const admin = adminPanel(page);
+  await admin.getByLabel('Plain summary').fill(TYPED_SUMMARY);
+  await admin.getByLabel('What done means').fill(TYPED_CRITERIA);
+}
+
+/** What the admin wrote is still in the form, panel and all. */
+async function expectOwnDraft(page: Page): Promise<void> {
+  const admin = adminPanel(page);
+  await expect(admin.getByLabel('Plain summary')).toHaveValue(TYPED_SUMMARY);
+  await expect(admin.getByLabel('What done means')).toHaveValue(TYPED_CRITERIA);
+  await expect(page.getByText("Your actions can't load right now. Try again.")).toHaveCount(0);
+}
+
+interface ReadTime {
+  start: number;
+  end: number;
+}
+
+/** Logs, in the page, when each read of proposal 7 through the BFF starts and ends, on the page's own clock. */
+async function logReads(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const realFetch = window.fetch.bind(window);
+    const log: Array<{ start: number; end: number }> = [];
+    (window as unknown as { __houseReads: typeof log }).__houseReads = log;
+    window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (!/\/bff\/proposals\/7$/.test(url) || (init?.method ?? 'GET') !== 'GET') return realFetch(input, init);
+      const entry = { start: Date.now(), end: Number.NaN };
+      log.push(entry);
+      try {
+        return await realFetch(input, init);
+      } finally {
+        entry.end = Date.now();
+      }
+    };
+  });
+}
+
+async function readLog(page: Page): Promise<ReadTime[]> {
+  return page.evaluate(() => (window as unknown as { __houseReads: ReadTime[] }).__houseReads);
+}
+
+test.describe('Phase 6 · the house model’s draft: every status and reason in its own words', () => {
+  const SAID: Array<[string, Json, string]> = [
+    ['off, no key on the server', { status: 'off', reason: 'not_configured' }, "The house model is off: FORGE's server has no key for it yet. Write the draft yourself."],
+    ['off, switched off', { status: 'off', reason: 'switched_off' }, "The house model is off: it is switched off on FORGE's server. Write the draft yourself."],
+    ['off, with no reason', { status: 'off' }, 'The house model is off. Write the draft yourself.'],
+    ['failed, refused', { status: 'failed', reason: 'refused' }, 'The house model declined to draft this task. Write the draft yourself.'],
+    ['failed, invalid_output', { status: 'failed', reason: 'invalid_output' }, "The house model's draft didn't hold together, twice in a row. Draft it again, or write it yourself."],
+    ['failed, unavailable', { status: 'failed', reason: 'unavailable' }, "The house model couldn't be reached, even after four tries. Draft it again later, or write it yourself."],
+    ['failed, too_large', { status: 'failed', reason: 'too_large' }, 'This proposal and its debate are too long for the house model. Write the draft yourself.'],
+    ['failed, bad_request', { status: 'failed', reason: 'bad_request' }, "FORGE's request to the house model was refused, so its setup on the server needs checking. Write the draft yourself."],
+    // Review L8(c): the limit counts a UTC day.
+    ['failed, daily_limit', { status: 'failed', reason: 'daily_limit' }, 'The house model reached its daily limit before it got to this task. Draft it again after midnight UTC, or write it yourself.'],
+    ['failed, with no reason', { status: 'failed' }, NOT_YET],
+  ];
+  for (const [name, house, sentence] of SAID) {
+    // Review L8(e): while it is off, "Draft it again" could only be refused, so it isn't offered.
+    const off = house.status === 'off';
+    test(`${name}: its sentence, above the draft form, ${off ? 'with nothing to ask for' : 'with "Draft it again"'}`, async ({ page, context, baseURL }) => {
+      await onProposal(page, context, baseURL, passedWith(house), ADMIN);
+      const block = houseBlock(page);
+      await expect(block.getByText(sentence, { exact: true })).toBeVisible();
+      await expect(block.getByRole('button', { name: 'Draft it again' })).toHaveCount(off ? 0 : 1);
+      // No draft of its own to show, so no verdict and nothing to use.
+      await expect(block.getByRole('button', { name: 'Use the house draft' })).toHaveCount(0);
+      await expect(block.getByRole('list')).toHaveCount(0);
+      // Above the draft task's form, which an admin can fill in the meantime.
+      await expect(adminPanel(page).getByLabel('Task title')).toHaveValue(PLAIN_DRAFT.title);
+      const above = await block.evaluate((element) => {
+        const form = document.getElementById('draft-title');
+        return form !== null && (element.compareDocumentPosition(form) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+      });
+      expect(above).toBe(true);
+    });
+  }
+
+  test('queued, then running: what it is doing, with no buttons; a draft from before stays out of the way', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    // Review L8(a): queued may be a wait to try again, so it isn't "drafting" yet.
+    await onProposal(page, context, baseURL, passedWith({ status: 'queued' }), ADMIN);
+    const block = houseBlock(page);
+    await expect(block.getByText(QUEUED, { exact: true })).toBeVisible();
+    await expect(block.getByText(DRAFTING, { exact: true })).toHaveCount(0);
+    await expect(block.getByRole('button')).toHaveCount(0);
+
+    // Drafting again: the last draft is in the answer, and waits until the new one lands.
+    await page.unroute('**/bff/proposals/7');
+    await serve(page, '**/bff/proposals/7', passedWith(doneHouse({ status: 'running' })));
+    await page.reload();
+    await expect(block.getByText(DRAFTING, { exact: true })).toBeVisible();
+    await expect(block.getByText(QUEUED, { exact: true })).toHaveCount(0);
+    await expect(block.getByText('Ready', { exact: true })).toHaveCount(0);
+    await expect(block.getByRole('button')).toHaveCount(0);
+  });
+
+  test('done: the verdict and its reason, the questions, risks and scope, who drafted it and when; its draft is in the form', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    await onProposal(page, context, baseURL, passedWith(doneHouse(), { draft: HOUSE_FILLED_DRAFT }), ADMIN);
+    const block = houseBlock(page);
+    await expect(block.getByText('Ready', { exact: true })).toBeVisible();
+    await expect(block.getByText('Clear, and small enough for one task.')).toBeVisible();
+    await expect(block.getByRole('list', { name: 'Questions for the mover' }).getByRole('listitem')).toHaveText(HOUSE_SPEC.questions);
+    await expect(block.getByRole('list', { name: 'Risks' }).getByRole('listitem')).toHaveText(HOUSE_SPEC.risks);
+    await expect(block.getByRole('list', { name: 'Scope in' }).getByRole('listitem')).toHaveText(HOUSE_SPEC.scopeIn);
+    await expect(block.getByRole('list', { name: 'Scope out' }).getByRole('listitem')).toHaveText(HOUSE_SPEC.scopeOut);
+    await expect(block.getByText(/^Drafted by claude-opus-5-5 on .*2026\.$/)).toBeVisible();
+    await expect(block.getByText(IN_THE_FORM, { exact: true })).toBeVisible();
+    await expect(houseStatus(page)).toHaveText('');
+    await expect(block.getByRole('button', { name: 'Use the house draft' })).toHaveCount(0);
+    await expect(block.getByRole('button', { name: 'Draft it again' })).toBeVisible();
+
+    // The form holds the house's draft; the tier stays T0 whatever the house suggested.
+    const admin = adminPanel(page);
+    await expect(admin.getByLabel('Task title')).toHaveValue(HOUSE_SPEC.title);
+    await expect(admin.getByLabel('Plain summary')).toHaveValue(HOUSE_SPEC.civilianSummary);
+    await expect(admin.getByLabel('What done means')).toHaveValue(HOUSE_SPEC.acceptanceCriteria.join('\n'));
+    await expect(admin.getByLabel('Size')).toHaveValue('M');
+    await expect(admin.getByRole('group', { name: 'Tier floor' })).toContainText('T0');
+  });
+
+  test('every verdict has its chip; empty lists say so, and no questions means no questions heading', async ({ page, context, baseURL }) => {
+    const empty = { ...HOUSE_SPEC, risks: [], scopeIn: [], scopeOut: [], questions: [] };
+    await onProposal(page, context, baseURL, passedWith(doneHouse({ spec: { ...empty, verdict: 'needs_clarification' } })), ADMIN);
+    const block = houseBlock(page);
+    await expect(block.getByText('Needs answers from the mover', { exact: true })).toBeVisible();
+    await expect(block.getByText('Questions for the mover')).toHaveCount(0);
+    await expect(block.getByText('None noted.', { exact: true })).toBeVisible();
+    await expect(block.getByText('No paths named.', { exact: true })).toHaveCount(2);
+
+    await page.unroute('**/bff/proposals/7');
+    await serve(page, '**/bff/proposals/7', passedWith(doneHouse({ spec: { ...HOUSE_SPEC, verdict: 'not_feasible' } })));
+    await page.reload();
+    await expect(block.getByText('Not feasible', { exact: true })).toBeVisible();
+    await expect(block.getByText('Ready', { exact: true })).toHaveCount(0);
+  });
+
+  test('a failure after an earlier draft says why, and still shows the earlier draft', async ({ page, context, baseURL }) => {
+    await onProposal(page, context, baseURL, passedWith(doneHouse({ status: 'failed', reason: 'unavailable', appliedToDraft: false }), { draft: SAVED_DRAFT }), ADMIN);
+    const block = houseBlock(page);
+    await expect(block.getByText("The house model couldn't be reached, even after four tries. Draft it again later, or write it yourself.")).toBeVisible();
+    await expect(block.getByText('Ready', { exact: true })).toBeVisible();
+    await expect(block.getByText(NOT_REPLACED, { exact: true })).toBeVisible();
+    await expect(block.getByRole('button', { name: 'Use the house draft' })).toBeVisible();
+    await expect(block.getByRole('button', { name: 'Draft it again' })).toBeVisible();
+  });
+
+  test('P10 turned around (review L5): `done` with no draft to show reads as a task it hasn’t drafted yet', async ({ page, context, baseURL }) => {
+    await onProposal(page, context, baseURL, passedWith({ status: 'done', model: 'claude-opus-5-5', appliedToDraft: true }), ADMIN);
+    const block = houseBlock(page);
+    await expect(block.getByText(NOT_YET, { exact: true })).toBeVisible();
+    await expect(block.getByRole('button', { name: 'Draft it again' })).toBeVisible();
+    await expect(block.getByText(/^Drafted by/)).toHaveCount(0);
+  });
+});
+
+test.describe('Phase 6 · while the house model drafts, the page reads every 5 s, one read at a time', () => {
+  // The page's clock is Playwright's: it runs in real time once installed, and `runFor` moves it on. Reads are
+  // counted from the page's first one, and the page logs when each read starts and ends on that same clock.
+
+  test('it starts while queued or running, waits 5 s after each read, and stops once the draft is done', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    await logReads(page);
+    await page.clock.install();
+    const reads = await onHouseProposal(page, context, baseURL, (n) =>
+      n === 1 ? passedWith({ status: 'queued' }) : n < 4 ? passedWith({ status: 'running' }) : passedWith(doneHouse(), { draft: HOUSE_FILLED_DRAFT }),
+    );
+    await expect(houseBlock(page).getByText(QUEUED, { exact: true })).toBeVisible();
+    for (const n of [2, 3, 4]) {
+      await page.clock.runFor(5_000);
+      await expect(timelineOf(page).getByText(`Read ${n}.`)).toBeVisible();
+    }
+    const block = houseBlock(page);
+    await expect(block.getByText('Ready', { exact: true })).toBeVisible();
+    await expect(block.getByText(IN_THE_FORM, { exact: true })).toBeVisible();
+    // The form was still the plain draft the pass made, untouched, so it took the draft the house filled.
+    await expect(adminPanel(page).getByLabel('Task title')).toHaveValue(HOUSE_SPEC.title);
+    await expect(adminPanel(page).getByLabel('What done means')).toHaveValue(HOUSE_SPEC.acceptanceCriteria.join('\n'));
+
+    // Done: no more reads.
+    await page.clock.runFor(15_000);
+    await page.waitForTimeout(200);
+    expect(reads).toHaveLength(4);
+    // Each read began at least 5 s after the one before it had ended, on the page's own clock.
+    const log = await readLog(page);
+    expect(log).toHaveLength(4);
+    for (let index = 1; index < log.length; index += 1) {
+      const gap = (log[index]?.start ?? 0) - (log[index - 1]?.end ?? Infinity);
+      expect(gap, `read ${index + 1}`).toBeGreaterThanOrEqual(5_000);
+    }
+  });
+
+  test('a hidden tab stops it; coming back reads at once and goes on', async ({ page, context, baseURL }) => {
+    await page.clock.install();
+    const reads = await onHouseProposal(page, context, baseURL, () => passedWith({ status: 'queued' }));
+    await page.clock.runFor(5_000);
+    await expect(timelineOf(page).getByText('Read 2.')).toBeVisible();
+
+    await setVisibility(page, 'hidden');
+    await page.clock.runFor(30_000);
+    await page.waitForTimeout(200);
+    expect(reads).toHaveLength(2);
+
+    await setVisibility(page, 'visible');
+    await expect(timelineOf(page).getByText('Read 3.')).toBeVisible();
+    await page.clock.runFor(5_000);
+    await expect(timelineOf(page).getByText('Read 4.')).toBeVisible();
+  });
+
+  test('leaving the page stops it', async ({ page, context, baseURL }) => {
+    await page.clock.install();
+    const reads = await onHouseProposal(page, context, baseURL, () => passedWith({ status: 'queued' }));
+    await serve(page, '**/api/proposals', { proposals: [card({ state: 'passed', deadline: undefined })], testTimers: false });
+    await serve(page, '**/bff/notifications', { notifications: [], unread: 0 });
+    await page.getByRole('link', { name: '← All proposals' }).click();
+    await expect(page.getByRole('heading', { name: 'Propose', level: 1 })).toBeVisible();
+    await page.clock.runFor(30_000);
+    await page.waitForTimeout(200);
+    expect(reads).toHaveLength(1);
+  });
+
+  test('a slow answer is waited for: no read starts on top of one', async ({ page, context, baseURL }) => {
+    await logReads(page);
+    await page.clock.install();
+    const slow = gate();
+    let started = 0;
+    await signInAs(context, baseURL ?? '', ADMIN);
+    await serviceDown(page);
+    await openProposals(page);
+    await serve(page, '**/api/proposals/7', publicOf(passedWith({ status: 'queued' })));
+    await serve(page, '**/bff/proposals/me', { isAdmin: true, testTimers: false });
+    await page.route('**/bff/proposals/7', async (route) => {
+      started += 1;
+      const n = started;
+      // The page's second read (its first 5 s one) is slow.
+      if (n === 2) await slow.wait;
+      await route
+        .fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(marked(passedWith({ status: 'queued' }), n)) })
+        .catch(() => undefined);
+    });
+    await page.goto('/propose/7');
+    await expect(timelineOf(page).getByText('Read 1.')).toBeVisible();
+
+    await page.clock.runFor(5_000);
+    await expect.poll(() => started).toBe(2);
+    // Six more seconds (inside the read's own 8 s limit) with that read still out: no other read starts.
+    await page.clock.runFor(6_000);
+    await page.waitForTimeout(200);
+    expect(started).toBe(2);
+
+    slow.open();
+    await expect(timelineOf(page).getByText('Read 2.')).toBeVisible();
+    await page.clock.runFor(5_000);
+    await expect(timelineOf(page).getByText('Read 3.')).toBeVisible();
+    const log = await readLog(page);
+    expect(log).toHaveLength(3);
+    expect((log[2]?.start ?? 0) - (log[1]?.end ?? Infinity)).toBeGreaterThanOrEqual(5_000);
+  });
+
+  test('a read that fails while it drafts keeps the page: the panel and what the admin is typing stay, and it says so', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    await page.clock.install();
+    await signInAs(context, baseURL ?? '', ADMIN);
+    await serviceDown(page);
+    await openProposals(page);
+    const publicReads = await serve(page, '**/api/proposals/7', publicOf(passedWith({ status: 'queued' })));
+    await serve(page, '**/bff/proposals/me', { isAdmin: true, testTimers: false });
+    let n = 0;
+    await page.route('**/bff/proposals/7', async (route) => {
+      n += 1;
+      // The page's second read (its first 5 s one) gets no answer at all.
+      if (n === 2) {
+        await route.abort();
+        return;
+      }
+      const body = n === 1 ? passedWith({ status: 'queued' }) : passedWith(doneHouse(), { draft: HOUSE_FILLED_DRAFT });
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(marked(body, n)) });
+    });
+    await page.goto('/propose/7');
+    await expect(timelineOf(page).getByText('Read 1.')).toBeVisible();
+    const admin = adminPanel(page);
+    await admin.getByLabel('Plain summary').fill('My own words.');
+    const before = publicReads.length;
+
+    await page.clock.runFor(5_000);
+    await expect.poll(() => n).toBe(2);
+    // Still the admin's page, waiting on the house, with what they typed; nothing read in public in its place.
+    await expect(staleView(page)).toHaveText(STALE_VIEW);
+    await expect(houseBlock(page).getByText(QUEUED, { exact: true })).toBeVisible();
+    await expect(admin.getByLabel('Plain summary')).toHaveValue('My own words.');
+    await expect(page.getByText("Your actions can't load right now. Try again.")).toHaveCount(0);
+    expect(publicReads).toHaveLength(before);
+
+    // The next read lands the draft: the changes being made are kept, and the block says so.
+    await page.clock.runFor(5_000);
+    await expect(timelineOf(page).getByText('Read 3.')).toBeVisible();
+    await expect(staleView(page)).toHaveText('');
+    await expect(houseBlock(page).getByText(HELD, { exact: true })).toBeVisible();
+    await expect(admin.getByLabel('Plain summary')).toHaveValue('My own words.');
+  });
+
+  test('changes being made when its draft lands are kept, and it says so; "Use the house draft" brings it in', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    await page.clock.install();
+    await onHouseProposal(page, context, baseURL, (n) =>
+      n === 1 ? passedWith({ status: 'running' }) : passedWith(doneHouse(), { draft: HOUSE_FILLED_DRAFT }),
+    );
+    const admin = adminPanel(page);
+    await expect(admin.getByLabel('Task title')).toHaveValue(PLAIN_DRAFT.title);
+
+    // The admin starts on the summary while the house drafts.
+    await admin.getByLabel('Plain summary').fill('My own words.');
+    await page.clock.runFor(5_000);
+    await expect(timelineOf(page).getByText('Read 2.')).toBeVisible();
+    const block = houseBlock(page);
+    await expect(block.getByText(HELD, { exact: true })).toBeVisible();
+    await expect(admin.getByLabel('Plain summary')).toHaveValue('My own words.');
+    await expect(admin.getByLabel('Task title')).toHaveValue(PLAIN_DRAFT.title);
+
+    await block.getByRole('button', { name: 'Use the house draft' }).click();
+    await expect(admin.getByLabel('Plain summary')).toHaveValue(HOUSE_SPEC.civilianSummary);
+    await expect(admin.getByLabel('Task title')).toHaveValue(HOUSE_SPEC.title);
+    // It is saved already (the house filled the draft), so it is in both.
+    await expect(block.getByText(IN_THE_FORM, { exact: true })).toBeVisible();
+    await expect(block.getByText(HELD, { exact: true })).toHaveCount(0);
+  });
+});
+
+test.describe('Phase 6 · "Use the house draft" and "Draft it again"', () => {
+  test('"Use the house draft" fills the title, summary, criteria and size without saving; the reward stays yours', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    const notApplied = (draft: Json) => passedWith(doneHouse({ appliedToDraft: false }), { draft });
+    await onProposal(page, context, baseURL, notApplied(SAVED_DRAFT), ADMIN);
+    const saves = await answer(page, '**/bff/proposals/7/admin/draft-task', (sent) => ({ body: notApplied(sent.body as Json) }));
+    const admin = adminPanel(page);
+    const block = houseBlock(page);
+    await expect(block.getByText(NOT_REPLACED, { exact: true })).toBeVisible();
+    await expect(admin.getByLabel('Task title')).toHaveValue(SAVED_DRAFT.title);
+
+    await admin.getByLabel('Reward').selectOption('R3');
+    await block.getByRole('button', { name: 'Use the house draft' }).click();
+    await expect(admin.getByLabel('Task title')).toHaveValue(HOUSE_SPEC.title);
+    await expect(admin.getByLabel('Plain summary')).toHaveValue(HOUSE_SPEC.civilianSummary);
+    await expect(admin.getByLabel('What done means')).toHaveValue(HOUSE_SPEC.acceptanceCriteria.join('\n'));
+    await expect(admin.getByLabel('Size')).toHaveValue('M');
+    await expect(admin.getByLabel('Reward')).toHaveValue('R3');
+    await expect(admin.getByRole('group', { name: 'Tier floor' })).toContainText('T0');
+    // Review M4: focus goes to the line that says what happened, not into the form.
+    await expect(houseStatus(page)).toHaveText(USED);
+    await expect(houseStatus(page)).toBeFocused();
+    await expect(block.getByText(NOT_REPLACED, { exact: true })).toHaveCount(0);
+    expect(saves).toEqual([]);
+
+    // Saving sends what the form now says; then the house's draft is in the form and saved.
+    await admin.getByRole('button', { name: 'Save draft' }).click();
+    await expect(outcome(page, 'admin')).toHaveText('Draft saved.');
+    expect(saves).toEqual([
+      {
+        method: 'PUT',
+        path: '/bff/proposals/7/admin/draft-task',
+        query: '',
+        body: { ...HOUSE_FILLED_DRAFT, rewardClass: 'R3' },
+      },
+    ]);
+    await expect(block.getByText(IN_THE_FORM, { exact: true })).toBeVisible();
+    await expect(houseStatus(page)).toHaveText('');
+  });
+
+  test('"Draft it again" asks first, then posts with no body; the house drafts, and its draft shows when it lands', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    await page.clock.install();
+    const reads = await onHouseProposal(page, context, baseURL, (n) =>
+      n === 1 ? passedWith({ status: 'failed', reason: 'unavailable' }) : passedWith(doneHouse(), { draft: HOUSE_FILLED_DRAFT }),
+    );
+    const posts = await answer(page, '**/bff/proposals/7/admin/house-draft', () => ({ status: 202, body: { status: 'queued' } }));
+    const block = houseBlock(page);
+
+    await block.getByRole('button', { name: 'Draft it again' }).click();
+    await expect(block.getByRole('group', { name: /^Draft it again\?/ })).toContainText(
+      'Draft it again? The house model writes a new draft from the proposal and its debate. It replaces the draft task only if nobody has saved it yet.',
+    );
+    await block.getByRole('button', { name: 'Not yet' }).click();
+    await expect(block.getByRole('button', { name: 'Draft it again' })).toBeFocused();
+    expect(posts).toEqual([]);
+
+    await block.getByRole('button', { name: 'Draft it again' }).click();
+    await block.getByRole('button', { name: 'Yes, draft it again' }).click();
+    // Review L8(b): it had never drafted this task, so not "again".
+    await expect(outcome(page, 'admin')).toHaveText(DRAFTING_FIRST);
+    await expect(outcome(page, 'admin')).toBeFocused();
+    await expect(block.getByText(QUEUED, { exact: true })).toBeVisible();
+    await expect(block.getByRole('button')).toHaveCount(0);
+    expect(posts).toEqual([{ method: 'POST', path: '/bff/proposals/7/admin/house-draft', query: '', body: undefined }]);
+    // The answer was the house's new state: nothing had to be read again.
+    expect(reads).toHaveLength(1);
+
+    await page.clock.runFor(5_000);
+    await expect(timelineOf(page).getByText('Read 2.')).toBeVisible();
+    await expect(block.getByText('Ready', { exact: true })).toBeVisible();
+    await expect(adminPanel(page).getByLabel('Task title')).toHaveValue(HOUSE_SPEC.title);
+    await page.clock.runFor(15_000);
+    await page.waitForTimeout(200);
+    expect(reads).toHaveLength(2);
+  });
+
+  test('every refusal of "Draft it again" is said in its own words; the step stays open, and a stale page reads again', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    test.setTimeout(90_000);
+    const reads = await onProposal(page, context, baseURL, passedWith(doneHouse({ appliedToDraft: false }), { draft: SAVED_DRAFT }), ADMIN);
+    const REFUSALS: Array<{ name: string; status: number; body: Json; headers?: Record<string, string>; sentence: string; readsAgain?: true }> = [
+      {
+        name: 'wrong_state',
+        status: 409,
+        body: { error: 'wrong_state', state: 'building' },
+        sentence: "It can't be drafted again (it is being built): the house model drafts a task only after it passes and before it is published. Nothing changed.",
+        readsAgain: true,
+      },
+      {
+        name: 'house_busy',
+        status: 409,
+        body: { error: 'house_busy' },
+        sentence: "The house model is already drafting this task, so nothing changed. Its new draft shows here when it's ready.",
+        readsAgain: true,
+      },
+      {
+        name: 'house_off, not_configured',
+        status: 503,
+        body: { error: 'house_off', reason: 'not_configured' },
+        sentence: "The house model is off (FORGE's server has no key for it yet), so nothing changed. Write the draft yourself.",
+        readsAgain: true,
+      },
+      {
+        name: 'house_off, switched_off',
+        status: 503,
+        body: { error: 'house_off', reason: 'switched_off' },
+        sentence: "The house model is off (it is switched off on FORGE's server), so nothing changed. Write the draft yourself.",
+        readsAgain: true,
+      },
+      {
+        name: 'rate_limited, five drafts of this proposal in a day',
+        status: 429,
+        body: { error: 'rate_limited', retryAfter: 7200, limit: 5 },
+        headers: { 'retry-after': '7200' },
+        sentence: 'The house model has drafted this proposal as often as FORGE allows in a day (5). Try again in about 2 hours.',
+      },
+      {
+        name: 'rate_limited, the daily limit across the floor',
+        status: 429,
+        body: { error: 'rate_limited', retryAfter: 600, limit: 30 },
+        headers: { 'retry-after': '600' },
+        sentence: 'The house model has made as many drafts today as FORGE allows across the floor (30). Try again in about 10 minutes.',
+      },
+      // Review L8(d): the API names which limit it was, so a daily limit set to 5 reads as the daily one.
+      {
+        name: 'rate_limited, the daily limit set to 5, scope daily',
+        status: 429,
+        body: { error: 'rate_limited', retryAfter: 600, limit: 5, scope: 'daily' },
+        headers: { 'retry-after': '600' },
+        sentence: 'The house model has made as many drafts today as FORGE allows across the floor (5). Try again in about 10 minutes.',
+      },
+      {
+        name: 'rate_limited, five drafts of this proposal, scope proposal',
+        status: 429,
+        body: { error: 'rate_limited', retryAfter: 3600, limit: 5, scope: 'proposal' },
+        headers: { 'retry-after': '3600' },
+        sentence: 'The house model has drafted this proposal as often as FORGE allows in a day (5). Try again in about 60 minutes.',
+      },
+      { name: 'admin_only', status: 403, body: { error: 'admin_only' }, sentence: "Only FORGE's admins can do that." },
+      {
+        name: 'not_configured (the BFF)',
+        status: 503,
+        body: { error: 'not_configured' },
+        sentence: "FORGE couldn't reach its service just now, so nothing changed. Try again in a minute.",
+      },
+    ];
+    let current = REFUSALS[0];
+    const posts = await answer(page, '**/bff/proposals/7/admin/house-draft', () => ({
+      status: current?.status ?? 500,
+      body: { ...current?.body, message: 'The API’s own words.' },
+      headers: current?.headers ?? {},
+    }));
+    const block = houseBlock(page);
+    await block.getByRole('button', { name: 'Draft it again' }).click();
+    for (const refusal of REFUSALS) {
+      current = refusal;
+      const before = reads.length;
+      await block.getByRole('button', { name: 'Yes, draft it again' }).click();
+      const alert = outcome(page, 'admin').getByRole('alert');
+      await expect(alert, refusal.name).toHaveText(refusal.sentence);
+      await expect(alert, refusal.name).not.toContainText('The API’s own words.');
+      await expect(outcome(page, 'admin'), refusal.name).toBeFocused();
+      if (refusal.readsAgain === true) await expect.poll(() => reads.length, refusal.name).toBeGreaterThan(before);
+      // Nothing changed: the step is still open for another try, and the house's draft is as it was.
+      await expect(block.getByRole('button', { name: 'Yes, draft it again' }), refusal.name).not.toHaveAttribute('aria-disabled', 'true');
+      await expect(block.getByText('Ready', { exact: true }), refusal.name).toBeVisible();
+    }
+    expect(posts).toHaveLength(REFUSALS.length);
+  });
+
+  test('house_busy: the page reads again and shows the house at work', async ({ page, context, baseURL }) => {
+    await onProposal(page, context, baseURL, passedWith(doneHouse()), ADMIN);
+    await answer(page, '**/bff/proposals/7/admin/house-draft', () => ({ status: 409, body: { error: 'house_busy' } }));
+    await page.unroute('**/bff/proposals/7');
+    await serve(page, '**/bff/proposals/7', passedWith(doneHouse({ status: 'queued' })));
+    const block = houseBlock(page);
+    await block.getByRole('button', { name: 'Draft it again' }).click();
+    await block.getByRole('button', { name: 'Yes, draft it again' }).click();
+    await expect(outcome(page, 'admin').getByRole('alert')).toHaveText(
+      "The house model is already drafting this task, so nothing changed. Its new draft shows here when it's ready.",
+    );
+    await expect(block.getByText(QUEUED, { exact: true })).toBeVisible();
+  });
+
+  test('no answer is not a "no": the proposal is read again, and the page says whether it went through', async ({ page, context, baseURL }) => {
+    await onProposal(page, context, baseURL, passedWith(doneHouse()), ADMIN);
+    await page.route('**/bff/proposals/7/admin/house-draft', (route) => route.abort());
+    await page.unroute('**/bff/proposals/7');
+    const reads = await serve(page, '**/bff/proposals/7', passedWith(doneHouse()));
+    const block = houseBlock(page);
+    await block.getByRole('button', { name: 'Draft it again' }).click();
+    await block.getByRole('button', { name: 'Yes, draft it again' }).click();
+    // The read back is just as the house was: it didn't happen.
+    await expect(outcome(page, 'admin').getByRole('alert')).toHaveText(didNotGoThrough('house_draft'));
+    expect(reads.length).toBeGreaterThan(0);
+
+    // This time the API took it before the connection dropped: the read back shows it queued. It had drafted
+    // this task before, so "again".
+    await page.unroute('**/bff/proposals/7');
+    await serve(page, '**/bff/proposals/7', passedWith(doneHouse({ status: 'queued' })));
+    await block.getByRole('button', { name: 'Yes, draft it again' }).click();
+    await expect(outcome(page, 'admin').getByRole('status')).toHaveText(DRAFTING_AGAIN);
+    await expect(block.getByText(QUEUED, { exact: true })).toBeVisible();
+  });
+
+  test('P15 turned around (review L4): a lost answer, and the new job has already failed by the read back: it went through', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    await onProposal(page, context, baseURL, passedWith(doneHouse({ appliedToDraft: false }), { draft: SAVED_DRAFT }), ADMIN);
+    await page.route('**/bff/proposals/7/admin/house-draft', (route) => route.abort());
+    await page.unroute('**/bff/proposals/7');
+    // The API took it, and the worker has already run it: refused, the draft from before still the latest.
+    await serve(page, '**/bff/proposals/7', passedWith(doneHouse({ status: 'failed', reason: 'refused', appliedToDraft: false }), { draft: SAVED_DRAFT }));
+    const block = houseBlock(page);
+    await block.getByRole('button', { name: 'Draft it again' }).click();
+    await block.getByRole('button', { name: 'Yes, draft it again' }).click();
+    await expect(outcome(page, 'admin').getByRole('status')).toHaveText(
+      'It went through, and the house model has already finished. The house draft below shows how it went.',
+    );
+    await expect(block.getByText('The house model declined to draft this task. Write the draft yourself.', { exact: true })).toBeVisible();
+  });
+});
+
+test.describe('Phase 6 · once published, and who sees it', () => {
+  test('building or shipped: the admin sees it read-only, with no buttons', async ({ page, context, baseURL }) => {
+    const published = (state: string, house: Json) =>
+      detail({
+        proposal: { state, deadline: undefined },
+        you: { isAdmin: true },
+        extra: { consentCount: 5, taskId: 10001, draft: { ...SAVED_DRAFT, taskId: 10001 }, house },
+      });
+    await onProposal(page, context, baseURL, published('building', doneHouse({ appliedToDraft: false })), ADMIN);
+    const block = houseBlock(page);
+    await expect(block.getByText('Ready', { exact: true })).toBeVisible();
+    await expect(block.getByRole('list', { name: 'Risks' })).toBeVisible();
+    await expect(block.getByText("The draft had already been saved, so it wasn't replaced.", { exact: true })).toBeVisible();
+    await expect(block.getByRole('button')).toHaveCount(0);
+    await expect(adminPanel(page).getByLabel('Task title')).toHaveCount(0);
+    await expect(adminPanel(page).getByRole('link', { name: 'See task #10001 on the Contribute board' })).toBeVisible();
+
+    for (const [state, house, line] of [
+      ['shipped', doneHouse(), 'Its draft filled the draft task.'],
+      ['building', { status: 'failed', reason: 'refused' }, 'The house model declined to draft this task. Write the draft yourself.'],
+      ['building', { status: 'off', reason: 'switched_off' }, "The house model is off: it is switched off on FORGE's server. Write the draft yourself."],
+    ] as const) {
+      await page.unroute('**/bff/proposals/7');
+      await serve(page, '**/bff/proposals/7', published(state, house));
+      await page.reload();
+      await expect(block.getByText(line, { exact: true }), `${state}: ${line}`).toBeVisible();
+      await expect(block.getByRole('button'), state).toHaveCount(0);
+    }
+  });
+
+  test('members never see it, even if an answer carried it: the public timeline line is all they see, and it is a plain line', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    const body = passedWith(doneHouse(), { you: { isAdmin: false } });
+    const withLine = { ...body, events: [...(body.events as Json[]), { at: at(-1), kind: 'house_drafted', message: HOUSE_LINE }] };
+    await onProposal(page, context, baseURL, withLine, MEMBER);
+    await expect(page.getByText('It has been decided, so there is nothing left to do here.')).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Admin' })).toHaveCount(0);
+    await expect(page.getByRole('group', { name: 'House draft' })).toHaveCount(0);
+    await expect(page.getByText('House draft', { exact: true })).toHaveCount(0);
+    await expect(page.getByText(HOUSE_SPEC.verdictReason)).toHaveCount(0);
+    const timeline = timelineOf(page);
+    await expect(timeline.getByText(HOUSE_LINE)).toBeVisible();
+    await expect(timeline.getByText('Admin', { exact: true })).toHaveCount(0);
+  });
+
+  test('P7 turned around (review L3): a member whose answer carries a working house never reads it every 5 s', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    await page.clock.install();
+    const reads = await onProposal(page, context, baseURL, passedWith({ status: 'queued' }, { you: { isAdmin: false } }), MEMBER);
+    await expect(page.getByRole('region', { name: 'Admin' })).toHaveCount(0);
+    for (let round = 1; round <= 3; round += 1) {
+      await page.clock.runFor(5_000);
+      await page.waitForTimeout(200);
+    }
+    expect(reads).toHaveLength(1);
+  });
+
+  test('an admin’s timeline shows the same plain line', async ({ page, context, baseURL }) => {
+    const body = passedWith(doneHouse(), { draft: HOUSE_FILLED_DRAFT });
+    const withLine = { ...body, events: [...(body.events as Json[]), { at: at(-1), kind: 'house_drafted', message: HOUSE_LINE }] };
+    await onProposal(page, context, baseURL, withLine, ADMIN);
+    const line = timelineOf(page).getByRole('listitem').filter({ hasText: HOUSE_LINE });
+    await expect(line).toBeVisible();
+    await expect(line.getByText('Admin', { exact: true })).toHaveCount(0);
+  });
+
+  test('a malformed house draft is dropped, and the page and the draft task still work', async ({ page, context, baseURL }) => {
+    const MALFORMED: Array<[string, unknown]> = [
+      ['a status this build doesn’t know', { status: 'thinking' }],
+      ['null', null],
+      ['a spec with more criteria than a task may have', doneHouse({ spec: { ...HOUSE_SPEC, acceptanceCriteria: Array.from({ length: 11 }, (_, index) => `Criterion ${index + 1}`) } })],
+      ['a spec without criteria', doneHouse({ spec: { ...HOUSE_SPEC, acceptanceCriteria: [] } })],
+      ['a reason that is not a code', { status: 'failed', reason: 'Boom: <b>bad</b>' }],
+    ];
+    const [first] = MALFORMED;
+    await onProposal(page, context, baseURL, { ...passedWith(undefined), house: first?.[1] }, ADMIN);
+    for (const [name, house] of MALFORMED) {
+      await page.unroute('**/bff/proposals/7');
+      await serve(page, '**/bff/proposals/7', { ...passedWith(undefined), house });
+      await page.reload();
+      await expect(page.getByRole('heading', { name: 'Show my properties on a map', level: 1 }), name).toBeVisible();
+      await expect(adminPanel(page).getByLabel('Task title'), name).toHaveValue(PLAIN_DRAFT.title);
+      await expect(page.getByRole('group', { name: 'House draft' }), name).toHaveCount(0);
+      await expect(page.getByText("Your actions can't load right now. Try again."), name).toHaveCount(0);
+    }
+  });
+});
+
+test.describe('Phase 6 · the house block from the keyboard', () => {
+  test('"Use the house draft" goes to its status line; "Draft it again" takes focus into its step and back; Yes keeps it while it is sent', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    await onProposal(page, context, baseURL, passedWith(doneHouse({ appliedToDraft: false }), { draft: SAVED_DRAFT }), ADMIN);
+    await answer(page, '**/bff/proposals/7/admin/house-draft', () => ({ status: 202, body: doneHouse({ status: 'queued', appliedToDraft: false }), delayMs: 800 }));
+    const block = houseBlock(page);
+    const admin = adminPanel(page);
+
+    await block.getByRole('button', { name: 'Use the house draft' }).focus();
+    await page.keyboard.press('Enter');
+    await expect(houseStatus(page)).toBeFocused();
+    await expect(houseStatus(page)).toHaveText(USED);
+    await expect(admin.getByLabel('Task title')).toHaveValue(HOUSE_SPEC.title);
+
+    await block.getByRole('button', { name: 'Draft it again' }).focus();
+    await page.keyboard.press('Enter');
+    await expect(block.getByRole('button', { name: 'Yes, draft it again' })).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(block.getByRole('button', { name: 'Not yet' })).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(block.getByRole('button', { name: 'Draft it again' })).toBeFocused();
+
+    await page.keyboard.press('Enter');
+    await expect(block.getByRole('button', { name: 'Yes, draft it again' })).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(block.getByRole('button', { name: 'Asking the house model…' })).toBeFocused();
+    await expect(outcome(page, 'admin')).toBeFocused();
+    await expect(outcome(page, 'admin')).toHaveText(DRAFTING_AGAIN);
+    // What "Use the house draft" put in the form is still there, unsaved.
+    await expect(admin.getByLabel('Task title')).toHaveValue(HOUSE_SPEC.title);
+  });
+
+  // Review M4: focus used to go into "Task title", where the next Enter (a second press, or the key held down) saved.
+  for (const how of ['pressed twice', 'held down'] as const) {
+    test(`P4 turned around: Enter ${how} on "Use the house draft" saves nothing`, async ({ page, context, baseURL }) => {
+      await onProposal(page, context, baseURL, passedWith(doneHouse({ appliedToDraft: false }), { draft: SAVED_DRAFT }), ADMIN);
+      const saves = await answer(page, '**/bff/proposals/7/admin/draft-task', (sent) => ({
+        body: passedWith(doneHouse({ appliedToDraft: false }), { draft: sent.body as Json }),
+      }));
+      await houseBlock(page).getByRole('button', { name: 'Use the house draft' }).focus();
+      if (how === 'pressed twice') {
+        await page.keyboard.press('Enter');
+        await page.keyboard.press('Enter');
+      } else {
+        await page.keyboard.down('Enter');
+        await page.keyboard.down('Enter'); // the repeats a held key sends
+        await page.keyboard.down('Enter');
+        await page.keyboard.up('Enter');
+      }
+      await expect(houseStatus(page)).toBeFocused();
+      await expect(houseStatus(page)).toHaveText(USED);
+      await expect(adminPanel(page).getByLabel('Task title')).toHaveValue(HOUSE_SPEC.title);
+      await page.waitForTimeout(1_000);
+      expect(saves).toEqual([]);
+      await expect(outcome(page, 'admin')).toHaveText('');
+    });
+  }
+});
+
+test.describe('Phase 6 · the house block at 390 px', () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+
+  test('it fits the screen with long paths, a long model name and every list, and so does its step', async ({ page, context, baseURL }) => {
+    const longPath = `apps/web/src/app/${'a'.repeat(170)}/page.tsx`;
+    expect(longPath.length).toBeLessThanOrEqual(200);
+    const spec = {
+      ...HOUSE_SPEC,
+      verdict: 'needs_clarification',
+      scopeIn: [longPath, 'tests/e2e/data-app.spec.ts'],
+      scopeOut: [longPath],
+      questions: ['q'.repeat(300)],
+      risks: Array.from({ length: 3 }, (_, index) => `Risk ${index + 1}: ${'r'.repeat(250)}`),
+    };
+    await onProposal(
+      page,
+      context,
+      baseURL,
+      passedWith(doneHouse({ spec, model: `claude-opus-5-5-${'x'.repeat(80)}`, appliedToDraft: false }), { draft: SAVED_DRAFT }),
+      ADMIN,
+    );
+    const block = houseBlock(page);
+    await expect(block.getByText('Needs answers from the mover', { exact: true })).toBeVisible();
+    const width = () => page.evaluate(() => document.documentElement.scrollWidth);
+    expect(await width()).toBeLessThanOrEqual(390);
+    const box = await block.boundingBox();
+    expect((box?.x ?? 0) + (box?.width ?? Infinity)).toBeLessThanOrEqual(390);
+
+    await block.getByRole('button', { name: 'Draft it again' }).click();
+    await expect(block.getByRole('button', { name: 'Yes, draft it again' })).toBeVisible();
+    expect(await width()).toBeLessThanOrEqual(390);
+
+    await page.unroute('**/bff/proposals/7');
+    await serve(page, '**/bff/proposals/7', passedWith({ status: 'running' }, { draft: SAVED_DRAFT }));
+    await page.reload();
+    await expect(block.getByText(DRAFTING, { exact: true })).toBeVisible();
+    expect(await width()).toBeLessThanOrEqual(390);
+  });
+
+  test('P8 and A3 turned around (review L9): a model name is cut short, a date that isn’t one is left out, and a path keeps its order', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    const rtl = 'apps/web/שלום/עולם/page.tsx';
+    const spec = { ...HOUSE_SPEC, scopeIn: [rtl, 'apps/web/src/app/apps/data/**'] };
+    await onProposal(
+      page,
+      context,
+      baseURL,
+      passedWith(doneHouse({ spec, model: `m${'x'.repeat(10_000)}`, draftedAt: `not-a-date-${'d'.repeat(500)}`, appliedToDraft: false }), {
+        draft: SAVED_DRAFT,
+      }),
+      ADMIN,
+    );
+    const block = houseBlock(page);
+    // At most 100 characters of the name, the ellipsis included, and no "on <date>" for a date that isn't one.
+    const drafted = block.getByText(/^Drafted by /);
+    await expect(drafted).toHaveText(`Drafted by m${'x'.repeat(98)}….`);
+    expect((await drafted.boundingBox())?.height ?? Infinity).toBeLessThan(200);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+
+    // Each segment of the path is isolated, so the right-to-left ones stay in the order the path has them.
+    const path = block.getByRole('list', { name: 'Scope in' }).getByRole('listitem').first().locator('code');
+    await expect(path).toHaveText(rtl);
+    const segments = path.locator('bdi');
+    await expect(segments).toHaveText(rtl.split('/'));
+    const boxes = await segments.evaluateAll((elements) => elements.map((element) => element.getBoundingClientRect().left));
+    for (let index = 1; index < boxes.length; index += 1) {
+      expect(boxes[index] ?? 0, `segment ${index + 1} sits right of segment ${index}`).toBeGreaterThan(boxes[index - 1] ?? Infinity);
+    }
+  });
+});
+
+test.describe('F6b · your own view is never traded for the public one (review H1, D5)', () => {
+  test('P3a turned around: the 60 s read fails through the BFF; the panel, and the draft being written, stay, said to be out of date', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    await page.clock.install();
+    let down = false;
+    const body = passedWith(doneHouse({ appliedToDraft: false }), { draft: SAVED_DRAFT });
+    const { publicReads, bffReads } = await onFlakyBff(page, context, baseURL, body, () =>
+      down ? { status: 502, body: { error: 'service_unreachable' } } : null,
+    );
+    await typeOwnDraft(page);
+    const publicBefore = publicReads.length;
+
+    down = true;
+    const before = bffReads.length;
+    await page.clock.runFor(60_000);
+    await expect.poll(() => bffReads.length).toBe(before + 1);
+    await expect(staleView(page)).toHaveText(STALE_VIEW);
+    // A polite live region, on the page all along, so a screen reader hears it fill.
+    await expect(staleView(page)).toHaveAttribute('aria-live', 'polite');
+    await expectOwnDraft(page);
+    expect(publicReads).toHaveLength(publicBefore);
+
+    // Once the BFF answers again, the line goes, and what was typed is still there.
+    down = false;
+    await page.clock.runFor(60_000);
+    await expect.poll(() => bffReads.length).toBe(before + 2);
+    await expect(staleView(page)).toHaveText('');
+    await expectOwnDraft(page);
+    expect(publicReads).toHaveLength(publicBefore);
+  });
+
+  test('P3c turned around: while the house drafts, neither its 5 s reads nor the 60 s one trade the panel for the public page', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    await page.clock.install();
+    let down = false;
+    const { publicReads, bffReads } = await onFlakyBff(page, context, baseURL, passedWith({ status: 'queued' }), () =>
+      down ? { status: 504, body: { error: 'upstream_timeout' } } : null,
+    );
+    await expect(houseBlock(page).getByText(QUEUED, { exact: true })).toBeVisible();
+    await typeOwnDraft(page);
+    const publicBefore = publicReads.length;
+    down = true;
+    // Three 5 s reads fail; then the page's own 60 s read fails too. (A count goes up as a read leaves; the
+    // page sets its next timer once the failure is in, so it gets a moment before the clock moves on.)
+    for (const count of [2, 3, 4]) {
+      await page.clock.runFor(5_000);
+      await expect.poll(() => bffReads.length).toBe(count);
+      await page.waitForTimeout(250);
+    }
+    await page.clock.runFor(45_000);
+    await expect.poll(() => bffReads.length).toBe(5);
+    await expect(staleView(page)).toHaveText(STALE_VIEW);
+    await expect(houseBlock(page).getByText(QUEUED, { exact: true })).toBeVisible();
+    await expectOwnDraft(page);
+    expect(publicReads).toHaveLength(publicBefore);
+  });
+
+  test('P3b turned around: back on the tab while the sign-in has ended, the panel and the text stay', async ({ page, context, baseURL }) => {
+    let answer401 = false;
+    let answerAsNobody = false;
+    const body = passedWith(doneHouse({ appliedToDraft: false }), { draft: SAVED_DRAFT });
+    const { publicReads, bffReads } = await onFlakyBff(page, context, baseURL, body, () => {
+      if (answer401) return { status: 401, body: { error: 'unauthenticated' } };
+      // The BFF reads a proposal as nobody once the session is gone: an answer with no `you` is no view to swap in.
+      if (answerAsNobody) return { body: publicOf(body) };
+      return null;
+    });
+    await typeOwnDraft(page);
+    const publicBefore = publicReads.length;
+
+    answer401 = true;
+    let before = bffReads.length;
+    await setVisibility(page, 'hidden');
+    await setVisibility(page, 'visible');
+    await expect.poll(() => bffReads.length).toBe(before + 1);
+    await expect(staleView(page)).toHaveText(STALE_VIEW);
+    await expect(adminPanel(page)).toBeVisible();
+    await expectOwnDraft(page);
+
+    answer401 = false;
+    answerAsNobody = true;
+    before = bffReads.length;
+    await setVisibility(page, 'hidden');
+    await setVisibility(page, 'visible');
+    await expect.poll(() => bffReads.length).toBe(before + 1);
+    await page.waitForTimeout(200);
+    await expect(staleView(page)).toHaveText(STALE_VIEW);
+    await expect(adminPanel(page)).toBeVisible();
+    await expectOwnDraft(page);
+    expect(publicReads).toHaveLength(publicBefore);
+  });
+
+  test('P3d turned around: "Draft it again" loses its answer and its read back fails: the outcome line, focus and the text stay', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    let down = false;
+    const body = passedWith(doneHouse({ appliedToDraft: false }), { draft: SAVED_DRAFT });
+    const { publicReads } = await onFlakyBff(page, context, baseURL, body, () => (down ? { status: 502, body: { error: 'service_unreachable' } } : null));
+    await page.route('**/bff/proposals/7/admin/house-draft', (route) => {
+      down = true;
+      return route.abort();
+    });
+    await typeOwnDraft(page);
+    const publicBefore = publicReads.length;
+    const block = houseBlock(page);
+    await block.getByRole('button', { name: 'Draft it again' }).click();
+    await block.getByRole('button', { name: 'Yes, draft it again' }).click();
+    // It can't tell whether it went through, and says so rather than claiming the page is current.
+    await expect(outcome(page, 'admin').getByRole('alert')).toHaveText(notReadBack());
+    await expect(outcome(page, 'admin')).toBeFocused();
+    await expect(staleView(page)).toHaveText(STALE_VIEW);
+    await expectOwnDraft(page);
+    expect(publicReads).toHaveLength(publicBefore);
+  });
+});
+
+test.describe('F6b · what the block says of the form comes from the form itself (review M1–M3)', () => {
+  test('P2a turned around: a draft that filled the task once, then saved over, says so, and can be brought back', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    await onProposal(page, context, baseURL, passedWith(doneHouse(), { draft: SAVED_DRAFT }), ADMIN);
+    const block = houseBlock(page);
+    const admin = adminPanel(page);
+    await expect(block.getByText(CHANGED_SINCE, { exact: true })).toBeVisible();
+    await expect(block.getByText(IN_THE_FORM, { exact: true })).toHaveCount(0);
+    await expect(admin.getByLabel('Task title')).toHaveValue(SAVED_DRAFT.title);
+
+    await block.getByRole('button', { name: 'Use the house draft' }).click();
+    await expect(admin.getByLabel('Task title')).toHaveValue(HOUSE_SPEC.title);
+    await expect(admin.getByLabel('What done means')).toHaveValue(HOUSE_SPEC.acceptanceCriteria.join('\n'));
+    await expect(houseStatus(page)).toHaveText(USED);
+    await expect(block.getByText(CHANGED_SINCE, { exact: true })).toHaveCount(0);
+    await expect(block.getByRole('button', { name: 'Use the house draft' })).toHaveCount(0);
+  });
+
+  test('P2b turned around: its draft lands on unsaved changes, and the admin saves theirs: it never claims to be in the form', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    await page.clock.install();
+    await onHouseProposal(page, context, baseURL, (n) =>
+      n === 1 ? passedWith({ status: 'running' }) : passedWith(doneHouse(), { draft: HOUSE_FILLED_DRAFT }),
+    );
+    // The API stores what the admin sent; the house's spec is still the latest, and it did fill the draft once.
+    const saves = await answer(page, '**/bff/proposals/7/admin/draft-task', (sent) => ({ body: passedWith(doneHouse(), { draft: sent.body as Json }) }));
+    const block = houseBlock(page);
+    const admin = adminPanel(page);
+    await typeOwnDraft(page);
+    await page.clock.runFor(5_000);
+    await expect(timelineOf(page).getByText('Read 2.')).toBeVisible();
+    await expect(block.getByText(HELD, { exact: true })).toBeVisible();
+    await expect(block.getByRole('button', { name: 'Use the house draft' })).toBeVisible();
+
+    await admin.getByRole('button', { name: 'Save draft' }).click();
+    await expect(outcome(page, 'admin')).toHaveText('Draft saved.');
+    expect((saves[0]?.body as Json).civilianSummary).toBe(TYPED_SUMMARY);
+    await expect(block.getByText(CHANGED_SINCE, { exact: true })).toBeVisible();
+    await expect(block.getByText(IN_THE_FORM, { exact: true })).toHaveCount(0);
+    await expect(block.getByRole('button', { name: 'Use the house draft' })).toBeVisible();
+    await expect(admin.getByLabel('Task title')).toHaveValue(PLAIN_DRAFT.title);
+  });
+
+  test('P2c turned around: "Use the house draft", then Save: it is in the form and saved, with nothing left to use', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    const notApplied = (draft: Json) => passedWith(doneHouse({ appliedToDraft: false }), { draft });
+    await onProposal(page, context, baseURL, notApplied(SAVED_DRAFT), ADMIN);
+    await answer(page, '**/bff/proposals/7/admin/draft-task', (sent) => ({ body: notApplied(sent.body as Json) }));
+    const block = houseBlock(page);
+    await block.getByRole('button', { name: 'Use the house draft' }).click();
+    await expect(houseStatus(page)).toHaveText(USED);
+    await adminPanel(page).getByRole('button', { name: 'Save draft' }).click();
+    await expect(outcome(page, 'admin')).toHaveText('Draft saved.');
+    await expect(block.getByText(IN_THE_FORM, { exact: true })).toBeVisible();
+    await expect(block.getByText(NOT_REPLACED, { exact: true })).toHaveCount(0);
+    await expect(block.getByRole('button', { name: 'Use the house draft' })).toHaveCount(0);
+    await expect(houseStatus(page)).toHaveText('');
+  });
+
+  test('P1 turned around: a new draft lands after "Use the house draft": the block no longer says the house draft is in the form', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    await page.clock.install();
+    let drafted = false;
+    const before = passedWith(doneHouse({ appliedToDraft: false }), { draft: SAVED_DRAFT });
+    const after = passedWith(doneHouse({ spec: HOUSE_SPEC_B, draftedAt: '2026-10-04T10:00:00Z', appliedToDraft: false }), { draft: SAVED_DRAFT });
+    await onHouseProposal(page, context, baseURL, () => (drafted ? after : before));
+    await answer(page, '**/bff/proposals/7/admin/house-draft', () => {
+      drafted = true;
+      return { status: 202, body: doneHouse({ status: 'queued', appliedToDraft: false }) };
+    });
+    const block = houseBlock(page);
+    const admin = adminPanel(page);
+
+    await block.getByRole('button', { name: 'Use the house draft' }).click();
+    await expect(admin.getByLabel('Task title')).toHaveValue(HOUSE_SPEC.title);
+    await expect(houseStatus(page)).toHaveText(USED);
+
+    await block.getByRole('button', { name: 'Draft it again' }).click();
+    await block.getByRole('button', { name: 'Yes, draft it again' }).click();
+    await expect(outcome(page, 'admin')).toHaveText(DRAFTING_AGAIN);
+    await page.clock.runFor(5_000);
+    await expect(timelineOf(page).getByText('Read 2.')).toBeVisible();
+    await expect(block.getByText(HOUSE_SPEC_B.verdictReason, { exact: true })).toBeVisible();
+    // The form still holds the first draft, and the block says nothing of the kind about the second.
+    await expect(admin.getByLabel('Task title')).toHaveValue(HOUSE_SPEC.title);
+    await expect(block.getByText(USED, { exact: true })).toHaveCount(0);
+    await expect(houseStatus(page)).toHaveText('');
+    await expect(block.getByText(NOT_REPLACED, { exact: true })).toBeVisible();
+
+    await block.getByRole('button', { name: 'Use the house draft' }).click();
+    await expect(admin.getByLabel('Task title')).toHaveValue(HOUSE_SPEC_B.title);
+    await expect(houseStatus(page)).toHaveText(USED);
+  });
+
+  test('P16 turned around: a re-draft lands while the form shows the first draft: the form stays, and the block says so', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    await page.clock.install();
+    // A re-draft is running; nobody has saved the house-filled draft, so the house fills it again.
+    const running = passedWith(doneHouse({ status: 'running' }), { draft: HOUSE_FILLED_DRAFT });
+    const landed = passedWith(doneHouse({ spec: HOUSE_SPEC_B, draftedAt: '2026-10-04T10:00:00Z' }), { draft: HOUSE_B_FILLED_DRAFT });
+    await onHouseProposal(page, context, baseURL, (n) => (n === 1 ? running : landed));
+    const admin = adminPanel(page);
+    const block = houseBlock(page);
+    await expect(admin.getByLabel('Task title')).toHaveValue(HOUSE_SPEC.title);
+
+    await page.clock.runFor(5_000);
+    await expect(timelineOf(page).getByText('Read 2.')).toBeVisible();
+    await expect(block.getByText(HOUSE_SPEC_B.verdictReason, { exact: true })).toBeVisible();
+    // No text changes under the admin: the form still has the first draft, and the block says the new one is saved.
+    await expect(admin.getByLabel('Task title')).toHaveValue(HOUSE_SPEC.title);
+    await expect(admin.getByLabel('What done means')).toHaveValue(HOUSE_SPEC.acceptanceCriteria.join('\n'));
+    await expect(block.getByText(EARLIER, { exact: true })).toBeVisible();
+
+    await block.getByRole('button', { name: 'Use the house draft' }).click();
+    await expect(admin.getByLabel('Task title')).toHaveValue(HOUSE_SPEC_B.title);
+    await expect(block.getByText(IN_THE_FORM, { exact: true })).toBeVisible();
+  });
+
+  test('L10: "Use the house draft" over unsaved changes can be undone; over the saved draft there is nothing to undo', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    await onProposal(page, context, baseURL, passedWith(doneHouse({ appliedToDraft: false }), { draft: SAVED_DRAFT }), ADMIN);
+    const block = houseBlock(page);
+    const admin = adminPanel(page);
+    const undo = block.getByRole('button', { name: 'Undo' });
+
+    // Over the saved draft: nothing of the admin's goes, so there is nothing to undo.
+    await block.getByRole('button', { name: 'Use the house draft' }).click();
+    await expect(houseStatus(page)).toHaveText(USED);
+    await expect(undo).toHaveCount(0);
+
+    // Over changes nobody saved: they can be put back.
+    await admin.getByLabel('Task title').fill('My own title');
+    await admin.getByLabel('Plain summary').fill(TYPED_SUMMARY);
+    await expect(houseStatus(page)).toHaveText('');
+    await block.getByRole('button', { name: 'Use the house draft' }).click();
+    await expect(admin.getByLabel('Plain summary')).toHaveValue(HOUSE_SPEC.civilianSummary);
+    await expect(houseStatus(page)).toHaveText(USED);
+    await expect(undo).toBeVisible();
+    await undo.click();
+    await expect(admin.getByLabel('Task title')).toHaveValue('My own title');
+    await expect(admin.getByLabel('Plain summary')).toHaveValue(TYPED_SUMMARY);
+    await expect(houseStatus(page)).toHaveText('');
+    await expect(undo).toHaveCount(0);
+    await expect(block.getByRole('button', { name: 'Use the house draft' })).toBeFocused();
+  });
+});
+
+test.describe('F6b · reads that fail, and reads that overlap (review L1, L2)', () => {
+  test('P6 turned around: after 3 failed reads in a row it reads once a minute, and says so, until a read works', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    await page.clock.install();
+    let down = false;
+    await signInAs(context, baseURL ?? '', ADMIN);
+    await serviceDown(page);
+    await openProposals(page);
+    await serve(page, '**/api/proposals/7', publicOf(passedWith({ status: 'running' })));
+    await serve(page, '**/bff/proposals/me', { isAdmin: true, testTimers: false });
+    const reads = await answer(page, '**/bff/proposals/7', (_sent, n) =>
+      down ? { status: 502, body: { error: 'service_unreachable' } } : { body: marked(passedWith({ status: 'running' }), n) },
+    );
+    await page.goto('/propose/7');
+    await expect(timelineOf(page).getByText('Read 1.')).toBeVisible();
+    const block = houseBlock(page);
+
+    down = true;
+    // A count goes up as a read leaves; the page sets its next timer once the failure is in.
+    for (const count of [2, 3]) {
+      await page.clock.runFor(5_000);
+      await expect.poll(() => reads.length).toBe(count);
+      await page.waitForTimeout(250);
+      await expect(block.getByText(UNCHECKED, { exact: true })).toHaveCount(0);
+    }
+    await page.clock.runFor(5_000);
+    await expect.poll(() => reads.length).toBe(4);
+    await expect(block.getByText(UNCHECKED, { exact: true })).toBeVisible();
+    await expect(block.getByText(DRAFTING, { exact: true })).toBeVisible();
+
+    // Once a minute now: nothing for the next 20 s, then the page's own 60 s read (which fails too).
+    await page.clock.runFor(20_000);
+    await page.waitForTimeout(200);
+    expect(reads).toHaveLength(4);
+    await page.clock.runFor(25_000);
+    await expect.poll(() => reads.length).toBe(5);
+    await page.waitForTimeout(250);
+
+    // The house's own read, a minute after its last, works: the line goes, and it is back to every 5 s.
+    down = false;
+    await page.clock.runFor(15_000);
+    await expect.poll(() => reads.length).toBe(6);
+    await expect(block.getByText(UNCHECKED, { exact: true })).toHaveCount(0);
+    await expect(staleView(page)).toHaveText('');
+    await page.clock.runFor(5_000);
+    await expect.poll(() => reads.length).toBe(7);
+  });
+
+  test('P5 turned around: the 60 s read never starts while one of the 5 s ones is still out', async ({ page, context, baseURL }) => {
+    await logReads(page);
+    await page.clock.install();
+    await signInAs(context, baseURL ?? '', ADMIN);
+    await serviceDown(page);
+    await openProposals(page);
+    await serve(page, '**/api/proposals/7', publicOf(passedWith({ status: 'queued' })));
+    await serve(page, '**/bff/proposals/me', { isAdmin: true, testTimers: false });
+    let n = 0;
+    let holdNext = false;
+    const held = gate();
+    await page.route('**/bff/proposals/7', async (route) => {
+      n += 1;
+      const mine = n;
+      if (holdNext) {
+        holdNext = false;
+        await held.wait;
+      }
+      await route
+        .fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(marked(passedWith({ status: 'queued' }), mine)) })
+        .catch(() => undefined);
+    });
+    await page.goto('/propose/7');
+    await expect(timelineOf(page).getByText('Read 1.')).toBeVisible();
+    for (let round = 2; round <= 11; round += 1) {
+      await page.clock.runFor(5_000);
+      await expect(timelineOf(page).getByText(`Read ${round}.`)).toBeVisible();
+    }
+    // Read 12 (a 5 s one, at 55 s) is held while the page's clock crosses the 60 s mark.
+    holdNext = true;
+    await page.clock.runFor(5_000);
+    await expect.poll(() => n).toBe(12);
+    await page.clock.runFor(6_000);
+    await page.waitForTimeout(300);
+    expect(n).toBe(12);
+    held.open();
+    await expect(timelineOf(page).getByText('Read 12.')).toBeVisible();
+    // Never two at once.
+    const log = await readLog(page);
+    for (let index = 1; index < log.length; index += 1) {
+      expect(log[index]?.start ?? 0, `read ${index + 1} starts after read ${index} ends`).toBeGreaterThanOrEqual(log[index - 1]?.end ?? Infinity);
+    }
+  });
+});
+
+test.describe('F6b · the house block’s live regions and motion (review L6, L7)', () => {
+  test('A1 turned around: under reduced motion (the suite asks for it), its spinner holds still', async ({ page, context, baseURL }) => {
+    expect(await page.evaluate(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches)).toBe(true);
+    await onProposal(page, context, baseURL, passedWith({ status: 'running' }, { draft: SAVED_DRAFT }), ADMIN);
+    const spinner = houseBlock(page).locator('.spinner');
+    await expect(spinner).toHaveCount(1);
+    expect(await spinner.evaluate((element) => getComputedStyle(element).animationName)).toBe('none');
+  });
+
+  test('A2 turned around: the status line is on the page before "Use the house draft" fills it', async ({ page, context, baseURL }) => {
+    await onProposal(page, context, baseURL, passedWith(doneHouse({ appliedToDraft: false }), { draft: SAVED_DRAFT }), ADMIN);
+    const status = houseStatus(page);
+    await expect(status).toHaveAttribute('role', 'status');
+    await expect(status).toHaveAttribute('tabindex', '-1');
+    await expect(status).toHaveText('');
+    // Watch for live regions inserted into the block: a screen reader may not read one inserted already filled.
+    await houseBlock(page).evaluate((block) => {
+      const inserted: string[] = [];
+      (window as unknown as { __inserted: string[] }).__inserted = inserted;
+      new MutationObserver((records) => {
+        for (const record of records) {
+          for (const node of Array.from(record.addedNodes)) {
+            if (node instanceof HTMLElement && (node.matches('[role="status"]') || node.querySelector('[role="status"]') !== null)) {
+              inserted.push(node.textContent ?? '');
+            }
+          }
+        }
+      }).observe(block, { subtree: true, childList: true });
+    });
+    await houseBlock(page).getByRole('button', { name: 'Use the house draft' }).click();
+    await expect(status).toHaveText(USED);
+    expect(await page.evaluate(() => (window as unknown as { __inserted: string[] }).__inserted)).toEqual([]);
+  });
+
+  test('P11 turned around: "Draft it again" is said once, by the outcome line; the block speaks only when drafting stops', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    await page.clock.install();
+    await onHouseProposal(page, context, baseURL, (n) =>
+      n === 1 ? passedWith({ status: 'failed' }) : passedWith({ status: 'failed', reason: 'refused' }),
+    );
+    await answer(page, '**/bff/proposals/7/admin/house-draft', () => ({ status: 202, body: { status: 'queued' } }));
+    const block = houseBlock(page);
+    await block.getByRole('button', { name: 'Draft it again' }).click();
+    await block.getByRole('button', { name: 'Yes, draft it again' }).click();
+    await expect(outcome(page, 'admin')).toHaveText(DRAFTING_FIRST);
+    await expect(block.getByText(QUEUED, { exact: true })).toBeVisible();
+    // In the admin panel, the outcome line is the only live region with anything to say.
+    const spoken = () =>
+      adminPanel(page).locator('[role="status"], [role="alert"], [aria-live]').evaluateAll((elements) =>
+        elements.map((element) => element.textContent?.trim() ?? '').filter((text) => text !== ''),
+      );
+    expect(await spoken()).toEqual([DRAFTING_FIRST]);
+
+    await page.clock.runFor(5_000);
+    await expect(timelineOf(page).getByText('Read 2.')).toBeVisible();
+    await expect(block.getByText('The house model declined to draft this task. Write the draft yourself.', { exact: true })).toBeVisible();
+    expect(await block.getByRole('status').allTextContents()).toContain('The house model stopped drafting: the reason is below.');
   });
 });
