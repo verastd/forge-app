@@ -37,8 +37,14 @@ for (const path of ['/', '/propose']) {
   });
 }
 
-test('/apps, signed in (it needs a sign-in), fits the screen', async ({ page }) => {
+test('/apps, signed in (it needs a sign-in), fits the screen, its nav folded into a Menu button', async ({ page }) => {
   await gotoLobby(page);
+  const menu = page.getByRole('button', { name: 'Menu' });
+  await expect(menu).toBeVisible();
+  await expectNoSideScroll(page);
+  // Hydrated: the nav knows it is on a narrow screen.
+  await expect(page.locator('header[data-chrome="lobby"]')).toHaveAttribute('data-nav-mode', 'menu');
+  await menu.click();
   await expect(page.getByRole('navigation', { name: 'Main' })).toBeVisible();
   await expectNoSideScroll(page);
 });

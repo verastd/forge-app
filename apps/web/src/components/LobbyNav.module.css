@@ -1,0 +1,188 @@
+/*
+ * The site nav on /apps (LobbyNav.tsx). Nothing here reaches any other page:
+ * every rule hangs off `.lobby`, the lobby nav's own header, and its
+ * `data-nav-mode`.
+ *
+ * - arrival and bar: the site's bar exactly (globals.css's .nav), in the
+ *   page's flow.
+ * - slide (the wall is up, on a desktop): the bar floats over the cave, so it
+ *   no longer pushes the page down, and slides up out of view while
+ *   `data-nav="hidden"`, ending `visibility: hidden` so nothing in it can be
+ *   seen, clicked or reached (its panel is `inert` too). The strip along the
+ *   top edge asks for it back.
+ * - menu, and arrival on a touch screen or 640 px and under: a 44 px menu
+ *   button in the top left corner, at the cave's own gutter (24 px, 16 px at
+ *   640 and under, as Lobby.module.css's .overlay), and the nav as a panel
+ *   under it. The cave's Exit sits right of the button, under the same media
+ *   query.
+ *
+ * With reduced motion it appears and disappears without sliding.
+ */
+
+.menuButton,
+.strip {
+  display: none;
+}
+
+/* ---- slide: the bar floats, and slides away ---- */
+
+.lobby[data-nav-mode='slide'] {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  transition:
+    transform 240ms var(--ease),
+    visibility 0s linear 0s;
+}
+
+.lobby[data-nav-mode='slide'][data-nav='hidden'] {
+  transform: translateY(calc(-100% - 2px));
+  visibility: hidden;
+  transition:
+    transform 240ms var(--ease),
+    visibility 0s linear 240ms;
+}
+
+/* The strip that asks for it back: the full width of the top edge, invisible, over the canvas and under the bar. */
+.lobby[data-nav-mode='slide'] + .strip {
+  display: block;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 39;
+  width: 100%;
+  height: 20px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  opacity: 0;
+  cursor: default;
+}
+
+/* ---- menu: a button, and the nav as a panel under it ---- */
+
+@media (pointer: coarse), (max-width: 640px) {
+  .lobby[data-nav-mode='arrival'],
+  .lobby[data-nav-mode='menu'] {
+    position: fixed;
+    top: 24px;
+    left: 24px;
+    right: auto;
+    background: none;
+    border: 0;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    transform: none;
+    visibility: visible;
+  }
+
+  .lobby[data-nav-mode='arrival'] .menuButton,
+  .lobby[data-nav-mode='menu'] .menuButton {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    background: rgba(6, 10, 18, 0.78);
+    -webkit-backdrop-filter: blur(14px) saturate(140%);
+    backdrop-filter: blur(14px) saturate(140%);
+    color: var(--accent);
+    cursor: pointer;
+  }
+
+  .menuButton[aria-expanded='true'] {
+    border-color: var(--accent-line);
+    background: var(--bg-elev);
+  }
+
+  .menuButton svg {
+    width: 22px;
+    height: 22px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+  }
+
+  .lobby[data-nav-mode='arrival'] .panel,
+  .lobby[data-nav-mode='menu'][data-nav='hidden'] .panel {
+    display: none;
+  }
+
+  .lobby[data-nav-mode='menu'][data-nav='shown'] .panel {
+    position: absolute;
+    top: calc(100% + 8px);
+    left: 0;
+    display: flex;
+    flex-direction: column;
+    flex-wrap: nowrap;
+    align-items: stretch;
+    justify-content: flex-start;
+    gap: 6px;
+    width: min(360px, calc(100vw - 32px));
+    max-width: none;
+    height: auto;
+    min-height: 0;
+    margin: 0;
+    padding: 10px 12px 12px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    background: rgba(6, 10, 18, 0.94);
+    -webkit-backdrop-filter: blur(14px) saturate(140%);
+    backdrop-filter: blur(14px) saturate(140%);
+    box-shadow: var(--shadow-lift);
+  }
+
+  /* The top row: the wordmark, then the pill, the bell and the account slot, whose panels open down over the links. */
+  .panel :global(.nav-panel-head) {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 44px;
+  }
+
+  /* The bar hides the word at 640 px and under; the panel has room for it. */
+  .panel :global(.wordmark-text) {
+    display: inline;
+  }
+
+  .panel :global(.nav-links) {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 2px;
+  }
+
+  .panel :global(.nav-link) {
+    padding: 11px 12px;
+  }
+
+  .panel :global(.nav-link)[aria-current='page']::after {
+    top: 11px;
+    bottom: 11px;
+    left: 0;
+    right: auto;
+    width: 3px;
+    height: auto;
+  }
+}
+
+@media (max-width: 640px) {
+  .lobby[data-nav-mode='arrival'],
+  .lobby[data-nav-mode='menu'] {
+    top: 16px;
+    left: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lobby[data-nav-mode='slide'],
+  .lobby[data-nav-mode='slide'][data-nav='hidden'] {
+    transition: none;
+  }
+}

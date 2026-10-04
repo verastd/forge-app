@@ -5,8 +5,10 @@
  * contract), with `chromeModeFor` from @forge/lobby:
  *
  * - "site" — the normal site nav plus footer. Everything not under /apps.
- * - "lobby" — /apps exactly. The same site nav, but no footer, so the
- *   full-bleed 3D lobby owns the rest of the viewport.
+ * - "lobby" — /apps exactly. The same site nav, but stepping out of the 3D
+ *   lobby's way (LobbyNav.tsx: it slides up once the wall is up, or is a menu
+ *   button on a phone), and no footer, so the full-bleed lobby owns the
+ *   viewport.
  * - "app" — any /apps/<slug> route. No site nav, no footer: the app renders
  *   its own AppBar instead (see AppBar.tsx), so there is never more than one
  *   top bar on screen.
@@ -26,6 +28,7 @@ import { usePathname } from 'next/navigation';
 import { useEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
 
+import { LobbyNav } from './LobbyNav';
 import { Nav } from './Nav';
 
 /** How long to keep looking for the new page's heading (or marked element). */
@@ -74,7 +77,7 @@ export function SiteChrome({ children }: { children: ReactNode }) {
 
   return (
     <>
-      <Nav />
+      {mode === 'lobby' ? <LobbyNav /> : <Nav />}
       {children}
       {mode === 'site' && <footer className="footer">beta · testnet</footer>}
     </>

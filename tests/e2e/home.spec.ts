@@ -85,18 +85,20 @@ test.describe('aria-current tracks the active section', () => {
 
   for (const { path, label } of SECTIONS) {
     test(`marks ${label} current on ${path}, and nothing else`, async ({ page }) => {
-      if (path === '/apps') {
-        // The lobby needs a sign-in (the middleware): the practice account.
+      // The lobby needs a sign-in (the middleware): the practice account. Its nav
+      // slides out of sight once the 3D wall is up, so it is read even then.
+      const lobby = path === '/apps';
+      if (lobby) {
         await gotoLobby(page);
       } else {
         await page.goto(path);
       }
-      const nav = page.getByRole('navigation', { name: 'Main' });
+      const nav = page.getByRole('navigation', { name: 'Main', includeHidden: lobby });
 
-      await expect(nav.getByRole('link', { name: label })).toHaveAttribute('aria-current', 'page');
+      await expect(nav.getByRole('link', { name: label, includeHidden: lobby })).toHaveAttribute('aria-current', 'page');
       for (const other of SECTIONS) {
         if (other.label !== label) {
-          await expect(nav.getByRole('link', { name: other.label })).not.toHaveAttribute(
+          await expect(nav.getByRole('link', { name: other.label, includeHidden: lobby })).not.toHaveAttribute(
             'aria-current',
             'page',
           );

@@ -57,13 +57,13 @@ import { isDemoMode } from '../../lib/mode';
 import { useSession } from '../SessionProvider';
 import styles from './Lobby.module.css';
 import type { LobbySceneProps, SceneEvents } from './LobbyScene';
+import { isFallback, publishLobbyState } from './lobbyState';
+import type { LobbyState } from './lobbyState';
 import { createPresenceFeed } from './presence/types';
 import type { FeedKind, PresenceFeed } from './presence/types';
 import type { Hit } from './scene/controls';
 
 const LobbyScene = dynamic(() => import('./LobbyScene'), { ssr: false });
-
-type LobbyState = 'loading' | 'ready' | 'unsupported' | 'lost' | 'off';
 
 const MESSAGES: Partial<Record<LobbyState, string>> = {
   off: 'The 3D lobby is switched off right now.',
@@ -320,6 +320,9 @@ export function Lobby({ heading, directory }: { heading: ReactNode; directory: R
 
   const say = useCallback((text: string) => setToast((current) => ({ text, on: true, id: current.id + 1 })), []);
 
+  // The chrome around the lobby (SiteChrome's lobby nav) follows its state.
+  useEffect(() => () => publishLobbyState('none'), []);
+
   const open = (hit: Hit, pose: CameraState): void => {
     saveCamera(pose);
     if (hit.lit) {
@@ -404,9 +407,12 @@ export function Lobby({ heading, directory }: { heading: ReactNode; directory: R
           : ready && webgl === 'yes'
             ? 'ready'
             : 'loading';
+  useEffect(() => {
+    publishLobbyState(state);
+  }, [state]);
   const message = MESSAGES[state];
   /** No wall to show: the heading, the message and the directory are the page. */
-  const fallback = state === 'off' || state === 'unsupported' || state === 'lost';
+  const fallback = isFallback(state);
   const voice = !feedInfo.voice ? 'unavailable' : micOn ? 'on' : 'off';
 
   return (
