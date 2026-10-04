@@ -573,6 +573,11 @@ def _strict_authority(authority: str) -> tuple[str, int | None] | None:
 
 
 def _canonical_ipv6(text: str) -> bool:
+    # A browser writes an embedded IPv4 part in hex (`::ffff:7f00:1`), while Python's own
+    # spelling of such an address differs between 3.12 patch releases, so a dotted IPv6
+    # literal is never one a browser shows as written: refuse it outright.
+    if "." in text:
+        return False
     try:
         return ipaddress.IPv6Address(text).compressed == text
     except ValueError:

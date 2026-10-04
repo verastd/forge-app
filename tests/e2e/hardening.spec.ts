@@ -106,7 +106,7 @@ test.describe('protected paths', () => {
     ]) {
       expect(manifest.protectedPaths, path).toContain(path);
       expect(readFileSync(join(ROOT, 'CODEOWNERS'), 'utf8'), path).toMatch(
-        new RegExp(`^/${path.replace(/[.[\]]/g, '\\$&')}\\s+@verastd @forge-cold$`, 'm'),
+        new RegExp(`^/${path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s+@verastd @forge-cold$`, 'm'),
       );
     }
   });
