@@ -16,10 +16,11 @@
  *   directory shows while a keyboard user is in it. Without the wall
  *   (switched off, no WebGL2, or a view that broke) they are the page.
  * - Presence: one feed per visit, connected on mount and closed on unmount.
- *   The scene publishes to it and draws its peers every frame; the mic
- *   button, and "Rejoin here" after the lobby was opened in another tab or
- *   device, are the only other things that talk to it. The button shows the
- *   feed's own word on the mic, which a reconnect can turn off.
+ *   The scene publishes to it and draws its peers every frame; the people
+ *   panel (VoicePanel) shows its voice snapshot and is the only other thing
+ *   that talks to it: the mic, deafen, per-person mute, "Turn on sound",
+ *   "Try again" after a join that failed in this browser, and "Rejoin here"
+ *   after the lobby was opened in another tab or device.
  * - The cave is its own experience: a tap on a lit panel saves the camera and
  *   opens the app; a tap on an empty slot stays in the cave and only says so
  *   (the toast). Exit, top left whenever the wall is the page, is the other
@@ -31,12 +32,17 @@
  *   that app's directory link; with the wall, SiteChrome's arrival focus on
  *   the page's h1 stands (see ArrivalFocus).
  * - The veil, the hint, the toast, the touch stick and the lift buttons,
- *   as in the prototype, and Exit.
+ *   as in the prototype, and Exit. The hint says how far a voice carries,
+ *   except on the practice build, which has none.
+ * - A join that failed in this browser tries once more by itself, once the
+ *   scene is up (a slow phone may simply have been busy building it).
  *
  * The root carries `data-lobby` and the state attributes e2e reads:
  * `data-lobby-state`, `data-focus`, `data-motion`, `data-peers`,
- * `data-voice` and `data-feed` here, and `data-x/y/z/yaw`, which the scene
- * writes itself ten times a second.
+ * `data-voice` (unavailable, off or on), `data-feed`, `data-sound`
+ * (blocked, on, or none without voice), `data-room-sound` and
+ * `data-deafened` here, and `data-x/y/z/yaw`, which the scene writes itself
+ * ten times a second.
  */
 
 import { useFlags } from '@forge/flags/react';
@@ -64,8 +70,9 @@ import type { LobbySceneProps, SceneEvents } from './LobbyScene';
 import { isFallback, publishLobbyState } from './lobbyState';
 import type { LobbyState } from './lobbyState';
 import { createPresenceFeed } from './presence/types';
-import type { FeedKind, PresenceFeed } from './presence/types';
+import type { PresenceFeed } from './presence/types';
 import type { Hit } from './scene/controls';
+import { VOICE_RANGE_HINT, VoicePanel, useFeedSummary } from './VoicePanel';
 
 const LobbyScene = dynamic(() => import('./LobbyScene'), { ssr: false });
 
@@ -219,17 +226,6 @@ function ArrivalFocus({ root, fallback }: { root: RefObject<HTMLDivElement | nul
   return null;
 }
 
-// ---------- presence ----------
-
-interface FeedInfo {
-  kind: FeedKind;
-  voice: boolean;
-  /** The lobby is open in another tab or device, which took this one's seat. */
-  elsewhere: boolean;
-}
-
-const NO_FEED: FeedInfo = { kind: 'none', voice: false, elsewhere: false };
-
 // ---------- the shell ----------
 
 export function Lobby({ heading, directory }: { heading: ReactNode; directory: ReactNode }) {
@@ -243,15 +239,12 @@ export function Lobby({ heading, directory }: { heading: ReactNode; directory: R
   const [ready, setReady] = useState(false);
   const [focus, setFocus] = useState('');
   const [peerCount, setPeerCount] = useState(0);
-  const [micOn, setMicOn] = useState(false);
-  const [feedInfo, setFeedInfo] = useState<FeedInfo>(NO_FEED);
+  const [feed, setFeed] = useState<PresenceFeed | null>(null);
   const [toast, setToast] = useState({ text: '', on: false, id: 0 });
 
+  /** The same feed, for the scene, which reads it every frame. */
   const feedRef = useRef<PresenceFeed | null>(null);
-  /** Reads the feed into state now; the effect that owns the feed sets it. */
-  const syncRef = useRef<() => void>(() => undefined);
   const rootRef = useRef<HTMLDivElement>(null);
-  const nearRef = useRef<HTMLDivElement>(null);
   const micRef = useRef<HTMLButtonElement>(null);
   const stickRef = useRef<HTMLDivElement>(null);
   const knobRef = useRef<HTMLDivElement>(null);
@@ -273,46 +266,35 @@ export function Lobby({ heading, directory }: { heading: ReactNode; directory: R
     if (!live) {
       return undefined;
     }
-    const feed = createPresenceFeed({ demo: isDemoMode(), me: login === null ? null : { name: login } });
-    feedRef.current = feed;
-    let active = true;
-    const sync = (): void => {
-      if (!active) {
-        return;
-      }
-      // What presence runs on now, not which feed this is: a LiveKit feed
-      // that was refused a token, or couldn't reach the room, reports 'none'.
-      const status = feed.status();
-      const next: FeedInfo = {
-        kind: status.kind,
-        voice: feed.voiceAvailable(),
-        elsewhere: status.kind === 'none' && status.reason === 'elsewhere',
-      };
-      setFeedInfo((prev) =>
-        prev.kind === next.kind && prev.voice === next.voice && prev.elsewhere === next.elsewhere ? prev : next,
-      );
-      // The feed's own word on the mic: off while voice is unavailable, and
-      // off after a reconnect that rejoined the room.
-      setMicOn(feed.micOn());
-    };
-    syncRef.current = sync;
-    sync();
-    void feed.connect().then(sync, sync);
-    const timer = window.setInterval(sync, 1000);
+    const next = createPresenceFeed({ demo: isDemoMode(), me: login === null ? null : { name: login } });
+    feedRef.current = next;
+    setFeed(next);
+    // The feed says what changed (onVoice): the panel and the root's attributes read it as a store.
+    void next.connect();
     return () => {
-      active = false;
-      syncRef.current = () => undefined;
-      window.clearInterval(timer);
-      if (feedRef.current === feed) {
+      if (feedRef.current === next) {
         feedRef.current = null;
       }
-      feed.close();
-      setFeedInfo(NO_FEED);
-      setMicOn(false);
+      next.close();
+      setFeed(null);
       setPeerCount(0);
       setFocus('');
     };
   }, [live, login]);
+
+  const presence = useFeedSummary(feed);
+  const practice = isDemoMode();
+
+  // A join that failed in this browser (more likely while the scene is still
+  // building, on a slow phone) gets one more go by itself, once the scene is
+  // up; after that it's the panel's "Try again".
+  const retried = useRef<PresenceFeed | null>(null);
+  useEffect(() => {
+    if (ready && presence.failed && feed !== null && retried.current !== feed) {
+      retried.current = feed;
+      void feed.connect();
+    }
+  }, [ready, presence.failed, feed]);
 
   useEffect(() => {
     if (!toast.on) {
@@ -359,7 +341,6 @@ export function Lobby({ heading, directory }: { heading: ReactNode; directory: R
     }
     return {
       root,
-      near: nearRef.current,
       mic: micRef.current,
       stick: stickRef.current,
       knob: knobRef.current,
@@ -368,36 +349,12 @@ export function Lobby({ heading, directory }: { heading: ReactNode; directory: R
     };
   }, []);
 
-  /** The room keeps one seat per member: joining again here takes it back from the other tab. */
+  /**
+   * Joins again: "Rejoin here" (the room keeps one seat per member, so this
+   * takes it back from the other tab), "Rejoin" and "Try again".
+   */
   const rejoin = (): void => {
-    const feed = feedRef.current;
-    if (!feed) {
-      return;
-    }
-    const sync = syncRef.current;
-    void feed.connect().then(sync, sync);
-    sync();
-  };
-
-  const toggleMic = async (): Promise<void> => {
-    const feed = feedRef.current;
-    if (!feed || !feedInfo.voice) {
-      return;
-    }
-    const want = !micOn;
-    let result = false;
-    try {
-      result = await feed.setMic(want);
-    } catch {
-      result = false;
-    }
-    if (feedRef.current !== feed) {
-      return;
-    }
-    setMicOn(result);
-    if (want && !result) {
-      say('Mic blocked');
-    }
+    void feedRef.current?.connect();
   };
 
   const state: LobbyState = loading
@@ -417,7 +374,6 @@ export function Lobby({ heading, directory }: { heading: ReactNode; directory: R
   const message = MESSAGES[state];
   /** No wall to show: the heading, the message and the directory are the page. */
   const fallback = isFallback(state);
-  const voice = !feedInfo.voice ? 'unavailable' : micOn ? 'on' : 'off';
 
   return (
     <div
@@ -428,8 +384,11 @@ export function Lobby({ heading, directory }: { heading: ReactNode; directory: R
       data-focus={live ? focus : ''}
       data-motion={reducedMotion ? 'reduced' : 'full'}
       data-peers={String(live ? peerCount : 0)}
-      data-voice={voice}
-      data-feed={feedInfo.kind}
+      data-voice={presence.voice}
+      data-feed={presence.feed}
+      data-sound={presence.sound}
+      data-room-sound={presence.roomSound}
+      data-deafened={String(presence.deafened)}
     >
       {live && (
         <SceneBoundary onError={() => setBroken(true)}>
@@ -475,27 +434,7 @@ export function Lobby({ heading, directory }: { heading: ReactNode; directory: R
           </div>
         </div>
         {live && (
-          <aside className={styles.chat} aria-label="People nearby">
-            {feedInfo.elsewhere && (
-              <div className={styles.elsewhere}>
-                <p role="status">{"You're in the lobby in another tab or device."}</p>
-                <button type="button" onClick={rejoin}>
-                  Rejoin here
-                </button>
-              </div>
-            )}
-            <div ref={nearRef} className={styles.near} />
-            <button
-              ref={micRef}
-              type="button"
-              className={cx(styles.mic, micOn && styles.on)}
-              disabled={!feedInfo.voice}
-              aria-pressed={feedInfo.voice ? micOn : undefined}
-              onClick={() => void toggleMic()}
-            >
-              <span>{!feedInfo.voice ? 'Voice unavailable' : micOn ? 'Mic · live' : 'Mic'}</span>
-            </button>
-          </aside>
+          <VoicePanel feed={feed} micRef={micRef} reducedMotion={reducedMotion} practice={practice} onRejoin={rejoin} />
         )}
       </div>
 
@@ -504,7 +443,8 @@ export function Lobby({ heading, directory }: { heading: ReactNode; directory: R
           <div className={styles.hint}>
             <span className={styles.desk}>Drag to look · WASD walk · Space/Shift rise, fall</span>
             <span className={styles.mob}>Drag to look · stick to walk</span>
-            <span>Tap a panel to open · Voice carries 9 m</span>
+            {/* The practice build carries no voice, so it has no range to tell. */}
+            <span>{practice ? 'Tap a panel to open' : `Tap a panel to open · ${VOICE_RANGE_HINT}`}</span>
           </div>
           <div ref={stickRef} className={styles.stick} aria-hidden="true">
             <div ref={knobRef} />

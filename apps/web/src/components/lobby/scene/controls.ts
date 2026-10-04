@@ -9,11 +9,13 @@
  * Angles follow @forge/lobby's camera.ts: yaw grows turning right, pitch
  * grows looking down. The look eases toward its target (faster when the
  * visitor asked for reduced motion); walking is an acceleration with drag,
- * clamped into the cave each step.
+ * clamped into the cave each step, and never faster than @forge/lobby's
+ * CAMERA_SPEED (which a fast wheel could otherwise pass): a peer's packets
+ * that move faster than that are dropped as implausible.
  */
 
 import * as THREE from 'three';
-import { CAMERA_LIMITS } from '@forge/lobby';
+import { CAMERA_LIMITS, CAMERA_SPEED } from '@forge/lobby';
 
 /** What a tap or the crosshair lands on: a lit app's panel, or an empty slot by index. */
 export type Hit = { slug: string; lit: true } | { slot: number; lit: false };
@@ -303,6 +305,12 @@ export function createControls(motion: Motion, opts: ControlsOptions): Controls 
 
       motion.vel.addScaledVector(acc, dt * 22);
       motion.vel.multiplyScalar(Math.pow(0.02, dt));
+      const across = Math.hypot(motion.vel.x, motion.vel.z);
+      if (across > CAMERA_SPEED.walk) {
+        motion.vel.x *= CAMERA_SPEED.walk / across;
+        motion.vel.z *= CAMERA_SPEED.walk / across;
+      }
+      motion.vel.y = THREE.MathUtils.clamp(motion.vel.y, -CAMERA_SPEED.rise, CAMERA_SPEED.rise);
       motion.pos.addScaledVector(motion.vel, dt);
 
       const r = Math.hypot(motion.pos.x, motion.pos.z);

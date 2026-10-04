@@ -16,9 +16,10 @@ export type ChromeMode = 'site' | 'lobby' | 'app';
 
 export function chromeModeFor(pathname: string): ChromeMode {
   // usePathname() carries no query or hash, but a caller passing a full href
-  // (`/apps?from=data`) must get the same answer. split() always returns a
-  // first element; `?? ''` is only for the type checker.
-  const path = pathname.split(/[?#]/, 1)[0] ?? '';
+  // (`/apps?from=data`) must get the same answer: everything before the
+  // first `?` or `#`.
+  const end = pathname.search(/[?#]/);
+  const path = end === -1 ? pathname : pathname.slice(0, end);
   if (path === '/apps' || path === '/apps/') {
     return 'lobby';
   }
