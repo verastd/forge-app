@@ -189,10 +189,8 @@ export function ContributionRecord() {
             {profile.pendingRewards.map((reward) => (
               <li key={`${reward.pr}-${reward.survivalEndsAt}`} className="card row">
                 <div>
-                  <p className="card-title">${reward.usdEquivalent}-equiv</p>
-                  <p className="faint">
-                    for your contribution to task #{reward.pr} · {reward.rewardClass}
-                  </p>
+                  <p className="card-title">{reward.rewardClass} reward</p>
+                  <p className="faint">for your contribution to task #{reward.pr}</p>
                 </div>
                 <span className="spacer" />
                 <Chip tone="warn">unlocks in {formatDaysLeft(reward.survivalEndsAt)}</Chip>

@@ -90,7 +90,6 @@ export const TaskCardSchema = z.object({
   civilianSummary: z.string(),
   size: z.enum(SIZES),
   rewardClass: z.enum(REWARD_CLASSES),
-  rewardUsd: z.number().optional(),
   tierFloor: z.enum(TIER_FLOORS),
   status: z.enum(['open', 'claimed']),
   url: z.string(),
@@ -985,7 +984,6 @@ export const ContributorProfileSchema = z.object({
     z.object({
       pr: z.number().int(),
       rewardClass: z.enum(REWARD_CLASSES),
-      usdEquivalent: z.number(),
       survivalEndsAt: z.string(),
     }),
   ),

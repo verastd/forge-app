@@ -1122,7 +1122,7 @@ eligible sets), and also:
    - is listed after the fixtures, and claimed, handed to an agent (the
      connector included) and merged like any other task;
    - carries the labels `agent-ready`, `status:open`, `size:<size>` and
-     `from-proposal`, and its reward class but no dollar amount;
+     `from-proposal`, and its reward class (no task carries a dollar amount);
    - links to the proposal's page, `<FORGE_PUBLIC_ORIGIN>/propose/<id>`
      (a bare `/propose/<id>` while that is unset or unusable).
 5. When the Bridge records the task's pull request as merged, the proposal

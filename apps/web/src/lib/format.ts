@@ -90,25 +90,38 @@ export function formatCountdown(msRemaining: number): string {
 
 /* --- task vocabulary ------------------------------------------------------- */
 
-/** Size, priced in the only currency a Civilian has: their agent's time. */
-export const SIZE_LABEL: Record<Size, string> = {
-  XS: '~an hour',
-  S: "~an evening of your agent's time",
-  M: '~a weekend',
+/**
+ * What a task costs a contributor: roughly how long their agent runs on it,
+ * and, the technical part shown only on hover or focus, roughly how many
+ * tokens of model use that takes, counting the context it re-reads as it
+ * works. Rough guides from the task's size alone, since agents differ a lot
+ * in speed and appetite. No task shows a dollar amount.
+ */
+export const RUN_ESTIMATE: Record<Size, { time: string; tokens: string }> = {
+  XS: { time: '~15 min', tokens: '0.5M to 1M' },
+  S: { time: '~1 hour', tokens: '2M to 4M' },
+  M: { time: '~3 hours', tokens: '6M to 12M' },
 };
+
+/** The run-time chip's text: "Agent runs ~1 hour". */
+export function runTimeLabel(size: Size): string {
+  return `Agent runs ${RUN_ESTIMATE[size].time}`;
+}
+
+/** The line behind the run-time chip, for anyone who wants the technical figure. */
+export function tokenEstimateLabel(size: Size): string {
+  return `Roughly ${RUN_ESTIMATE[size].tokens} tokens of model use, counting the context the agent re-reads as it works. It varies a lot by agent.`;
+}
 
 export const SIZE_FILTER_LABEL: Record<Size, string> = {
-  XS: 'An hour',
-  S: 'An evening',
-  M: 'A weekend',
+  XS: 'About 15 min',
+  S: 'About an hour',
+  M: 'About 3 hours',
 };
 
-/** "$200-equiv" — rewards are token-denominated, quoted in dollars (PRD §7.2). */
-export function rewardLabel(rewardClass: RewardClass, rewardUsd?: number): string | null {
-  if (rewardClass === 'none') {
-    return null;
-  }
-  return rewardUsd === undefined ? 'reward attached' : `$${rewardUsd}-equiv`;
+/** A rewarded task says so, with no amount: FORGE shows no dollar figures. */
+export function rewardLabel(rewardClass: RewardClass): string | null {
+  return rewardClass === 'none' ? null : 'reward attached';
 }
 
 /** Tier floors, said the way a person would say them (PRD §6). */

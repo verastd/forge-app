@@ -172,13 +172,28 @@ describe('TaskCardSchema', () => {
       civilianSummary: 'Speed up a slow page on phones.',
       size: 'S',
       rewardClass: 'R1',
-      rewardUsd: 25,
       tierFloor: 'T0',
       status: 'open',
       url: 'https://github.com/verastd/forge-app/issues/42',
       labels: ['agent-ready', 'status:open'],
     });
     expect(result.success).toBe(true);
+  });
+
+  it('carries no dollar amount: a stray rewardUsd is dropped, never passed on', () => {
+    const parsed = TaskCardSchema.parse({
+      id: 42,
+      title: 'Make the history page load faster on mobile',
+      civilianSummary: 'Speed up a slow page on phones.',
+      size: 'S',
+      rewardClass: 'R1',
+      rewardUsd: 25,
+      tierFloor: 'T0',
+      status: 'open',
+      url: 'https://github.com/verastd/forge-app/issues/42',
+      labels: [],
+    });
+    expect(parsed).not.toHaveProperty('rewardUsd');
   });
 
   it('accepts a claimed card with the optional claim fields', () => {
@@ -621,7 +636,7 @@ describe('ContributorProfileSchema', () => {
       merged: 7,
       survivalRate: 0.92,
       pendingRewards: [
-        { pr: 101, rewardClass: 'R2', usdEquivalent: 50, survivalEndsAt: '2026-08-24T00:00:00Z' },
+        { pr: 101, rewardClass: 'R2', survivalEndsAt: '2026-08-24T00:00:00Z' },
       ],
       ledger: [{ kind: 'merge', refPr: 101, points: 10, at: '2026-08-10T00:00:00Z' }],
     });
@@ -658,7 +673,7 @@ describe('ContributorProfileSchema', () => {
       tier: 'T0',
       merged: 0,
       survivalRate: 0,
-      pendingRewards: [{ pr: 101, rewardClass: 'R9', usdEquivalent: 50, survivalEndsAt: 'x' }],
+      pendingRewards: [{ pr: 101, rewardClass: 'R9', survivalEndsAt: 'x' }],
       ledger: [],
     });
     expect(result.success).toBe(false);

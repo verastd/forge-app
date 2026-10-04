@@ -177,8 +177,10 @@ decided:
   forge-app's own issues and pull requests reach #10001, that would close
   an unrelated issue. The repo is around #18, so this is far off, and it
   isn't handled yet.
-- **A published task has a reward class but no dollar amount.** The draft
-  sets the class (`none` or R1 to R4); nothing maps it to an amount yet.
+- **A task has a reward class but no dollar amount.** The draft sets the
+  class (`none` or R1 to R4), and nothing maps a class to an amount. No task
+  carries a dollar figure at all (2026-10-04): a card shows roughly how long
+  an agent runs on it instead, with a token estimate behind a hover.
 - **No migration.** Phase 5's tables are all new (`members`,
   `notifications`, the `proposal_` tables and `bridge_published_tasks`),
   so a state database from Phase 4 gains them at the API's next start and
