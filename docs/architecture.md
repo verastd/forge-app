@@ -23,11 +23,11 @@ incomplete), `experimental` (scaffold/stub only).
 
 | Path | Purpose | Owners | Stability | Tier-floor notes |
 |---|---|---|---|---|
-| `apps/web` | Next.js 15 App Router, TypeScript strict. The app itself, including the Bridge's `/contribute` surface, GitHub sign-in (`src/app/auth/`, `src/app/bff/`), the FORGE connector's consent page (`src/app/oauth/`) and setup page (`src/app/connect/`), and the Apps lobby at `/apps` (`src/components/lobby/`, with its LiveKit token route in `src/app/api/lobby/`) | `@verastd`; `src/app/auth/`, `src/app/bff/`, `src/app/oauth/`, `src/app/connect/`, `src/app/api/lobby/`, `src/middleware.ts`, `src/lib/session.ts`, `src/lib/auth/`, `src/lib/launch.ts`, `src/lib/mode.ts`, `src/lib/bff-forward.ts`, `src/lib/handoff.ts`, `src/lib/api.ts`, `src/components/contribute/` and `next.config.mjs` need cold-account approval | beta — live and demo builds both work end to end; no unit-test runner yet, so it's exempt from the changed-line coverage gate | Open to all tiers per task; the cold-account sub-paths above are effectively T2+ in practice |
-| `apps/api` | FastAPI (Python 3.12, `uv`), package `forge_api`. App backend, the Bridge's server-side service and the FORGE connector (OAuth + MCP) | `@verastd`; `routers/auth*`, `routers/pay*`, `routers/oauth.py`, `routers/mcp.py`, `routers/bridge.py`, `services/identity.py`, `services/oauth.py`, `services/mcp_server.py`, `services/vault.py`, `services/rail_adapters/`, `services/bridge_mcp.py`, `services/bridge.py`, `services/brief.py`, `services/rails.py`, `models.py`, `main.py` and `fixtures/` need cold-account approval | beta — `health`, `flags`, `bridge`, `oauth`, `mcp`, and `upland`/`upland_scrape` routers are live, each with pytest coverage; `auth*`/`pay*` don't exist yet (identity verification lives in `services/identity.py`, consumed by the `upland` and `bridge` routers' dependencies, not a dedicated router) | `auth*`/`pay*`/`services/identity.py`, the connector, vault, rail and brief paths, the Bridge's key-carrying code and the task fixtures: cold-account approval, effectively T2+ in practice |
+| `apps/web` | Next.js 15 App Router, TypeScript strict. The app itself, including the Bridge's `/contribute` surface, GitHub sign-in (`src/app/auth/`, `src/app/bff/`), the FORGE connector's consent page (`src/app/oauth/`) and setup page (`src/app/connect/`), the Apps lobby at `/apps` (`src/components/lobby/`, with its LiveKit token route in `src/app/api/lobby/`), and the Propose floor at `/propose` (`src/app/propose/`) with its bell (`src/components/NotificationBell.tsx`) | `@verastd`; `src/app/auth/`, `src/app/bff/`, `src/app/oauth/`, `src/app/connect/`, `src/app/api/lobby/`, `src/middleware.ts`, `src/lib/session.ts`, `src/lib/auth/`, `src/lib/launch.ts`, `src/lib/mode.ts`, `src/lib/bff-forward.ts`, `src/lib/handoff.ts`, `src/lib/api.ts`, `src/components/contribute/` and `next.config.mjs` need cold-account approval | beta — live and demo builds both work end to end; no unit-test runner yet, so it's exempt from the changed-line coverage gate | Open to all tiers per task; the cold-account sub-paths above are effectively T2+ in practice |
+| `apps/api` | FastAPI (Python 3.12, `uv`), package `forge_api`. App backend, the Bridge's server-side service, the FORGE connector (OAuth + MCP), and the Propose floor's rules, members and notifications | `@verastd`; `routers/auth*`, `routers/pay*`, `routers/oauth.py`, `routers/mcp.py`, `routers/bridge.py`, `services/identity.py`, `services/oauth.py`, `services/mcp_server.py`, `services/vault.py`, `services/rail_adapters/`, `services/bridge_mcp.py`, `services/bridge.py`, `services/brief.py`, `services/rails.py`, `models.py`, `main.py` and `fixtures/` need cold-account approval | beta — `health`, `flags`, `bridge`, `oauth`, `mcp`, `upland`/`upland_scrape`, and `proposals`/`notifications`/`members` routers are live, each with pytest coverage; `auth*`/`pay*` don't exist yet (identity verification lives in `services/identity.py`, consumed by the routers' dependencies, not a dedicated router) | `auth*`/`pay*`/`services/identity.py`, the connector, vault, rail and brief paths, the Bridge's key-carrying code and the task fixtures: cold-account approval, effectively T2+ in practice |
 | `packages/shared` | zod schemas — reference copy of the web/API contract, hand-mirrored and test-locked against `apps/api`'s Pydantic models; also the rail registry (`src/rails.ts`) and the brief every agent gets (`src/brief.ts`), mirrored by `services/rails.py` and `services/brief.py` and held to golden fixtures in `tests/fixtures/` | `@verastd`; `src/rails.ts` and `src/brief.ts` need cold-account approval | stable — schemas populated, mirrored field-for-field by `models.py`, locked by contract tests | Open; `src/rails.ts` and `src/brief.ts`: cold-account approval |
 | `packages/auth` | Sign-in with GitHub: PKCE, sealed session/transaction cookies, the API assertion, and revoking the Copilot rail's one-time GitHub token once it is used. Built on `jose` and Web Crypto only (no `node:` imports), so Next's Edge middleware can import it — see [ADR-003](adr/ADR-003-github-app-signin.md) | `@verastd` `@forge-cold` (cold-account approval) | stable — 100% coverage enforced in `vitest.config.ts`, includes the RFC 7636 PKCE test vector | **Tier floor T2** |
-| `packages/flags` | Feature-flag client; layered load, fail-closed. `config/flags.json` -> `FORGE_FLAGS_PATH` -> `FORGE_FLAGS_JSON` | `@verastd` | stable — `csv_export`, `contribute_bridge`, `upland_data`, `github_signin`, `apps_lobby`, `mcp_connector` (the FORGE connector) and `agent_start` (FORGE starting agents through vendor APIs; off in `config/flags.json` until those rails pass their live tests), all real gates | Open |
+| `packages/flags` | Feature-flag client; layered load, fail-closed. `config/flags.json` -> `FORGE_FLAGS_PATH` -> `FORGE_FLAGS_JSON` | `@verastd` | stable — `csv_export`, `contribute_bridge`, `upland_data`, `github_signin`, `apps_lobby`, `mcp_connector` (the FORGE connector), `agent_start` (FORGE starting agents through vendor APIs; off in `config/flags.json` until those rails pass their live tests) and `proposals` (the Propose floor and its notifications), all real gates | Open |
 | `packages/lobby` | The Apps lobby's pure logic: the wall's geometry, the free-roam camera and how it is saved, the app registry and the rules every entry must pass (slots, routes, and the sandbox and CSP for framed apps), which page chrome a route gets, and the presence packet, ranges and name rules. No DOM, no three.js and no runtime dependencies (its `tsconfig.json` and `eslint.config.mjs` enforce it) — see [ADR-004](adr/ADR-004-apps-lobby.md) | `@verastd` | stable — unit-tested in Node at full line coverage; the framed-app rules are enforced, though nothing framed ships yet | Open |
 | `packages/contracts-client` | The only module allowed to import a chain SDK. Mock-only isolation layer | `@verastd` `@forge-cold` (cold-account approval) | experimental — mock-only; `mode: 'live'` throws, no chain wiring | **Tier floor T2** |
 | `contracts/` | On-chain code, if any lands in-repo | `@verastd` `@forge-cold` (cold-account approval) | placeholder — no contract source yet | **Tier floor T2** |
@@ -82,8 +82,14 @@ browser holds, sealed and opened by `packages/auth`.
    `enc: A256GCM`; claims: GitHub id, login, display name, avatar URL,
    `demo: false`) and set with a 7-day absolute lifetime. The transaction
    cookie is cleared on every path out of the callback, success or failure.
-   `middleware.ts` gates `/me/:path*` and `/apps/data/:path*` on a valid session,
-   redirecting to `/signin?next=<path>` otherwise.
+   `middleware.ts` gates `/me/:path*`, `/apps/data/:path*`, the connector's
+   consent page `/oauth/authorize` and the new-proposal form `/propose/new`
+   on a valid session, redirecting to `/signin?next=<path>` otherwise.
+4. Once the session is set, the callback tells the API that this GitHub
+   account is a member (`POST /api/members/hello`, with the assertion; see
+   [The Propose floor](#the-propose-floor)). It runs after the redirect has
+   gone, tries once for at most 3 seconds and logs only a failure's code,
+   so it can never hold up or break a sign-in.
 
 No database, no server-side session store, and no way to revoke one session
 without changing a secret that revokes every session (see Operations below).
@@ -158,20 +164,20 @@ The rules are one pure function, `resolveSessionKeys` in
 | `GITHUB_APP_CLIENT_ID` | web — `lib/auth/config.ts`'s `githubAppConfig()` | For real GitHub sign-in | The GitHub App's client ID; sign-in reads as `'unavailable'` without it |
 | `GITHUB_APP_CLIENT_SECRET` | web, same | For real GitHub sign-in | Never sent to the browser or logged; only used server-side in the `/auth/callback` code exchange |
 | `GITHUB_APP_SLUG` | web — the Copilot rail's "Install FORGE's GitHub app on your fork" link (`https://github.com/apps/<slug>/installations/new`) on the task page | For that link | The App's URL name, as in `https://github.com/apps/<slug>`: lowercase letters, digits and inner dashes, anything else counts as unset. Unset, the install step is shown as plain text with no link. Server-side only, never `NEXT_PUBLIC_*`: the task page reads it on every request and hands it to the page as a prop, so a change needs no rebuild |
-| `FORGE_PUBLIC_ORIGIN` | web — `publicOrigin()` (the OAuth `redirect_uri`, the callback's final redirect) and `isTrustedOrigin()` (the Origin check on `POST /auth/signout`, `POST /auth/demo`, `POST /bff/upland/*` and the other state-changing routes); API — the FORGE connector's public URLs (the OAuth metadata, the `iss` it sends back, the `<origin>/mcp` resource every token is bound to) and the Origin check on `/mcp` | Web: required outside `next dev`; optional in `next dev` only, where an unset value falls back to the request's own origin. API: required for the connector, which answers `503 connector_unavailable` without it | An `http(s)` URL with no path, query, fragment or credentials, e.g. `https://forge.example` (not `.../` ) — a set-but-invalid value refuses every state-changing request rather than guessing. On the API it must also be `https`, except `http` on a loopback host (`http://localhost:3000`) for development; anything else answers `503 connector_unavailable`. The same value on web and API: production is `https://forge-app-eta-mocha.vercel.app`; it is the connector's OAuth issuer and its address is this plus `/mcp`, so changing it disconnects every agent |
+| `FORGE_PUBLIC_ORIGIN` | web — `publicOrigin()` (the OAuth `redirect_uri`, the callback's final redirect) and `isTrustedOrigin()` (the Origin check on `POST /auth/signout`, `POST /auth/demo`, `POST /bff/upland/*` and the other state-changing routes); API — the FORGE connector's public URLs (the OAuth metadata, the `iss` it sends back, the `<origin>/mcp` resource every token is bound to), the Origin check on `/mcp`, and the link a task published from a proposal carries (`<origin>/propose/<id>`) | Web: required outside `next dev`; optional in `next dev` only, where an unset value falls back to the request's own origin. API: required for the connector, which answers `503 connector_unavailable` without it; without a usable value, a published task links to a bare `/propose/<id>` | An `http(s)` URL with no path, query, fragment or credentials, e.g. `https://forge.example` (not `.../` ) — a set-but-invalid value refuses every state-changing request rather than guessing. On the API it must also be `https`, except `http` on a loopback host (`http://localhost:3000`) for development; anything else answers `503 connector_unavailable`. The same value on web and API: production is `https://forge-app-eta-mocha.vercel.app`; it is the connector's OAuth issuer and its address is this plus `/mcp`, so changing it disconnects every agent |
 | `FORGE_SESSION_SECRET` | web — seals and (with `_PREVIOUS`) opens session and transaction cookies | Required outside `next dev` | >= 32 characters, ASCII (`MIN_SECRET_LENGTH` in `@forge/auth`). Unset or empty under `next dev` only: the public dev secret, for practice sessions only, and the BFF never mints (see The development secret, above). Set but shorter than 32 characters: sign-in is disabled in every mode, with one logged warning |
 | `FORGE_SESSION_SECRET_PREVIOUS` | web, same | Optional | Same constraints; set only while rotating (see Operations) |
 | `FORGE_API_ASSERTION_SECRET` | web — mints the BFF's assertion; API — `verify_assertion` checks it | Required for `/apps/data` to work end to end; its absence (or weakness) on the web side answers `503 not_configured` rather than pretending the Data app is merely down | >= 32 characters, ASCII, used exactly as stored (not trimmed); must be byte-for-byte identical on web and API |
-| `FORGE_API_URL` | web — `apiUrl()`, where the BFF forwards `/bff/upland/*`, `/bff/bridge/*` and `/bff/oauth/*`, and where the consent page and the Copilot callback call the API; and `next.config.mjs`, which rewrites the connector's paths (`/mcp`, `/oauth/register`, `/oauth/token`, `/oauth/revoke`, `/.well-known/oauth-*`, and the fallback `/register` and `/token`) to it | Optional for the BFF; required for the connector | Unset, the BFF uses `NEXT_PUBLIC_API_URL`, then `http://localhost:8000`. Whichever it uses must be `https`, or plain `http` only to `localhost`, `127.0.0.1` or `::1`, with no credentials, query or fragment, because pasted keys, the Copilot token and assertions go there. Anything else and the web server sends nothing to the API (the BFF answers `503 not_configured`, the consent page says "FORGE can't connect agents right now", a Copilot start fails) and logs one error, never the value. The rewrites are written when the app is built, and only if this is set to such a URL (plain `http` only to `localhost` or `127.0.0.1`): set it in Vercel before the build, or the connector's paths 404 on the web origin. The fallback `/authorize` is not a rewrite: the web app redirects it (`307`, query kept) to its own `/oauth/authorize` |
-| `NEXT_PUBLIC_API_URL` | web, in the browser — `lib/api.ts`'s `apiBase` and the flag client (`@forge/flags/react`): every visitor's flag fetch, the Bridge's public reads while nobody is signed in (tasks, rails, status, checks), and the base of the `prompt_url` Claude Code on the web fetches a long brief from (`<this>/api/bridge/tasks/<id>/brief`, used when the brief makes the link pass 7,000 characters) | Required for a deployed live build | The API's public origin, `https` in production, e.g. `https://api.forge.example` (a trailing slash is dropped). Browsers and claude.ai call it directly, so never a private address. Inlined when the app is built, like every `NEXT_PUBLIC_*`. Unset means `http://localhost:8000`. Its origin is also the API entry in the site's Content-Security-Policy `connect-src`, fixed when the app is built |
-| `FORGE_CORS_ORIGINS` | API — the browser origins allowed to call it (`main.py`'s CORS policy, with credentials) on every route but the connector's | Required in production | Comma-separated origins, blanks ignored; unset or blank means `http://localhost:3000,http://localhost:3100` (`next dev` and the Playwright server). It must include the web origin (`FORGE_PUBLIC_ORIGIN`): browsers read the flags, and signed-out visitors the Bridge's public data, from the API directly, and those reads fail without it. The connector's paths and the brief behind `prompt_url` answer any origin, whatever this says |
+| `FORGE_API_URL` | web — `apiUrl()`, where the BFF forwards `/bff/upland/*`, `/bff/bridge/*`, `/bff/oauth/*`, `/bff/proposals*` and `/bff/notifications*`, and where the consent page, the Copilot callback and the sign-in callback's members hello call the API; and `next.config.mjs`, which rewrites the connector's paths (`/mcp`, `/oauth/register`, `/oauth/token`, `/oauth/revoke`, `/.well-known/oauth-*`, and the fallback `/register` and `/token`) to it | Optional for the BFF; required for the connector | Unset, the BFF uses `NEXT_PUBLIC_API_URL`, then `http://localhost:8000`. Whichever it uses must be `https`, or plain `http` only to `localhost`, `127.0.0.1` or `::1`, with no credentials, query or fragment, because pasted keys, the Copilot token and assertions go there. Anything else and the web server sends nothing to the API (the BFF answers `503 not_configured`, the consent page says "FORGE can't connect agents right now", a Copilot start fails) and logs one error, never the value. The rewrites are written when the app is built, and only if this is set to such a URL (plain `http` only to `localhost` or `127.0.0.1`): set it in Vercel before the build, or the connector's paths 404 on the web origin. The fallback `/authorize` is not a rewrite: the web app redirects it (`307`, query kept) to its own `/oauth/authorize` |
+| `NEXT_PUBLIC_API_URL` | web, in the browser — `lib/api.ts`'s `apiBase` and the flag client (`@forge/flags/react`): every visitor's flag fetch, the Bridge's public reads while nobody is signed in (tasks, rails, status, checks), the Propose floor's public reads (`lib/proposals.ts`: the list, and a proposal's public record), and the base of the `prompt_url` Claude Code on the web fetches a long brief from (`<this>/api/bridge/tasks/<id>/brief`, used when the brief makes the link pass 7,000 characters) | Required for a deployed live build | The API's public origin, `https` in production, e.g. `https://api.forge.example` (a trailing slash is dropped). Browsers and claude.ai call it directly, so never a private address. Inlined when the app is built, like every `NEXT_PUBLIC_*`. Unset means `http://localhost:8000`. Its origin is also the API entry in the site's Content-Security-Policy `connect-src`, fixed when the app is built |
+| `FORGE_CORS_ORIGINS` | API — the browser origins allowed to call it (`main.py`'s CORS policy, with credentials) on every route but the connector's | Required in production | Comma-separated origins, blanks ignored; unset or blank means `http://localhost:3000,http://localhost:3100` (`next dev` and the Playwright server). It must include the web origin (`FORGE_PUBLIC_ORIGIN`): browsers read the flags and the Propose floor's public reads, and signed-out visitors the Bridge's public data, from the API directly, and those reads fail without it. The connector's paths and the brief behind `prompt_url` answer any origin, whatever this says |
 | `NEXT_PUBLIC_FORGE_DEMO` | web — `lib/mode.ts`'s `isDemoMode()`, read at build time only | Optional | `1` when building makes the demo build (practice sign-in, fixtures); anything else, or unset, a live build. Inlined by `next.config.mjs`'s `env`, so the value at runtime is ignored |
-| `FORGE_ADMIN_IDS` | API — the admin check behind `require_admin` | Optional | Comma-separated numeric GitHub user ids (not logins), each matching `^[1-9][0-9]{0,19}$`; entries trimmed, blanks ignored; unset means nobody is admin. One invalid entry makes nobody admin, with one logged warning |
+| `FORGE_ADMIN_IDS` | API — the admin check behind `require_admin`: the Upland scraper and GCS-sync controls, and on the Propose floor the Test timers switch, End debate now and Close the vote now, and finishing and publishing a passed proposal's task (see [The Propose floor](#the-propose-floor)) | Optional; without it nobody can publish a passed proposal | Comma-separated numeric GitHub user ids (not logins), each matching `^[1-9][0-9]{0,19}$`; entries trimmed, blanks ignored; unset means nobody is admin. One invalid entry makes nobody admin, with one logged warning |
 | `LIVEKIT_URL` | web — the lobby's token route (`src/app/api/lobby/token/route.ts`), which hands it to the browser with each token (see [The Apps lobby](#the-apps-lobby)) | For presence and voice in the Apps lobby; without all three LiveKit settings the route answers `503 voice_unavailable` and the lobby works alone | A `wss:`, `ws:`, `https:` or `http:` URL with no credentials, e.g. `wss://<project>.livekit.cloud`; anything else counts as unset. Server-side only, never `NEXT_PUBLIC_*`. Read on every request, so a build without it still succeeds; but the site's Content-Security-Policy `connect-src` allows this host (as `wss:` and `https:`, or `ws:` and `http:` for an insecure URL) as it was when the app was built, so set it before building and rebuild after changing it, or the lobby can't connect |
 | `LIVEKIT_API_KEY` | web, same — the key each token is issued under | Same | The LiveKit project's API key. Server-side only |
 | `LIVEKIT_API_SECRET` | web, same — signs each token | Same | The LiveKit project's API secret. Server-side only: never sent to the browser or logged |
 | `FORGE_OAUTH_SECRET` | API — signs the FORGE connector's client registrations and derives confidential clients' secrets (`services/oauth.py`; see [The FORGE connector](#the-forge-connector)) | For the connector; unset, or shorter than 32 characters, answers `503 connector_unavailable` | >= 32 characters. Generate it on the API box itself (`openssl rand -base64 32`) and never paste it anywhere; FORGE never sends or logs it. Changing it invalidates every registered client, so connected agents have to connect again |
-| `FORGE_STATE_DB_PATH` | API — the state database: the Bridge's claims and timeline, saved agent keys, and the connector's grants and token hashes (`services/state.py`; see [State, keys and GitHub reads](#state-keys-and-github-reads)) | Optional; set it in production | A file path, created on demand. Defaults to `var/forge-state.db` in the repo (git-ignored). Production: `/var/lib/forge-api/forge.db`, on a disk that survives a redeploy. It has no migrations yet: after an upgrade that changes its tables, the file is deleted and starts again empty (see [State, keys and GitHub reads](#state-keys-and-github-reads)) |
+| `FORGE_STATE_DB_PATH` | API — the state database: the Bridge's claims and timeline, saved agent keys, the connector's grants and token hashes, and the Propose floor's members, proposals and notifications (`services/state.py`; see [State, keys and GitHub reads](#state-keys-and-github-reads)) | Optional; set it in production | A file path, created on demand. Defaults to `var/forge-state.db` in the repo (git-ignored). Production: `/var/lib/forge-api/forge.db`, on a disk that survives a redeploy. It has no migrations yet: after an upgrade that changes its tables, the file is deleted and starts again empty (see [State, keys and GitHub reads](#state-keys-and-github-reads)) |
 | `FORGE_VAULT_KEY` | API — encrypts the agent keys people ask FORGE to remember (`services/vault.py`) | Optional; without it nothing is saved and keys are typed in at each start | Base64 of 32 random bytes; generate it on the API box (`openssl rand -base64 32`). Surrounding whitespace is ignored. Unset or malformed turns the vault off (`vault: false` in `GET /api/bridge/rails`); a malformed value also logs one warning, which never includes the value. Changing it makes every saved key unreadable: each one then reads as not saved (it isn't listed, and a one-click start asks for a key), but nothing is deleted, so putting the old value back restores every key nobody has re-entered; otherwise each person enters their key again, which replaces the old one |
 | `FORGE_START_RAILS` | API — which start rails may run (`GET /api/bridge/rails`, `POST /api/bridge/dispatch`) | Optional | Comma-separated rail ids from `copilot`, `jules`, `cursor`, `devin`, `openhands`, `claude-routine` (case and spaces don't matter; unknown ids are ignored); unset or empty means none. A rail runs only when it is listed here AND the `agent_start` flag is on. Add a rail only after it passes its live test ([`live-tests.md`](live-tests.md)) |
 | `FORGE_MAX_ACTIVE_CLAIMS` | API — how many tasks one person may hold at once | Optional | An integer from 1 to 100; unset or anything else means 2. A task whose pull request merged no longer counts. One more claim answers `409 claim_limit` |
@@ -291,16 +297,21 @@ agent does that. How a task reaches the agent without copy and paste is
   every route with `{"error": "bridge-disabled"}`, except `GET` and
   `DELETE /api/bridge/me/keys`, so people can still see and remove their
   saved keys.
-- Tasks come only from the checked-in fixtures
-  (`apps/api/src/forge_api/fixtures/tasks.json`). Reading them from GitHub
-  issues waits for the Foreman claim linkage; until then no issue author's
-  text reaches a brief.
+- Tasks come from the checked-in fixtures
+  (`apps/api/src/forge_api/fixtures/tasks.json`) and from passed proposals
+  an admin has published (see [The Propose floor](#the-propose-floor)).
+  Published tasks are listed after the fixtures, numbered from 10001, well
+  clear of the fixtures' issue numbers, and labelled `from-proposal`. A
+  published task's text is the admin's: its summary starts as the mover's
+  pitch, and the admin reads and edits it before publishing. Reading tasks
+  from GitHub issues waits for the Foreman claim linkage; until then no
+  issue author's text reaches a brief.
 - Not built: FORGE doesn't fork, branch or open pull requests for anyone
   (the agent works in a fork the contributor already has, and the only
   GitHub writes FORGE makes are starting Copilot, on the contributor's
   one-time authorization, and revoking that authorization afterwards), and
-  there are no webhooks, notifications or automatic retries of a failed
-  start. **Not joined
+  there are no webhooks, no notifications about tasks (the bell is the
+  Propose floor's) and no automatic retries of a failed start. **Not joined
   yet:** the Bridge's claims live in FORGE's own database, while Foreman's
   G0 claim check reads `/claim` leases on GitHub, so once Foreman runs, a
   Bridge contributor's pull request fails claim linkage until the two are
@@ -644,16 +655,19 @@ links shown back (`apps/web/src/lib/bff-forward.ts`, `lib/handoff.ts`,
 `FORGE_STATE_DB_PATH`: `var/forge-state.db` in the repo by default (created
 on demand, git-ignored), `/var/lib/forge-api/forge.db` in production. It
 holds the Bridge's claims, hand-offs, progress events, merges and
-submissions (`bridge_` tables), saved agent keys (`vault_`), and the
-connector's grants, codes and token hashes (`oauth_`). Write-ahead logging,
+submissions (`bridge_` tables, with the tasks published from proposals in
+`bridge_published_tasks`), saved agent keys (`vault_`), the connector's
+grants, codes and token hashes (`oauth_`), and the Propose floor: its
+members (`members`), proposals with their votes, comments and timelines
+(`proposal_`), and the bell (`notifications`). Write-ahead logging,
 foreign keys and secure delete on (deleted rows are overwritten, not just
 unlinked), one lock per process: it is built for the one API process on one
 box that the pilot runs. Back it up, and keep the backups as private as
-the box: losing the file forgets every claim and saved key and disconnects
-every agent, and the file together with `FORGE_VAULT_KEY` opens every saved
-key. Removing or replacing a key also empties the write-ahead log, so the
-old sealed copy is gone from the live files, but a backup taken before
-still holds it.
+the box: losing the file forgets every claim, saved key, member and
+proposal and disconnects every agent, and the file together with
+`FORGE_VAULT_KEY` opens every saved key. Removing or replacing a key also
+empties the write-ahead log, so the old sealed copy is gone from the live
+files, but a backup taken before still holds it.
 
 **No migrations yet.** Each table is created only if it doesn't exist yet,
 so a file from an earlier build keeps its old tables, and the API fails on
@@ -662,7 +676,9 @@ API, delete the file together with its `-wal` and `-shm` files, and start
 it again: claims and their timelines are forgotten, connected agents have
 to connect again, and saved keys have to be entered again. Production has
 no state database yet; a checkout that ran an earlier build deletes its
-`var/forge-state.db` the same way.
+`var/forge-state.db` the same way. The Propose floor (Phase 5) changed no
+table: its tables are all new, so a file from Phase 4 gains them at the
+API's next start and keeps everything else.
 
 **The vault.** A key a contributor asks FORGE to remember is encrypted
 with AES-256-GCM under a key of its own for each person, derived from
@@ -882,6 +898,306 @@ are not allowed, so a join that would fail over to another region fails
 instead. LiveKit bills per participant-minute and everyone in the lobby is a
 participant, talking or not; ADR-004 has the numbers.
 
+## The Propose floor
+
+`/propose` is where members bring ideas for FORGE to build and decide on
+them in the open, by Robert's Rules with the pilot's numbers (see
+[ADR-006](adr/ADR-006-proposals.md) for why). The `proposals` flag gates
+all of it. Anyone can read the floor, every proposal and its whole record;
+acting on it needs GitHub sign-in.
+
+**The pieces.**
+
+- `apps/web`'s `src/app/propose/`: `/propose` lists the proposals in four
+  sections (Needs a second, In debate, Voting, Decided), each deadline as a
+  countdown, with a "Bring a proposal" button and the rules collapsed
+  under "How proposals work". `/propose/new` is the form; the middleware
+  sends a signed-out visitor to sign in first. `/propose/<id>` is one
+  proposal's record and whatever its reader may do now. The bell is
+  `src/components/NotificationBell.tsx`.
+- The floor's list, and a proposal's record for a signed-out visitor, are
+  read straight from the API (`NEXT_PUBLIC_API_URL`), as the Contribute
+  page's public reads are. Everything that needs to know who is asking
+  goes through the same-origin BFF, `/bff/proposals*` and
+  `/bff/notifications*`, which mints the assertion as `/bff/bridge/*` does
+  (see [Identity](#identity)): the practice account is refused, writes must
+  come from this origin, and bodies are capped at 32 KB (16 KB for the
+  bell).
+- `apps/api`: `routers/proposals.py` and `services/proposals.py` (the
+  rules, the timeline, the draft task and the ticker), `routers/members.py`
+  and `services/members.py` (who counts), and `routers/notifications.py`
+  and `services/notifications.py` (the bell). Tasks published from
+  proposals are served by the Bridge (`services/bridge.py`), after the
+  fixtures.
+- The practice build (`NEXT_PUBLIC_FORGE_DEMO=1`) runs a practice floor in
+  the browser instead (`src/lib/proposals-offline.ts`): sample proposals
+  the practice account can second, consent to and pass, with "Practice:
+  nothing is saved." on every screen. Nothing reaches the API.
+
+**Who takes part.** Anyone signed in with GitHub can bring a proposal,
+second, consent or object, comment and vote. Signed-out visitors and the
+practice account read everything and act on nothing. Throwaway GitHub
+accounts can take part as well, which the pilot accepts (ADR-006). The API
+makes every check itself (who is asking, who moved it, who is eligible,
+who is an admin); a proposal's `you` block tells the page what its reader
+may do.
+
+**Members.** The API keeps one row per GitHub user id in `members`: the
+login, and when FORGE first and last saw them. A member is recorded when
+they sign in with GitHub, by the sign-in callback's
+`POST /api/members/hello` (after the redirect, one try of at most 3
+seconds; it never holds up or breaks a sign-in), and again on every
+proposals or notifications request that carries their identity, the bell's
+poll included. The table started empty with Phase 5 and was never
+backfilled: an account FORGE knew before (a Bridge contributor, the owner
+of a connected agent) becomes a member only when it signs in, or uses
+FORGE signed in, after the deploy.
+
+**States.**
+
+| State | Shown as | What moves it on |
+|---|---|---|
+| `submitted` | Needs a second | Another member seconds it (→ `debate`), or nobody does in time (→ `lapsed`) |
+| `debate` | In debate | Everyone in the eligible set consents (→ `passed`, at once); debate ends with no objection (→ `passed`, without a vote); debate ends after an objection (→ `voting`) |
+| `voting` | Voting | The vote closes (→ `passed` or `failed`) |
+| `passed` | Passed | An admin publishes its task (→ `building`) |
+| `building` | Being built | The task's pull request merges (→ `shipped`) |
+| `shipped`, `failed`, `lapsed`, `withdrawn` | Shipped, Failed, Lapsed, Withdrawn | Nothing: these are final |
+
+`submitted`, `debate` and `voting` are the active states; the mover can
+withdraw a proposal in any of them (→ `withdrawn`). There is no stored
+`seconded` state: seconding opens debate at once, and the timeline records
+the second as its own line.
+
+**The rules, as built.**
+
+- **Motion.** A title (1 to 100 characters) and a pitch in plain English
+  (1 to 4,000), both plain text. A member with a proposal in an active
+  state can't bring another (`409 one_active_proposal`, with its id), and
+  nobody can bring more than 3 in 24 hours (`429 rate_limited`). The mover
+  can edit the title and pitch until it is seconded, at most 10 times an
+  hour (`429`) and 20 times in all (`409 edit_limit`); each edit adds 1 to
+  the text's revision, which starts at 1.
+- **Second.** Any member but the mover (`403 own_proposal`), on a proposal
+  waiting for one, naming the revision they read: if the mover edited it
+  since, the answer is `409 proposal_changed`, so nobody seconds text they
+  never saw. Seconding opens debate, sets its deadline, records the mover's
+  consent, and freezes the **eligible set**: every member seen in the 30
+  days before the second (`members.last_seen`), plus the mover and the
+  seconder whatever their dates. Members outside it can comment, but not
+  consent, object or vote on it (`409 not_eligible`).
+- **Debate: consent and objection.** From the second until debate ends,
+  each member of the eligible set may consent or object, once. Both are
+  final (`409 already_decided_consent`). The mover counts as consenting
+  from the second; the seconder consents like anyone else.
+  - When everyone in the eligible set has consented and nobody has
+    objected, the proposal passes at once.
+  - When debate's deadline comes with no objection, it passes without a
+    vote: consent by silence.
+  - One objection ends both paths: debate runs to its deadline, and then
+    the vote opens. Consenting or objecting after an objection still goes
+    on the record, and changes nothing else.
+- **Comments.** Any member, eligible or not, from the second until the
+  vote closes: 1 to 2,000 characters, at most 10 per member per proposal
+  an hour. The thread is public. A proposal's page carries the newest 100,
+  and `GET /api/proposals/<id>/comments?before=<commentId>` pages back
+  through the rest, 100 at a time.
+- **Vote.** Only the eligible set votes: Yes, No or Abstain, one ballot
+  each, changeable until the vote closes. Until then only the turnout is
+  shown ("3 of 5 have voted"), never the totals. At the close:
+  - **quorum** is more than half of the eligible set casting a ballot,
+    Abstain included;
+  - with quorum, the proposal passes if Yes outnumber No, and fails on a
+    tie or more No;
+  - without quorum, it fails.
+
+  The tally, and each member's final ballot by name, become public at the
+  close.
+- **Write limit.** Each member may second, consent, object, vote, edit or
+  withdraw at most 60 times an hour across the floor (`429 rate_limited`).
+- **Plain text.** Titles, pitches, comments and draft fields go through
+  the Bridge's sanitizer for agent text (`clean_text`): control and format
+  characters and variation selectors are dropped, and stacks of combining
+  marks are capped. Pitches and comments keep their line breaks. Text that
+  shows nothing, blank or made only of invisible characters (zero-width
+  characters, Hangul fillers, the blank Braille pattern), is refused.
+  Lengths count Unicode code points, the same on both sides. Nothing is
+  rendered as HTML or markdown.
+
+**The public record.** Anyone can read all of it: the mover, the seconder,
+every consent and objection with its time, the debate thread, the tally
+after the close, the outcome, and a timeline of every state change and
+action (moved, edited, seconded, consented, objected, commented, the end
+of debate, the vote opening, each ballot once the vote closes, passed or
+failed, lapsed, withdrawn, the draft task, the task published, shipped,
+the admin actions, Test timers switched, and the floor pausing and
+resuming). A failed proposal keeps its record and its tally.
+
+**Timers.** Each deadline is fixed when its period starts.
+
+| Period | Pilot | Test timers on |
+|---|---|---|
+| To find a second, from the motion | 7 days | 10 minutes |
+| Debate, from the second | 3 days | 5 minutes |
+| The vote, from the end of debate | 2 days | 5 minutes |
+
+**When things happen.** One pure function (`advance` in
+`services/proposals.py`) works out every transition a proposal has due at
+a given moment. It runs on every read and write of a proposal, so a reader
+sees it as it stands at that moment, and in a ticker: a background
+task in the API process (FastAPI's lifespan) that applies every passed
+deadline on the floor every 60 seconds, logs and survives a failing beat,
+and stops when the API shuts down. Each transition is written in one
+transaction as a compare-and-set on the proposal's state and version, so
+two readers, or a reader and the ticker, never apply it twice. A
+transition applied late is dated at its deadline, so the record doesn't
+depend on when somebody looked.
+
+**The floor pauses while members can't act.** That is while the
+`proposals` flag or the `github_signin` flag is off, or the flag
+configuration fails closed (which turns every flag off).
+
+- While it is closed, no transition applies. The API keeps when it closed
+  (`proposal_floor`), and each active proposal's timeline says so.
+- The floor notices at the ticker's next beat, at a read, or when a
+  request is refused because `proposals` is off, so deadlines can run on
+  for up to about a minute after a switch is thrown.
+- When both flags are on again, before anything else, every deadline still
+  running when the floor closed moves later by the time it was closed, and
+  each active proposal's timeline says so ("The floor was closed for 2 h
+  10 min; deadlines moved by that."). A deadline that had already passed
+  before it closed stays put and applies straight away, dated at itself.
+- With `proposals` on and sign-in off, the list and a proposal's page say
+  `floorPaused: true`. With `proposals` off, every `/api/proposals*` route
+  answers `404`.
+- API downtime is not a pause: when the API comes back, whatever fell due
+  meanwhile applies, dated at its deadline.
+
+**Admins.** The admin is whoever's numeric GitHub user id is in the API's
+`FORGE_ADMIN_IDS`, which today is the operator. An admin is a member like
+anyone else (they can bring, second, consent and vote, and count in
+eligible sets), and also:
+
+- switches **Test timers** on or off (the switch on `/propose`,
+  `PUT /api/proposals/settings`). The setting is stored in the database.
+  While it is on, every visitor sees "Test timers are on: deadlines are
+  minutes, not days." Each switch is logged, with the admin's login, on
+  every active proposal, and only deadlines set afterwards change;
+- presses **End debate now** on a proposal in debate, or **Close the vote
+  now** on one in a vote, which act as if its deadline had passed that
+  moment, and are logged in its timeline with the admin's login. Both work
+  only while Test timers are on (`409 test_mode_off` otherwise): they are
+  for testing, and can't cut a real debate or vote short;
+- sees, edits and publishes the draft task of each passed proposal
+  (below).
+
+**From passed to shipped.**
+
+1. Passing (by consent, by silence or by the vote) makes a **draft task**:
+   the proposal's title, its pitch on one line as the summary, no
+   acceptance criteria yet, size S, tier floor T0 and reward class `none`.
+   Only admins see it.
+2. An admin finishes it (`PUT /api/proposals/<id>/admin/draft-task`): a
+   title (1 to 100 characters); a plain summary (1 to 500), which becomes
+   the "Why" line of the brief every agent is given, so the admin reads the
+   mover's words before they reach anyone's agent; what done means, as 1
+   to 10 acceptance criteria of up to 300 characters each; the size (XS, S
+   or M); the tier floor; and the reward class.
+3. **Publish to the board** (`POST /api/proposals/<id>/admin/publish-task`)
+   refuses:
+   - an unfinished draft (`400 invalid_request`, naming the fields);
+   - a tier floor above T0 (`400 tier_not_open`): every account is T0
+     until Foreman's ledger exists, so nobody could claim it. Saving such
+     a draft is refused the same way;
+   - a title with no letter or digit from A to Z or 0 to 9
+     (`400 task_title_needs_letters`), because the task's branch is named
+     after it.
+4. Otherwise, in one transaction, the task goes on the Contribute board and
+   the proposal moves to `building`. The task:
+   - is numbered from 10001 up, one more than the last published task
+     (`bridge_published_tasks`), well clear of the fixtures' issue numbers.
+     Its brief still asks for "Closes #<id>", so once forge-app's own
+     issues and pull requests reach #10001 that would close an unrelated
+     one; the repo is far from it, and it isn't handled yet;
+   - is listed after the fixtures, and claimed, handed to an agent (the
+     connector included) and merged like any other task;
+   - carries the labels `agent-ready`, `status:open`, `size:<size>` and
+     `from-proposal`, and its reward class but no dollar amount;
+   - links to the proposal's page, `<FORGE_PUBLIC_ORIGIN>/propose/<id>`
+     (a bare `/propose/<id>` while that is unset or unusable).
+5. When the Bridge records the task's pull request as merged, the proposal
+   moves to `shipped`: a hook inside the Bridge's own merge write, with the
+   ticker catching any merge the hook missed.
+6. A shipped proposal's panel in the lobby is still added by hand: an entry
+   in `APPS` in `packages/lobby/src/registry.ts`, through a pull request.
+
+**The bell.** It sits in the site header and in an app's bar, for members
+signed in with GitHub only: never signed out, for the practice account or
+on the practice build, and not at all while `proposals` is off. It reads
+`GET /api/notifications` (through `/bff/notifications`) when it loads,
+every 60 seconds while the tab is visible, and when it is opened: the
+newest 30 and the unread count. Opening one marks it read, and "Mark all
+read" marks the rest (`POST /api/notifications/read`, with `ids`, or
+without them for all). Each member keeps their newest 200. A message quotes
+the proposal's title in “ ”, with the title's own double quotation marks
+made single and the title cut to 80 characters, so a title can't pass
+itself off as another message. Every link is `/propose/<id>`.
+
+| Kind | When | Who gets it |
+|---|---|---|
+| `proposal_moved` | A proposal is brought | Every member but the mover |
+| `proposal_seconded` | It is seconded | The eligible set, except the mover and the seconder |
+| `your_proposal_seconded` | It is seconded | The mover |
+| `vote_opened` | Its vote opens | The eligible set |
+| `proposal_passed`, `proposal_failed`, `proposal_lapsed` | It passes, fails or lapses | Everyone involved: the mover, the seconder, and everyone who consented, objected, voted or commented |
+| `task_published` | An admin publishes its task | Everyone involved, as above |
+
+Nothing is sent when a proposal is withdrawn or ships, and nothing leaves
+the app: no e-mail, no push. While `proposals` is off, these notifications
+are hidden from the list and the count, not deleted.
+
+**Not built, on purpose** (see [ADR-006](adr/ADR-006-proposals.md)): a
+shipped proposal's lobby panel, which is added by hand (above); any
+backfill of members from before Phase 5; and any notification outside the
+app.
+
+**The API.** Every `/api/proposals*` route answers
+`404 {"error": "proposals-disabled"}` while the flag is off, before any
+identity check. "Member" means the BFF's assertion for a GitHub account
+(`401 unauthenticated` without one); "admin" adds `FORGE_ADMIN_IDS`
+(`403 admin_only`).
+
+| Route | Who |
+|---|---|
+| `GET /api/proposals` | Anyone. Every active proposal and the newest 100 decided ones, newest first; `?decidedBefore=<id>` pages older decided ones, and `?state=` keeps one state |
+| `GET /api/proposals/<id>` | Anyone. A member also gets `you` (what they may do now), and an admin the draft task |
+| `GET /api/proposals/<id>/comments?before=<commentId>` | Anyone |
+| `GET /api/proposals/me` | Member: admin or not, their active proposal, and whether Test timers are on |
+| `POST /api/proposals` | Member (`201`) |
+| `PATCH /api/proposals/<id>`, `POST …/withdraw` | The mover |
+| `POST …/second` | A member other than the mover, with `{revision}` |
+| `POST …/consent`, `POST …/vote` | The eligible set |
+| `POST …/comments` | Member |
+| `PUT /api/proposals/settings` | Admin (Test timers) |
+| `POST …/admin/end-debate`, `POST …/admin/close-vote` | Admin, while Test timers are on |
+| `PUT …/admin/draft-task`, `POST …/admin/publish-task` | Admin |
+| `GET /api/notifications`, `POST /api/notifications/read` | Member; behind no flag of their own |
+| `POST /api/members/hello` | Member; behind no flag (`204`) |
+
+No JSON answer holds a `null`. Every refusal is a flat
+`{"error": code, ...}`, and all but `proposals-disabled`,
+`unauthenticated`, `admin_only` and `body_too_large` carry a plain-English
+`message`:
+
+| Status | `error` |
+|---|---|
+| `400` | `invalid_request` (with `fields`, never the input), `tier_not_open`, `task_title_needs_letters` |
+| `403` | `admin_only`, `not_mover`, `own_proposal` |
+| `404` | `proposals-disabled`, `proposal_not_found` (a missing proposal, or a number that isn't one) |
+| `409` | `wrong_state` (with `state`), `one_active_proposal` (with `proposalId`), `already_seconded`, `already_decided_consent`, `not_eligible`, `proposal_changed` (with `revision`), `edit_limit`, `test_mode_off` |
+| `413` | `body_too_large`: the API reads bodies up to 64 KB |
+| `429` | `rate_limited`, with `Retry-After` |
+
 ## Data flow
 
 `apps/web` talks to `apps/api` over REST. `packages/shared`'s zod schemas
@@ -899,9 +1215,12 @@ read for in-app profile/tier/reward views — not built yet.
 Endpoints this app defines for itself today: `/api/flags`, `/api/upland/*`
 (gated by `upland_data`; its `/export` route additionally requires
 `csv_export`), `/api/bridge/*` (gated by `contribute_bridge`, except
-`GET` and `DELETE /api/bridge/me/keys`; see [The Bridge](#the-bridge)), and
-the FORGE connector's `/mcp`, `/oauth/register`, `/oauth/token`,
-`/oauth/revoke`, their fallback aliases `/register` and `/token`,
+`GET` and `DELETE /api/bridge/me/keys`; see [The Bridge](#the-bridge)),
+`/api/proposals*` (gated by `proposals`), `/api/notifications*` and
+`/api/members/hello` (identity only, behind no flag; see
+[The Propose floor](#the-propose-floor)), and the FORGE connector's
+`/mcp`, `/oauth/register`, `/oauth/token`, `/oauth/revoke`, their fallback
+aliases `/register` and `/token`,
 `/.well-known/oauth-*` and `/api/oauth/*` (gated by `mcp_connector` and
 `github_signin`; see
 [The FORGE connector](#the-forge-connector)), which the web origin reaches
@@ -909,8 +1228,9 @@ through rewrites. `apps/web` answers one API route itself,
 `POST /api/lobby/token`, the lobby's LiveKit room token (see
 [The Apps lobby](#the-apps-lobby)); it never calls `apps/api`. Its other
 server-side calls to the API (the BFF's `/bff/*`, the consent page and its
-decision route, and `/auth/callback` finishing a Copilot start) carry the
-same short-lived assertion whenever they act for a signed-in person.
+decision route, and `/auth/callback` finishing a Copilot start or saying
+hello for a member who just signed in) carry the same short-lived
+assertion whenever they act for a signed-in person.
 Outbound, `apps/api` calls GitHub's public REST API for reads, and a
 vendor's API only when a contributor starts a start rail or has FORGE send
 the check notes. Every one of those calls follows no redirect, asks for an
@@ -967,6 +1287,15 @@ The flags are real gates, not decoration. For example:
   `FORGE_START_RAILS` lists, and the task page offers "Open my agent"
   only. Checked in off; turn it on only once at least one start rail has
   passed its live test ([`live-tests.md`](live-tests.md)).
+- `proposals` — the Propose floor: off, every `/api/proposals*` route
+  answers `404 {"error": "proposals-disabled"}` before any identity check,
+  `/propose`, `/propose/new` and every proposal's page say "Proposals are
+  switched off right now.", and the bell disappears, its notifications
+  hidden but not deleted. The floor also pauses: nothing on it moves while
+  it is off, and each deadline still running moves later by the time it
+  was off once it is back on. Switching `github_signin` off pauses the
+  floor the same way (see [The Propose floor](#the-propose-floor)).
+  Checked in on, so the operator can try it.
 
 Flag flips are runtime config, not code — this is what lets features ship
 dark-launched and get killed instantly on revert. The out-of-band kill

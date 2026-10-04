@@ -1,6 +1,7 @@
 /**
- * Signed-out visitors to account and data pages, and to the connector's
- * consent page, go to /signin first, and come back afterwards. Edge runtime,
+ * Signed-out visitors to account and data pages, to the connector's consent
+ * page and to the new-proposal form go to /signin first, and come back
+ * afterwards. Edge runtime,
  * so it imports only `next/server`, `@forge/auth` and the Edge-safe
  * `lib/auth/visitor` (no `@forge/flags`, no `node:`). "Signed in" means
  * exactly what `getSession()` means, so a session the pages would refuse
@@ -23,8 +24,10 @@ import { visitorSession } from './lib/auth/visitor';
 const CONSENT_PATH = '/oauth/authorize';
 
 export const config = {
-  // Phase 2 swapped /upland for /apps/data.
-  matcher: ['/me/:path*', '/apps/data/:path*', '/oauth/authorize'],
+  // Phase 2 swapped /upland for /apps/data. Phase 5 added /propose/new, the
+  // only Propose page that needs a session: the floor and every proposal's
+  // page are open to read signed out.
+  matcher: ['/me/:path*', '/apps/data/:path*', '/oauth/authorize', '/propose/new'],
 };
 
 export async function middleware(request: NextRequest): Promise<NextResponse> {

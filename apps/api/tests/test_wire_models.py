@@ -1,18 +1,22 @@
-"""The Bridge v2 wire models (contract §3).
+"""The wire models: Bridge v2 (Phase 4 contract §3), Proposals and notifications (Phase 5
+contract §2).
 
 tests/fixtures/wire-golden.json records every model's fields as this file describes
-them; packages/shared/src/index.test.ts describes the zod schemas the same way and
-compares against the same file, so a field renamed, retyped or made optional on one side
-only fails a test on both. Update the golden by hand when both sides change together.
+them, length limits included; packages/shared/src/wire.test.ts describes the zod schemas
+the same way and compares against the same file, so a field renamed, retyped, made
+optional or given another limit on one side only fails a test on both. Update the golden
+by hand when both sides change together.
 """
 
 import json
+from collections.abc import Iterable
 from pathlib import Path
 from types import NoneType, UnionType
-from typing import Any, Literal, Union, get_args, get_origin
+from typing import Annotated, Any, Literal, Union, get_args, get_origin
 
 import pytest
-from pydantic import BaseModel, SecretStr, ValidationError
+from pydantic import BaseModel, Field, SecretStr, ValidationError
+from pydantic.fields import FieldInfo
 
 from forge_api.models import (
     OPEN_RAILS,
@@ -28,23 +32,43 @@ from forge_api.models import (
     CheckResults,
     CheckRun,
     ClaimRequest,
+    CommentRequest,
     ConnectedAgent,
     ConnectedAgentList,
+    ConsentRequest,
     Credential,
     DispatchRequest,
     DispatchResult,
+    DraftTask,
+    DraftTaskRequest,
     FeedbackResponse,
     FlagConfig,
     ForkStatus,
+    NewProposal,
+    Notification,
+    NotificationList,
+    NotificationReadRequest,
+    ProposalCard,
+    ProposalComment,
+    ProposalCommentPage,
+    ProposalDetail,
+    ProposalEvent,
+    ProposalList,
+    ProposalMe,
+    ProposalSettings,
+    ProposalTally,
+    ProposalYou,
     RailInfo,
     RailList,
     RailMeta,
     SavedCredential,
     SavedCredentialList,
+    SecondRequest,
     SubmitRequest,
     TaskCard,
     TaskDetail,
     TaskList,
+    VoteRequest,
 )
 
 GOLDEN = Path(__file__).resolve().parents[3] / "tests" / "fixtures" / "wire-golden.json"
@@ -78,6 +102,26 @@ WIRE_MODELS: list[type[BaseModel]] = [
     AuthorizeCheck,
     AuthorizeError,
     AuthorizeDecision,
+    ProposalCard,
+    ProposalList,
+    ProposalComment,
+    ProposalEvent,
+    ProposalTally,
+    ProposalYou,
+    DraftTask,
+    ProposalDetail,
+    NewProposal,
+    ConsentRequest,
+    VoteRequest,
+    CommentRequest,
+    DraftTaskRequest,
+    ProposalSettings,
+    ProposalMe,
+    Notification,
+    NotificationList,
+    NotificationReadRequest,
+    ProposalCommentPage,
+    SecondRequest,
 ]
 
 _SIMPLE = {str: "string", SecretStr: "string", bool: "boolean", int: "integer", float: "number"}
@@ -85,8 +129,31 @@ _SIMPLE = {str: "string", SecretStr: "string", bool: "boolean", int: "integer", 
 SECRET = "test-only-not-a-real-key-0001"
 
 
+def _limits(constraints: Iterable[Any], *, array: bool) -> dict[str, int]:
+    """minLength/maxLength (characters) for a string, minItems/maxItems for a list, read off
+    pydantic's constraints. A minimum of 0 is no limit, as the zod side reads it."""
+    low_key, high_key = ("minItems", "maxItems") if array else ("minLength", "maxLength")
+    found: dict[str, int] = {}
+    for constraint in constraints:
+        if isinstance(constraint, FieldInfo):
+            found.update(_limits(constraint.metadata, array=array))
+            continue
+        low = getattr(constraint, "min_length", None)
+        high = getattr(constraint, "max_length", None)
+        if low:
+            found[low_key] = low
+        if high is not None:
+            found[high_key] = high
+    return found
+
+
 def _kind(annotation: Any) -> dict[str, Any]:
     origin = get_origin(annotation)
+    if origin is Annotated:
+        inner, *constraints = get_args(annotation)
+        entry = _kind(inner)
+        entry.update(_limits(constraints, array=entry["type"] == "array"))
+        return entry
     if origin in (Union, UnionType):
         (inner,) = [arg for arg in get_args(annotation) if arg is not NoneType]
         return _kind(inner)
@@ -101,14 +168,37 @@ def _kind(annotation: Any) -> dict[str, Any]:
 
 
 def describe(model: type[BaseModel]) -> dict[str, Any]:
-    """{field: {type, optional?, values?, items?, ref?}} in declaration order."""
+    """{field: {type, values?, items?, ref?, limits?, optional?}} in declaration order."""
     described: dict[str, Any] = {}
     for name, field in model.model_fields.items():
         entry = _kind(field.annotation)
+        entry.update(_limits(field.metadata, array=entry["type"] == "array"))
         if not field.is_required():
             entry["optional"] = True
         described[name] = entry
     return described
+
+
+def test_the_describer_reads_limits_where_pydantic_keeps_them() -> None:
+    class Sample(BaseModel):
+        text: Annotated[str, Field(min_length=1, max_length=5)]
+        note: str | None = Field(default=None, max_length=9)
+        lines: list[Annotated[str, Field(min_length=2, max_length=3)]] = Field(
+            min_length=1, max_length=4
+        )
+        free: str = Field(min_length=0)
+
+    assert describe(Sample) == {
+        "text": {"type": "string", "minLength": 1, "maxLength": 5},
+        "note": {"type": "string", "maxLength": 9, "optional": True},
+        "lines": {
+            "type": "array",
+            "items": {"type": "string", "minLength": 2, "maxLength": 3},
+            "minItems": 1,
+            "maxItems": 4,
+        },
+        "free": {"type": "string"},
+    }
 
 
 def test_every_wire_model_matches_the_golden_the_zod_side_reads() -> None:
@@ -153,6 +243,14 @@ def test_credential_lengths_are_bounded(credential: dict[str, str]) -> None:
 
 def test_credential_bounds_are_inclusive() -> None:
     Credential.model_validate({"key": "k" * 4096, "orgId": "o" * 200, "routineUrl": "u" * 500})
+
+
+def test_credential_limits_count_characters_as_the_zod_side_does() -> None:
+    astral = "\U0001f511"  # one character, two UTF-16 units
+    Credential.model_validate({"key": astral * 4096, "orgId": astral * 200})
+    for too_long in ({"key": astral * 4097}, {"key": "k", "orgId": astral * 201}):
+        with pytest.raises(ValidationError):
+            Credential.model_validate(too_long)
 
 
 def test_optional_fields_leave_the_wire_and_required_lists_stay() -> None:

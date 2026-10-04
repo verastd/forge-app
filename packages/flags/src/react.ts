@@ -14,7 +14,7 @@
 import { useEffect, useState } from 'react';
 import type { FlagConfig, FlagName } from '@forge/shared';
 
-import { DEFAULT_FLAGS, parseFlags } from './core.js';
+import { DEFAULT_FLAGS, fetchFlags } from './core.js';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
@@ -27,7 +27,9 @@ export interface UseFlagsResult {
  * Fetch `${NEXT_PUBLIC_API_URL}/api/flags` on mount and return the
  * resolved flag config. Falls back to `initial ?? DEFAULT_FLAGS` — both
  * as the initial render state and on any network/parse error — and never
- * throws into the caller.
+ * throws into the caller. A flag service that hasn't answered within
+ * `FLAGS_TIMEOUT_MS` (8 s) counts as no answer: the fallback applies and
+ * `loading` ends, so no page waits on its flags for longer than that.
  *
  * That fallback IS this hook's fail-closed behavior: `DEFAULT_FLAGS` is
  * all false, so an API that's unreachable, slow, or returning garbage
@@ -43,28 +45,13 @@ export function useFlags(initial?: FlagConfig): UseFlagsResult {
   useEffect(() => {
     let cancelled = false;
 
-    const run = async (): Promise<void> => {
-      try {
-        const res = await fetch(`${API_BASE}/api/flags`);
-        if (!res.ok) {
-          throw new Error(`GET /api/flags responded with ${res.status}`);
-        }
-        const data: unknown = await res.json();
-        if (!cancelled) {
-          setFlags(parseFlags(data));
-        }
-      } catch {
-        if (!cancelled) {
-          setFlags(initial ?? DEFAULT_FLAGS);
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
+    // fetchFlags never throws, and gives up (null) after FLAGS_TIMEOUT_MS.
+    void fetchFlags(`${API_BASE}/api/flags`).then((answer) => {
+      if (!cancelled) {
+        setFlags(answer ?? initial ?? DEFAULT_FLAGS);
+        setLoading(false);
       }
-    };
-
-    void run();
+    });
 
     return () => {
       cancelled = true;

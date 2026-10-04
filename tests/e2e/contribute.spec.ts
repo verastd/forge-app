@@ -87,6 +87,27 @@ test.describe('browsing the Bridge', () => {
     await expect(page.getByText("~an evening of your agent's time").first()).toBeVisible();
   });
 
+  test('each card is a link named by its summary, and opens from anywhere on the card (review-pages, Phase 4 carry-over)', async ({
+    page,
+  }) => {
+    await page.goto('/contribute');
+    const summary = 'Let people download the Upland data they are looking at as a spreadsheet file.';
+    const link = page.getByRole('region', { name: 'Tasks' }).getByRole('link', { name: summary, exact: true });
+    await expect(link).toHaveAttribute('href', '/contribute/task/1');
+    // Every card's link has a name of its own: its summary, never nothing.
+    const names = await page.getByRole('region', { name: 'Tasks' }).getByRole('link').evaluateAll((links) =>
+      links.map((element) => element.textContent?.trim() ?? ''),
+    );
+    expect(names).toHaveLength(8);
+    expect(names.every((name) => name.length > 10)).toBe(true);
+    // The card's corner, far from the summary, still opens it.
+    const card = page.getByRole('region', { name: 'Tasks' }).getByRole('article').filter({ has: page.getByRole('link', { name: summary, exact: true }) });
+    const box = await card.boundingBox();
+    if (box === null) throw new Error('no card');
+    await page.mouse.click(box.x + box.width - 12, box.y + box.height - 12);
+    await expect(page).toHaveURL(/\/contribute\/task\/1$/);
+  });
+
   test('filters down to the tasks that carry a reward', async ({ page }) => {
     await page.goto('/contribute');
 
@@ -344,7 +365,7 @@ test.describe('the practice account is nobody on GitHub', () => {
     await page.goto(`/signin?next=${encodeURIComponent('/contribute')}`);
     await demoSignIn(page);
 
-    const first = page.getByRole('region', { name: 'Tasks' }).getByRole('link').first();
+    const first = page.getByRole('region', { name: 'Tasks' }).getByRole('article').first();
     await expect(first).toContainText('someone is on it');
     await expect(first).not.toContainText('yours right now');
 

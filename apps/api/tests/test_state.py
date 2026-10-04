@@ -165,6 +165,24 @@ def test_execute_reports_the_rowcount_and_the_new_rowid(db: state.StateDB) -> No
     assert updated.rowcount == 2
 
 
+def test_executemany_runs_one_statement_for_every_row(db: state.StateDB) -> None:
+    written = db.executemany(
+        "INSERT INTO test_notes (body) VALUES (?)", [("one",), ("two",), ("three",)]
+    )
+    assert (written.rowcount, written.lastrowid) == (3, None)
+    assert [row["body"] for row in db.query_all("SELECT body FROM test_notes ORDER BY id")] == [
+        "one",
+        "two",
+        "three",
+    ]
+    with pytest.raises(sqlite3.IntegrityError), db.transaction():  # all or nothing
+        db.executemany("INSERT INTO test_notes (body) VALUES (?)", [("four",), (None,)])
+    assert db.query_one("SELECT COUNT(*) AS n FROM test_notes") == {"n": 3}
+    state.reset_state_db()
+    with pytest.raises(sqlite3.ProgrammingError):
+        db.executemany("INSERT INTO test_notes (body) VALUES (?)", [("five",)])
+
+
 def test_queries_return_plain_dicts(db: state.StateDB) -> None:
     assert db.query_one("SELECT * FROM test_notes") is None
     assert db.query_all("SELECT * FROM test_notes") == []

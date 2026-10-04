@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { FLAG_NAMES } from '@forge/shared';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { DEFAULT_FLAGS, isEnabled, loadFlags, parseFlags } from './index.js';
@@ -36,6 +37,7 @@ describe('parseFlags', () => {
         apps_lobby: true,
         mcp_connector: true,
         agent_start: false,
+        proposals: true,
       }),
     ).toEqual({
       csv_export: false,
@@ -45,6 +47,7 @@ describe('parseFlags', () => {
       apps_lobby: true,
       mcp_connector: true,
       agent_start: false,
+      proposals: true,
     });
   });
 
@@ -57,6 +60,7 @@ describe('parseFlags', () => {
       apps_lobby: DEFAULT_FLAGS.apps_lobby,
       mcp_connector: DEFAULT_FLAGS.mcp_connector,
       agent_start: DEFAULT_FLAGS.agent_start,
+      proposals: DEFAULT_FLAGS.proposals,
     });
   });
 
@@ -73,6 +77,7 @@ describe('parseFlags', () => {
       apps_lobby: false,
       mcp_connector: false,
       agent_start: false,
+      proposals: false,
     });
   });
 
@@ -86,6 +91,7 @@ describe('parseFlags', () => {
         apps_lobby: true,
         mcp_connector: true,
         agent_start: false,
+        proposals: false,
         unknown_flag: true,
       }),
     ).toEqual({
@@ -96,6 +102,7 @@ describe('parseFlags', () => {
       apps_lobby: true,
       mcp_connector: true,
       agent_start: false,
+      proposals: false,
     });
   });
 
@@ -108,6 +115,7 @@ describe('parseFlags', () => {
       apps_lobby: false,
       mcp_connector: false,
       agent_start: false,
+      proposals: false,
     });
   });
 
@@ -124,8 +132,27 @@ describe('parseFlags', () => {
     expect(result.apps_lobby).toBe(true);
   });
 
-  it.each(['mcp_connector', 'agent_start'])('a non-boolean %s fails every flag closed', (name) => {
+  it('leaves proposals off when a payload predates it', () => {
+    const result = parseFlags({
+      csv_export: true,
+      contribute_bridge: true,
+      upland_data: true,
+      github_signin: true,
+      apps_lobby: true,
+      mcp_connector: true,
+      agent_start: true,
+    });
+    expect(result.proposals).toBe(false);
+    expect(result.agent_start).toBe(true);
+  });
+
+  it.each(['mcp_connector', 'agent_start', 'proposals'])('a non-boolean %s fails every flag closed', (name) => {
     expect(parseFlags({ csv_export: true, mcp_connector: true, [name]: 'true' })).toEqual(DEFAULT_FLAGS);
+  });
+
+  it('DEFAULT_FLAGS covers every flag, all off', () => {
+    expect(Object.keys(DEFAULT_FLAGS)).toEqual([...FLAG_NAMES]);
+    expect(Object.values(DEFAULT_FLAGS).every((value) => value === false)).toBe(true);
   });
 
   it('a non-boolean apps_lobby fails every flag closed', () => {
@@ -154,6 +181,7 @@ describe('isEnabled', () => {
       apps_lobby: true,
       mcp_connector: true,
       agent_start: false,
+      proposals: true,
     };
     expect(isEnabled(flags, 'csv_export')).toBe(true);
     expect(isEnabled(flags, 'contribute_bridge')).toBe(false);
@@ -162,6 +190,7 @@ describe('isEnabled', () => {
     expect(isEnabled(flags, 'apps_lobby')).toBe(true);
     expect(isEnabled(flags, 'mcp_connector')).toBe(true);
     expect(isEnabled(flags, 'agent_start')).toBe(false);
+    expect(isEnabled(flags, 'proposals')).toBe(true);
   });
 });
 
@@ -195,6 +224,7 @@ describe('loadFlags precedence', () => {
         apps_lobby: false,
         mcp_connector: false,
         agent_start: false,
+        proposals: false,
       });
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -217,6 +247,7 @@ describe('loadFlags precedence', () => {
         apps_lobby: DEFAULT_FLAGS.apps_lobby,
         mcp_connector: DEFAULT_FLAGS.mcp_connector,
         agent_start: DEFAULT_FLAGS.agent_start,
+        proposals: DEFAULT_FLAGS.proposals,
       });
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -242,6 +273,7 @@ describe('loadFlags precedence', () => {
         apps_lobby: true,
         mcp_connector: true,
         agent_start: false,
+        proposals: true,
       });
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -271,6 +303,7 @@ describe('loadFlags precedence', () => {
         apps_lobby: false,
         mcp_connector: false,
         agent_start: false,
+        proposals: false,
       });
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -282,7 +315,8 @@ describe('loadFlags precedence', () => {
     // script with cwd = packages/flags, two levels below the repo root
     // that owns config/flags.json. config/flags.json — not DEFAULT_FLAGS —
     // is what keeps local/demo behavior enabled (see core.ts); agent_start
-    // stays off there until its rails pass the live tests.
+    // stays off there until its rails pass the live tests, and proposals is
+    // on so the operator can test the floor.
     const result = await loadFlags({ env: {} });
     expect(result).toEqual({
       csv_export: true,
@@ -292,6 +326,7 @@ describe('loadFlags precedence', () => {
       apps_lobby: true,
       mcp_connector: true,
       agent_start: false,
+      proposals: true,
     });
   });
 
@@ -309,6 +344,7 @@ describe('loadFlags precedence', () => {
         apps_lobby: false,
         mcp_connector: false,
         agent_start: false,
+        proposals: false,
       });
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -349,6 +385,7 @@ describe('loadFlags precedence', () => {
         apps_lobby: false,
         mcp_connector: false,
         agent_start: false,
+        proposals: false,
       });
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -374,6 +411,7 @@ describe('loadFlags precedence', () => {
         apps_lobby: DEFAULT_FLAGS.apps_lobby,
         mcp_connector: DEFAULT_FLAGS.mcp_connector,
         agent_start: DEFAULT_FLAGS.agent_start,
+        proposals: DEFAULT_FLAGS.proposals,
       });
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -401,6 +439,7 @@ describe('loadFlags precedence', () => {
           apps_lobby: false,
           mcp_connector: false,
           agent_start: false,
+          proposals: false,
         });
       } finally {
         await rm(dir, { recursive: true, force: true });
@@ -424,6 +463,7 @@ describe('loadFlags precedence', () => {
           apps_lobby: false,
           mcp_connector: false,
           agent_start: false,
+          proposals: false,
         });
       } finally {
         await rm(dir, { recursive: true, force: true });
@@ -444,6 +484,7 @@ describe('loadFlags precedence', () => {
           apps_lobby: false,
           mcp_connector: false,
           agent_start: false,
+          proposals: false,
         });
       } finally {
         await rm(dir, { recursive: true, force: true });
@@ -465,6 +506,7 @@ describe('loadFlags precedence', () => {
           apps_lobby: false,
           mcp_connector: false,
           agent_start: false,
+          proposals: false,
         });
       } finally {
         await rm(dir, { recursive: true, force: true });
@@ -493,6 +535,7 @@ describe('loadFlags precedence', () => {
           apps_lobby: false,
           mcp_connector: false,
           agent_start: false,
+          proposals: false,
         });
       } finally {
         await rm(dir, { recursive: true, force: true });
@@ -512,6 +555,7 @@ describe('loadFlags precedence', () => {
           apps_lobby: false,
           mcp_connector: false,
           agent_start: false,
+          proposals: false,
         });
       } finally {
         await rm(dir, { recursive: true, force: true });
@@ -534,6 +578,7 @@ describe('loadFlags precedence', () => {
           apps_lobby: false,
           mcp_connector: false,
           agent_start: false,
+          proposals: false,
         });
       } finally {
         await rm(dir, { recursive: true, force: true });

@@ -52,6 +52,10 @@ it;
 [ADR-005](docs/adr/ADR-005-agent-handoff.md) say what's wired up today and
 what's still switched off.
 
+Have an idea for FORGE rather than a task to take on? Bring it to the
+Propose floor at [`/propose`](apps/web/src/app/propose) (see
+[The Propose floor](#the-propose-floor), below).
+
 ## Build and run
 
 This is a pnpm workspace (`apps/web` + `packages/*`) plus a Python API
@@ -123,11 +127,51 @@ presence between tabs of one browser instead, with no voice. See
 [`docs/architecture.md`](docs/architecture.md#the-apps-lobby) and
 [ADR-004](docs/adr/ADR-004-apps-lobby.md) for why it's built this way.
 
+### The Propose floor
+
+`/propose` is where members decide what FORGE builds next, by Robert's
+Rules. Anyone signed in with GitHub can bring a proposal (a title and a
+pitch in plain English), second someone else's, consent or object, comment
+and vote; anyone at all can read the floor. A proposal nobody seconds
+within 7 days lapses. A seconded one is debated for 3 days: if every
+eligible member consents it passes at once, and if debate ends with no
+objection it passes without a vote. One objection means a 2-day vote once
+debate ends. A passed proposal becomes a draft task, which an admin
+finishes and publishes to the Contribute board.
+
+- **The flag.** It all sits behind the `proposals` flag, which
+  `config/flags.json` has on. Switching it off, or switching off
+  `github_signin`, pauses the floor: its deadlines wait until members can
+  act again.
+- **Who counts.** A member is anyone the API has seen signed in with
+  GitHub, and members aren't backfilled from earlier phases: only accounts
+  that sign in, or use FORGE signed in, after the deploy count. Who may
+  consent, object and vote on a proposal, and whom its quorum counts, is
+  fixed when it is seconded: the members seen in the 30 days before, plus
+  its mover and seconder. Throwaway GitHub accounts can take part too; the
+  pilot accepts that.
+- **The admin** is whoever's GitHub user id is in the API's
+  `FORGE_ADMIN_IDS`: the operator. An admin can switch on **Test timers**,
+  which make new deadlines minutes instead of days (10 to find a second, 5
+  of debate, 5 of voting) so the whole flow fits in one sitting; only then
+  do **End debate now** and **Close the vote now** work. An admin also
+  writes what done means for a passed proposal and publishes it as a
+  Contribute task, numbered from 10001.
+- **The bell.** Members signed in with GitHub get an in-app bell for new
+  proposals, seconds, votes opening, outcomes and published tasks. Nothing
+  is e-mailed.
+- **The demo build** runs a practice floor in the browser instead, where
+  nothing is saved.
+
+[`docs/architecture.md`](docs/architecture.md#the-propose-floor) has the
+rules as built, every limit and the API, and
+[ADR-006](docs/adr/ADR-006-proposals.md) why.
+
 ## Repo map
 
 | Path | What's there |
 |---|---|
-| `apps/web` | Next.js 15 (App Router, TypeScript strict): the app itself, including the [`/contribute`](apps/web/src/app/contribute) Bridge surface and the 3D Apps lobby at `/apps`. |
+| `apps/web` | Next.js 15 (App Router, TypeScript strict): the app itself, including the [`/contribute`](apps/web/src/app/contribute) Bridge surface, the 3D Apps lobby at `/apps` and the Propose floor at [`/propose`](apps/web/src/app/propose). |
 | `apps/api` | FastAPI (Python 3.12, `uv`), package `forge_api`: the backend, and the Bridge's server-side service. See [`apps/api/README.md`](apps/api/README.md). |
 | `packages/shared` | zod schemas — the reference copy of the web/API contract, hand-mirrored by `apps/api`'s Pydantic models. |
 | `packages/flags` | The feature-flag client, backed by [`config/flags.json`](config/flags.json). Fails closed: code defaults are all off. |

@@ -27,6 +27,7 @@ export const DEFAULT_FLAGS: FlagConfig = {
   apps_lobby: false,
   mcp_connector: false,
   agent_start: false,
+  proposals: false,
 };
 
 /**
@@ -79,4 +80,50 @@ export function parseFlags(input: unknown): FlagConfig {
 /** Read a single flag's value out of a resolved {@link FlagConfig}. */
 export function isEnabled(flags: FlagConfig, flag: FlagName): boolean {
   return flags[flag];
+}
+
+/**
+ * How long {@link fetchFlags} waits for the flag service before giving up.
+ * A service that accepts the connection and never answers would otherwise
+ * leave every page that waits on its flags loading for as long as the
+ * browser keeps the request open.
+ */
+export const FLAGS_TIMEOUT_MS = 8000;
+
+export interface FetchFlagsOptions {
+  /** Defaults to {@link FLAGS_TIMEOUT_MS}. */
+  timeoutMs?: number;
+  /** Defaults to the global `fetch`. */
+  fetchImpl?: typeof fetch;
+}
+
+/**
+ * GET `url` (the API's `/api/flags`) and parse it with {@link parseFlags}.
+ * Never throws: null means there is no answer to use (unreachable, a non-2xx
+ * status, a body that isn't JSON, or nothing at all within `timeoutMs`), and
+ * the caller then fails closed. The timeout covers the whole exchange, body
+ * included, and holds even if the request ignores its abort signal.
+ */
+export async function fetchFlags(url: string, options: FetchFlagsOptions = {}): Promise<FlagConfig | null> {
+  const { timeoutMs = FLAGS_TIMEOUT_MS, fetchImpl = fetch } = options;
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const gaveUp = new Promise<null>((resolve) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      resolve(null);
+    }, timeoutMs);
+  });
+  const answered = (async (): Promise<FlagConfig | null> => {
+    const response = await fetchImpl(url, { signal: controller.signal });
+    if (!response.ok) {
+      return null;
+    }
+    return parseFlags(await response.json());
+  })().catch(() => null);
+  try {
+    return await Promise.race([answered, gaveUp]);
+  } finally {
+    clearTimeout(timer);
+  }
 }

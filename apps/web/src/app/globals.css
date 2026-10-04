@@ -452,6 +452,13 @@ a.faint:hover {
   cursor: not-allowed;
 }
 
+/* Waiting on something else on the page, but still focusable: a button that
+   is pressed and then disabled would throw keyboard focus out of the page. */
+.btn[aria-disabled='true'] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* Busy beats disabled: a button that is working stays at full strength so the
    spinner reads, and says "wait" rather than "no". */
 .btn[aria-busy='true'],
@@ -536,6 +543,25 @@ a.faint:hover {
     transform 160ms var(--ease),
     box-shadow 160ms var(--ease),
     background-color 160ms var(--ease);
+}
+
+/* A card whose heading link opens it from anywhere: the link's hit area is
+   stretched over the card (`.card` is position: relative), so the link's
+   accessible name stays its own text rather than the whole card's. */
+.card-stretch::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: var(--radius);
+}
+
+.card-stretch:focus-visible {
+  outline: none;
+}
+
+.card-stretch:focus-visible::after {
+  outline: 2px solid var(--spark);
+  outline-offset: 3px;
 }
 
 .card-link:hover {

@@ -6,7 +6,8 @@
  *
  * An `agent` attempt (POST /auth/github/agent, "Start GitHub Copilot") comes
  * back here too, and takes its own branch below; the sign-in path is
- * unchanged.
+ * unchanged, except that once the session is set it says hello to the API
+ * for the new member (`members-hello.ts`), best effort, after the redirect.
  */
 import {
   AuthError,
@@ -30,6 +31,8 @@ import { postAsUser } from '../../../lib/bff-forward';
 import type { ApiOutcome } from '../../../lib/bff-forward';
 import { getSession, setSessionCookie, signInAvailability } from '../../../lib/session';
 import { startWithToken } from './agent-start';
+import { sayHello } from './members-hello';
+import type { Member } from './members-hello';
 
 export const dynamic = 'force-dynamic';
 
@@ -53,6 +56,7 @@ export async function GET(request: NextRequest): Promise<Response> {
   const code = params.get('code');
   if (!code) return signInFailed('github');
 
+  let member: Member;
   try {
     const { accessToken } = await exchangeCode({
       clientId: config.clientId,
@@ -62,9 +66,10 @@ export async function GET(request: NextRequest): Promise<Response> {
       codeVerifier: tx.verifier,
     });
     const user = await fetchGitHubUser(accessToken);
+    member = { sub: String(user.id), login: user.login };
     await setSessionCookie({
-      sub: String(user.id),
-      login: user.login,
+      sub: member.sub,
+      login: member.login,
       name: user.name,
       avatarUrl: user.avatarUrl,
       demo: false,
@@ -74,6 +79,13 @@ export async function GET(request: NextRequest): Promise<Response> {
     console.warn(`sign-in callback failed: ${error instanceof AuthError ? error.code : 'unexpected'}`);
     return signInFailed('github');
   }
+
+  // The members hello (members-hello.ts): after the redirect has gone, one
+  // try, 3 s, and its outcome never reaches the sign-in. Logged by code only.
+  after(async () => {
+    const outcome = await sayHello(member, (path, who, timeoutMs) => postAsUser(path, who, {}, timeoutMs));
+    if (!outcome.ok) console.warn(`members hello: ${outcome.code}`);
+  });
 
   // Against the configured origin, never the Host header this request came with.
   return redirectTo(new URL(safeNext(tx.next), config.origin).toString());

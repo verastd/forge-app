@@ -207,8 +207,8 @@ test("/propose?slot= puts its note after the heading and lede, so a reader start
   const texts = await page.locator('main').evaluate((main) => [...main.querySelectorAll('h1, p')].map((el) => el.textContent ?? ''));
   expect(texts.slice(0, 3)).toEqual([
     'Propose',
-    "Proposals aren't open yet.",
-    `Slot ${DARK_SLOT} is free. Proposals open soon; this slot is where yours would go.`,
+    'Where FORGE decides what to build next. A member brings an idea, another seconds it, and the floor decides it together, in the open.',
+    `Slot ${DARK_SLOT} is free. Bring a proposal to fill it.`,
   ]);
 });
 

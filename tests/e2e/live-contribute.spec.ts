@@ -1145,6 +1145,31 @@ test.describe('no answer to a claim, a release or a pull request handed in', () 
     await expect(page.getByText(/yours for \d+h/)).toBeVisible();
   });
 
+  test('a claim answered by the host’s own 502 page reads the task again, and finds it yours (review-pages L1)', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    await signInAs(context, baseURL ?? '', IDENTITY);
+    await serviceDown(page);
+    await openBridge(page);
+    await serve(page, '**/bff/bridge/tasks/1', detail());
+    await serve(page, '**/bff/bridge/rails', rails());
+    await serve(page, '**/bff/bridge/status/1', status());
+    await page.route('**/bff/bridge/claim', async (route) => {
+      // The API made the claim; the host answered for the BFF with its own error page.
+      await page.unroute('**/bff/bridge/tasks/1');
+      await serve(page, '**/bff/bridge/tasks/1', detail(MINE));
+      await route.fulfill({ status: 502, contentType: 'text/html', body: '<html><body><h1>502 Bad Gateway</h1></body></html>' });
+    });
+    await page.goto('/contribute/task/1');
+    await page.getByRole('button', { name: 'Claim this' }).click();
+
+    await expect(page.getByText(MAY_HAVE)).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Get your agent on it' })).toBeVisible();
+    await expect(page.getByText(/nothing (was )?changed/)).toHaveCount(0);
+  });
+
   test('a claim with no answer at all: the page waits past the BFF, then reads the task again (review-creds CR-3)', async ({
     page,
     context,

@@ -446,6 +446,179 @@ class GitHubTaskSource:
         raise NotImplementedError
 
 
+# --- Phase 5: tasks published from proposals (contract §3) ----------------------------
+#
+# Everything in this block is new. The Phase 4 code above and below is unchanged apart
+# from two lines marked "Phase 5" (the shipped hook's call in LeaseStore.record_pull, and
+# the default `_source`) and get_task_source's docstring.
+#
+# A passed proposal becomes a task here once an admin publishes it (services/proposals.py).
+# Published tasks live in their own new table, with ids from 10001 up so they never
+# collide with issue numbers. The link from a task back to its proposal is the proposals
+# service's own table (proposal_tasks), so this block knows nothing about proposals: it
+# stores the card it is given, serves it next to the fixtures, and tells whoever
+# registered with `on_task_shipped` when a task's pull request is recorded as merged.
+
+#: The first id a published task gets.
+PUBLISHED_TASK_FIRST_ID = 10001
+#: The largest integer SQLite stores: a larger task id is no published task.
+_SQLITE_MAX_INT = 2**63 - 1
+
+register_schema(
+    "bridge_published",
+    [
+        """CREATE TABLE IF NOT EXISTS bridge_published_tasks (
+            id INTEGER PRIMARY KEY CHECK (id >= 10001),
+            title TEXT NOT NULL,
+            civilian_summary TEXT NOT NULL,
+            size TEXT NOT NULL,
+            reward_class TEXT NOT NULL,
+            tier_floor TEXT NOT NULL,
+            url TEXT NOT NULL,
+            labels TEXT NOT NULL,
+            acceptance_criteria TEXT NOT NULL,
+            published_at TEXT NOT NULL,
+            published_by TEXT NOT NULL
+        )""",
+    ],
+)
+
+
+def _published_task(row: Mapping[str, Any]) -> TaskFixture:
+    return TaskFixture(
+        id=row["id"],
+        title=row["title"],
+        civilianSummary=row["civilian_summary"],
+        size=row["size"],
+        rewardClass=row["reward_class"],
+        rewardUsd=None,
+        tierFloor=row["tier_floor"],
+        url=row["url"],
+        labels=list(json.loads(row["labels"])),
+        acceptanceCriteria=list(json.loads(row["acceptance_criteria"])),
+    )
+
+
+class PublishedTaskSource:
+    """The tasks admins published from passed proposals (`bridge_published_tasks`).
+
+    `db` defaults to the process's state database, looked up on each use (as LeaseStore's).
+    """
+
+    def __init__(self, db: StateDB | None = None) -> None:
+        self._db = db
+
+    @property
+    def db(self) -> StateDB:
+        return self._db if self._db is not None else get_state_db()
+
+    def list_tasks(self) -> list[TaskFixture]:
+        rows = self.db.query_all("SELECT * FROM bridge_published_tasks ORDER BY id")
+        return [_published_task(row) for row in rows]
+
+    def get_task(self, task_id: int) -> TaskFixture | None:
+        if not PUBLISHED_TASK_FIRST_ID <= task_id <= _SQLITE_MAX_INT:
+            return None
+        row = self.db.query_one("SELECT * FROM bridge_published_tasks WHERE id = ?", (task_id,))
+        return _published_task(row) if row else None
+
+
+class CompositeTaskSource:
+    """Several sources as one board: each one's tasks in turn. A lookup asks each source in
+    order and takes the first that has the id (the fixtures and the published tasks never
+    share one)."""
+
+    def __init__(self, *sources: TaskSource) -> None:
+        self._sources = sources
+
+    def list_tasks(self) -> list[TaskFixture]:
+        return [task for source in self._sources for task in source.list_tasks()]
+
+    def get_task(self, task_id: int) -> TaskFixture | None:
+        for source in self._sources:
+            task = source.get_task(task_id)
+            if task is not None:
+                return task
+        return None
+
+
+def publish_task(
+    db: StateDB,
+    *,
+    title: str,
+    civilian_summary: str,
+    acceptance_criteria: list[str],
+    size: Size,
+    tier_floor: TierFloor,
+    reward_class: RewardClass,
+    url: str,
+    labels: list[str],
+    published_by: str,
+    now: datetime,
+) -> TaskFixture:
+    """Put a new task on the board, numbered after every task published so far (10001
+    first). Runs in the caller's transaction when there is one, so a publish that fails
+    later leaves no task behind."""
+    with db.transaction():
+        row = db.query_one(
+            "SELECT COALESCE(MAX(id), ?) + 1 AS next_id FROM bridge_published_tasks",
+            (PUBLISHED_TASK_FIRST_ID - 1,),
+        )
+        task_id = int(row["next_id"]) if row else PUBLISHED_TASK_FIRST_ID
+        db.execute(
+            "INSERT INTO bridge_published_tasks (id, title, civilian_summary, size, "
+            "reward_class, tier_floor, url, labels, acceptance_criteria, published_at, "
+            "published_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                task_id,
+                title,
+                civilian_summary,
+                size,
+                reward_class,
+                tier_floor,
+                url,
+                json.dumps(labels),
+                json.dumps(acceptance_criteria),
+                _to_db(now),
+                published_by,
+            ),
+        )
+        created = db.query_one("SELECT * FROM bridge_published_tasks WHERE id = ?", (task_id,))
+    assert created is not None
+    return _published_task(created)
+
+
+def task_merged(db: StateDB, task_id: int) -> bool:
+    """Whether a pull request for this task was recorded as merged (`bridge_merges`)."""
+    row = db.query_one("SELECT 1 AS hit FROM bridge_merges WHERE task_id = ? LIMIT 1", (task_id,))
+    return row is not None
+
+
+#: Called as hook(db, task_id, now) when a task's pull request is recorded as merged,
+#: inside the transaction that records it.
+ShippedHook = Callable[[StateDB, int, datetime], None]
+_shipped_hooks: list[ShippedHook] = []
+
+
+def on_task_shipped(hook: ShippedHook) -> None:
+    """Register `hook` to hear about every merge the Bridge records (once per hook)."""
+    if hook not in _shipped_hooks:
+        _shipped_hooks.append(hook)
+
+
+def _task_shipped(db: StateDB, task_id: int, now: datetime) -> None:
+    """Run every shipped hook, each in its own savepoint: a hook that fails is logged and
+    its writes undone, and the merge it was told about stays recorded."""
+    for hook in list(_shipped_hooks):
+        try:
+            with db.transaction():
+                hook(db, task_id, now)
+        except Exception:
+            logger.exception("A shipped hook failed for task %s", task_id)
+
+
+# --- end of Phase 5 block -------------------------------------------------------------
+
 # --- the store ------------------------------------------------------------------------
 
 
@@ -737,6 +910,7 @@ class LeaseStore:
                         "holder_sub, merged_at) VALUES (?, ?, ?, ?, ?)",
                         (current.task_id, pull.number, current.id, current.holder_sub, merged_at),
                     )
+                    _task_shipped(db, current.task_id, now)  # Phase 5: the shipped hook
                 elif pull.is_open:
                     if (current.pr_number, current.pr_state, current.pr_head_sha) != (
                         pull.number,
@@ -975,7 +1149,7 @@ class LeaseStore:
 _store = LeaseStore()
 _github = GitHubReads()
 _rail_client: httpx.Client | None = None
-_source: TaskSource = FixtureTaskSource()
+_source: TaskSource = CompositeTaskSource(FixtureTaskSource(), PublishedTaskSource())  # Phase 5
 _providers_lock = threading.Lock()
 
 
@@ -998,7 +1172,8 @@ def get_rail_client() -> httpx.Client:
 
 
 def get_task_source() -> TaskSource:
-    """The committed fixtures: the only task source until Foreman's claim linkage."""
+    """The committed fixtures, then the tasks published from proposals (Phase 5), until
+    Foreman's claim linkage."""
     return _source
 
 

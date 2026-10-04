@@ -24,7 +24,7 @@ import os
 import re
 import sqlite3
 import threading
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -133,6 +133,17 @@ class StateDB:
             cursor = self._conn.execute(sql, params)
             try:
                 return WriteResult(rowcount=cursor.rowcount, lastrowid=cursor.lastrowid)
+            finally:
+                cursor.close()
+
+    def executemany(self, sql: str, rows: Iterable[Params]) -> WriteResult:
+        """Run one statement once per parameter set in `rows`, in one call (a fan-out).
+        Outside `transaction()` each run commits at once; inside one, all or nothing."""
+        with self._lock:
+            self._check_open()
+            cursor = self._conn.executemany(sql, rows)
+            try:
+                return WriteResult(rowcount=cursor.rowcount, lastrowid=None)
             finally:
                 cursor.close()
 

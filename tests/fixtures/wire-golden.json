@@ -21,6 +21,9 @@
       },
       "agent_start": {
         "type": "boolean"
+      },
+      "proposals": {
+        "type": "boolean"
       }
     },
     "TaskCard": {
@@ -268,14 +271,18 @@
     },
     "Credential": {
       "key": {
-        "type": "string"
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 4096
       },
       "orgId": {
         "type": "string",
+        "maxLength": 200,
         "optional": true
       },
       "routineUrl": {
         "type": "string",
+        "maxLength": 500,
         "optional": true
       }
     },
@@ -703,6 +710,455 @@
     "AuthorizeDecision": {
       "redirectTo": {
         "type": "string"
+      }
+    },
+    "ProposalCard": {
+      "id": {
+        "type": "integer"
+      },
+      "title": {
+        "type": "string"
+      },
+      "state": {
+        "type": "enum",
+        "values": [
+          "submitted",
+          "debate",
+          "voting",
+          "passed",
+          "failed",
+          "building",
+          "shipped",
+          "lapsed",
+          "withdrawn"
+        ]
+      },
+      "mover": {
+        "type": "string"
+      },
+      "movedAt": {
+        "type": "string"
+      },
+      "seconder": {
+        "type": "string",
+        "optional": true
+      },
+      "deadline": {
+        "type": "string",
+        "optional": true
+      },
+      "commentCount": {
+        "type": "integer"
+      },
+      "objectionCount": {
+        "type": "integer"
+      }
+    },
+    "ProposalList": {
+      "proposals": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "ref": "ProposalCard"
+        }
+      },
+      "testTimers": {
+        "type": "boolean"
+      },
+      "moreDecided": {
+        "type": "boolean",
+        "optional": true
+      },
+      "floorPaused": {
+        "type": "boolean",
+        "optional": true
+      }
+    },
+    "ProposalComment": {
+      "id": {
+        "type": "integer"
+      },
+      "author": {
+        "type": "string"
+      },
+      "text": {
+        "type": "string"
+      },
+      "at": {
+        "type": "string"
+      }
+    },
+    "ProposalEvent": {
+      "at": {
+        "type": "string"
+      },
+      "kind": {
+        "type": "enum",
+        "values": [
+          "moved",
+          "edited",
+          "seconded",
+          "consented",
+          "objected",
+          "commented",
+          "debate_ended",
+          "vote_opened",
+          "voted",
+          "vote_closed",
+          "passed",
+          "failed",
+          "lapsed",
+          "withdrawn",
+          "task_drafted",
+          "task_published",
+          "shipped",
+          "admin_ended_debate",
+          "admin_closed_vote",
+          "test_timers_on",
+          "test_timers_off",
+          "floor_paused",
+          "floor_resumed"
+        ]
+      },
+      "actor": {
+        "type": "string",
+        "optional": true
+      },
+      "message": {
+        "type": "string"
+      }
+    },
+    "ProposalTally": {
+      "yes": {
+        "type": "integer"
+      },
+      "no": {
+        "type": "integer"
+      },
+      "abstain": {
+        "type": "integer"
+      },
+      "eligible": {
+        "type": "integer"
+      },
+      "quorumMet": {
+        "type": "boolean"
+      }
+    },
+    "ProposalYou": {
+      "canEdit": {
+        "type": "boolean"
+      },
+      "canWithdraw": {
+        "type": "boolean"
+      },
+      "canSecond": {
+        "type": "boolean"
+      },
+      "canConsent": {
+        "type": "boolean"
+      },
+      "consent": {
+        "type": "enum",
+        "values": [
+          "consented",
+          "objected"
+        ],
+        "optional": true
+      },
+      "canComment": {
+        "type": "boolean"
+      },
+      "canVote": {
+        "type": "boolean"
+      },
+      "vote": {
+        "type": "enum",
+        "values": [
+          "yes",
+          "no",
+          "abstain"
+        ],
+        "optional": true
+      },
+      "isAdmin": {
+        "type": "boolean"
+      }
+    },
+    "DraftTask": {
+      "title": {
+        "type": "string"
+      },
+      "civilianSummary": {
+        "type": "string"
+      },
+      "acceptanceCriteria": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "size": {
+        "type": "enum",
+        "values": [
+          "XS",
+          "S",
+          "M"
+        ]
+      },
+      "tierFloor": {
+        "type": "enum",
+        "values": [
+          "T0",
+          "T1",
+          "T2"
+        ]
+      },
+      "rewardClass": {
+        "type": "enum",
+        "values": [
+          "none",
+          "R1",
+          "R2",
+          "R3",
+          "R4"
+        ]
+      },
+      "taskId": {
+        "type": "integer",
+        "optional": true
+      }
+    },
+    "ProposalDetail": {
+      "proposal": {
+        "type": "object",
+        "ref": "ProposalCard"
+      },
+      "pitch": {
+        "type": "string"
+      },
+      "eligibleCount": {
+        "type": "integer",
+        "optional": true
+      },
+      "consentCount": {
+        "type": "integer",
+        "optional": true
+      },
+      "turnout": {
+        "type": "integer",
+        "optional": true
+      },
+      "tally": {
+        "type": "object",
+        "ref": "ProposalTally",
+        "optional": true
+      },
+      "comments": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "ref": "ProposalComment"
+        }
+      },
+      "events": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "ref": "ProposalEvent"
+        }
+      },
+      "you": {
+        "type": "object",
+        "ref": "ProposalYou",
+        "optional": true
+      },
+      "draft": {
+        "type": "object",
+        "ref": "DraftTask",
+        "optional": true
+      },
+      "taskId": {
+        "type": "integer",
+        "optional": true
+      },
+      "revision": {
+        "type": "integer"
+      },
+      "moreComments": {
+        "type": "boolean",
+        "optional": true
+      },
+      "floorPaused": {
+        "type": "boolean",
+        "optional": true
+      }
+    },
+    "NewProposal": {
+      "title": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 100
+      },
+      "pitch": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 4000
+      }
+    },
+    "ConsentRequest": {
+      "consent": {
+        "type": "boolean"
+      }
+    },
+    "VoteRequest": {
+      "choice": {
+        "type": "enum",
+        "values": [
+          "yes",
+          "no",
+          "abstain"
+        ]
+      }
+    },
+    "CommentRequest": {
+      "text": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 2000
+      }
+    },
+    "DraftTaskRequest": {
+      "title": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 100
+      },
+      "civilianSummary": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 500
+      },
+      "acceptanceCriteria": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "minItems": 1,
+        "maxItems": 10
+      },
+      "size": {
+        "type": "enum",
+        "values": [
+          "XS",
+          "S",
+          "M"
+        ]
+      },
+      "tierFloor": {
+        "type": "enum",
+        "values": [
+          "T0",
+          "T1",
+          "T2"
+        ]
+      },
+      "rewardClass": {
+        "type": "enum",
+        "values": [
+          "none",
+          "R1",
+          "R2",
+          "R3",
+          "R4"
+        ]
+      }
+    },
+    "ProposalSettings": {
+      "testTimers": {
+        "type": "boolean"
+      }
+    },
+    "ProposalMe": {
+      "isAdmin": {
+        "type": "boolean"
+      },
+      "activeProposalId": {
+        "type": "integer",
+        "optional": true
+      },
+      "testTimers": {
+        "type": "boolean"
+      }
+    },
+    "Notification": {
+      "id": {
+        "type": "integer"
+      },
+      "kind": {
+        "type": "enum",
+        "values": [
+          "proposal_moved",
+          "proposal_seconded",
+          "your_proposal_seconded",
+          "proposal_passed",
+          "proposal_failed",
+          "proposal_lapsed",
+          "vote_opened",
+          "task_published"
+        ]
+      },
+      "message": {
+        "type": "string"
+      },
+      "href": {
+        "type": "string"
+      },
+      "at": {
+        "type": "string"
+      },
+      "read": {
+        "type": "boolean"
+      }
+    },
+    "NotificationList": {
+      "notifications": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "ref": "Notification"
+        }
+      },
+      "unread": {
+        "type": "integer"
+      }
+    },
+    "NotificationReadRequest": {
+      "ids": {
+        "type": "array",
+        "items": {
+          "type": "integer"
+        },
+        "optional": true
+      }
+    },
+    "ProposalCommentPage": {
+      "comments": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "ref": "ProposalComment"
+        }
+      },
+      "moreComments": {
+        "type": "boolean"
+      }
+    },
+    "SecondRequest": {
+      "revision": {
+        "type": "integer"
       }
     }
   }
