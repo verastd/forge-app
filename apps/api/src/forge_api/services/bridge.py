@@ -388,7 +388,6 @@ class TaskFixture:
     civilianSummary: str
     size: Size
     rewardClass: RewardClass
-    rewardUsd: float | None
     tierFloor: TierFloor
     url: str
     labels: list[str]
@@ -401,7 +400,6 @@ class TaskFixture:
             civilianSummary=self.civilianSummary,
             size=self.size,
             rewardClass=self.rewardClass,
-            rewardUsd=self.rewardUsd,
             tierFloor=self.tierFloor,
             status="claimed" if claimed_by is not None else "open",
             url=self.url,
@@ -491,7 +489,6 @@ def _published_task(row: Mapping[str, Any]) -> TaskFixture:
         civilianSummary=row["civilian_summary"],
         size=row["size"],
         rewardClass=row["reward_class"],
-        rewardUsd=None,
         tierFloor=row["tier_floor"],
         url=row["url"],
         labels=list(json.loads(row["labels"])),

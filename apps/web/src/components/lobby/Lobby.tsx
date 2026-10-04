@@ -415,7 +415,15 @@ export function Lobby({ heading, directory }: { heading: ReactNode; directory: R
               {message}
             </p>
           )}
-          {directory}
+          {/* With the wall on screen, the wall is the directory: the list steps out of
+              sight but stays in the page for screen readers, and shows again while a
+              keyboard user is in it. Without the wall it is the way in, so it shows. */}
+          <div
+            className={cx(live && ready && styles.directoryAside)}
+            data-directory={live && ready ? 'aside' : 'shown'}
+          >
+            {directory}
+          </div>
         </div>
         {live && (
           <aside className={styles.chat} aria-label="People nearby">

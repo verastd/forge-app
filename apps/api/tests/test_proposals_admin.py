@@ -406,7 +406,7 @@ def test_published_tasks_are_numbered_from_10001(floor: Floor) -> None:
     source = PublishedTaskSource(db)
     assert [task.id for task in source.list_tasks()] == [10001, 10002]
     assert source.get_task(10002) == second
-    assert second.acceptanceCriteria == ["b", "c"] and second.rewardUsd is None
+    assert second.acceptanceCriteria == ["b", "c"]
     for missing in (1, 10000, 10003, 2**63, 2**80):
         assert source.get_task(missing) is None
     board = CompositeTaskSource(FixtureTaskSource(), source)

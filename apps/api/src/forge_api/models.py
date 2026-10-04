@@ -176,7 +176,6 @@ class TaskCard(BaseModel):
     civilianSummary: str
     size: Size
     rewardClass: RewardClass
-    rewardUsd: float | None = None
     tierFloor: TierFloor
     status: TaskStatus
     url: str
@@ -624,7 +623,6 @@ class NotificationReadRequest(BaseModel):
 class PendingReward(BaseModel):
     pr: int
     rewardClass: RewardClass
-    usdEquivalent: float
     survivalEndsAt: str
 
 

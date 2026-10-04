@@ -4,9 +4,10 @@ import Link from 'next/link';
 import type { TaskCard as TaskCardType } from '@forge/shared';
 
 import { Chip } from './Chip';
+import { RunEstimate } from './RunEstimate';
 import { useSession } from './SessionProvider';
 import { DEMO_IDENTITY } from '../lib/fixtures';
-import { SIZE_LABEL, rewardLabel, tierFloorLabel } from '../lib/format';
+import { rewardLabel, tierFloorLabel } from '../lib/format';
 import { isDemoMode } from '../lib/mode';
 
 /**
@@ -23,7 +24,7 @@ import { isDemoMode } from '../lib/mode';
  */
 export function TaskCard({ task }: { task: TaskCardType }) {
   const { session } = useSession();
-  const reward = rewardLabel(task.rewardClass, task.rewardUsd);
+  const reward = rewardLabel(task.rewardClass);
   const claimed = task.status === 'claimed';
   const me = isDemoMode() || session?.demo === true ? DEMO_IDENTITY : (session?.login ?? null);
   const mine = claimed && me !== null && task.claimedBy?.toLowerCase() === me.toLowerCase();
@@ -47,7 +48,7 @@ export function TaskCard({ task }: { task: TaskCardType }) {
         <p className="task-title">{task.title}</p>
       </div>
       <div className="task-chips">
-        <Chip>{SIZE_LABEL[task.size]}</Chip>
+        <RunEstimate size={task.size} />
         {reward !== null && <Chip tone="accent">{reward}</Chip>}
         <Chip>{tierFloorLabel(task.tierFloor)}</Chip>
         {claimed && (

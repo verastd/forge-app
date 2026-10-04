@@ -83,8 +83,42 @@ test.describe('browsing the Bridge', () => {
     await expect(
       page.getByText('Let people download the Upland data they are looking at as a spreadsheet file.'),
     ).toBeVisible();
-    // Size is priced in the contributor's agent time, never in story points.
-    await expect(page.getByText("~an evening of your agent's time").first()).toBeVisible();
+    // A task is priced in the contributor's agent time, never in dollars.
+    await expect(page.getByText('Agent runs ~1 hour').first()).toBeVisible();
+    await expect(page.getByText(/\$\s?\d/)).toHaveCount(0);
+  });
+
+  test("the run-time chip keeps the token estimate behind a hover or a focus, and Escape puts it away", async ({
+    page,
+  }) => {
+    await page.goto('/contribute');
+    const summary = 'Let people download the Upland data they are looking at as a spreadsheet file.';
+    const card = page.getByRole('region', { name: 'Tasks' }).getByRole('article').filter({ has: page.getByRole('link', { name: summary, exact: true }) });
+    const chip = card.getByText('Agent runs ~1 hour');
+    const tip = card.getByRole('tooltip', { includeHidden: true });
+    await expect(tip).toBeHidden();
+    await expect(chip).toHaveAttribute('aria-describedby', (await tip.getAttribute('id')) ?? 'missing');
+
+    // Hovering the chip shows the estimate; moving away hides it.
+    await chip.hover();
+    await expect(tip).toBeVisible();
+    await expect(tip).toHaveText(
+      'Roughly 2M to 4M tokens of model use, counting the context the agent re-reads as it works. It varies a lot by agent.',
+    );
+    await page.mouse.move(0, 0);
+    await expect(tip).toBeHidden();
+
+    // A click or a tap focuses it, which shows the estimate too, and never opens the card.
+    await chip.click();
+    await expect(page).toHaveURL(/\/contribute$/);
+    await expect(tip).toBeVisible();
+    // Escape hides it without moving focus; leaving the chip resets it.
+    await page.keyboard.press('Escape');
+    await expect(tip).toBeHidden();
+    await expect(chip).toBeFocused();
+    await page.keyboard.press('Shift+Tab');
+    await chip.focus();
+    await expect(tip).toBeVisible();
   });
 
   test('each card is a link named by its summary, and opens from anywhere on the card (review-pages, Phase 4 carry-over)', async ({
@@ -116,7 +150,9 @@ test.describe('browsing the Bridge', () => {
 
     await page.getByRole('button', { name: 'Has a reward' }).click();
     await expect(cards).toHaveCount(6);
-    await expect(page.getByText('$200-equiv').first()).toBeVisible();
+    // It says a reward is attached, never what it is worth in dollars.
+    await expect(page.getByText('reward attached')).toHaveCount(6);
+    await expect(page.getByText(/\$\s?\d/)).toHaveCount(0);
   });
 
   test('opens a task and shows what done looks like; signed out, the claim is "Sign in to claim"', async ({
@@ -425,15 +461,12 @@ test.describe('/me for the practice account', () => {
 
 test.describe('the offline task fixtures', () => {
   // No browser: `lib/fixtures.ts` against the API's `tasks.json`, every field,
-  // compared as the API serves a task: it adds `status` from its lease store
-  // and leaves an unpaid task's null `rewardUsd` out. (Moved here from the
-  // retired handoff-golden.spec.ts.)
+  // compared as the API serves a task: it adds `status` from its lease store.
+  // Neither side carries a dollar amount. (Moved here from the retired
+  // handoff-golden.spec.ts.)
   test('match the API fixtures field for field', () => {
-    const served = apiTasks.map(({ rewardUsd, ...task }) => ({
-      ...task,
-      ...(rewardUsd === null ? {} : { rewardUsd }),
-      status: 'open',
-    }));
+    const served = apiTasks.map((task) => ({ ...task, status: 'open' }));
+    expect(apiTasks.some((task) => 'rewardUsd' in task)).toBe(false);
     expect(TASK_FIXTURES.map((task) => task.id)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
     expect(TASK_FIXTURES).toStrictEqual(served);
   });

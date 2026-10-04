@@ -54,10 +54,6 @@
           "R4"
         ]
       },
-      "rewardUsd": {
-        "type": "number",
-        "optional": true
-      },
       "tierFloor": {
         "type": "enum",
         "values": [

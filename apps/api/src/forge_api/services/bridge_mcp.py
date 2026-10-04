@@ -72,7 +72,6 @@ _TASK_CARD_SCHEMA: dict[str, Any] = {
         "civilianSummary": {"type": "string"},
         "size": {"type": "string", "enum": ["XS", "S", "M"]},
         "rewardClass": {"type": "string", "enum": ["none", "R1", "R2", "R3", "R4"]},
-        "rewardUsd": {"type": "number"},
         "tierFloor": {"type": "string", "enum": ["T0", "T1", "T2"]},
         "status": {"type": "string", "enum": ["open", "claimed"]},
         "url": {"type": "string"},

@@ -18,10 +18,7 @@ export interface TaskFixture extends TaskCard {
   acceptanceCriteria: string[];
 }
 
-/**
- * Mirror of the API fixtures. `rewardUsd` is omitted (never null) for the
- * unpaid tasks, exactly as the API serialises them.
- */
+/** Mirror of the API fixtures (apps/api/src/forge_api/fixtures/tasks.json). */
 export const TASK_FIXTURES: readonly TaskFixture[] = [
   {
     id: 1,
@@ -46,7 +43,6 @@ export const TASK_FIXTURES: readonly TaskFixture[] = [
       'Add a page that shows who has helped build the app and how much they have shipped.',
     size: 'S',
     rewardClass: 'R2',
-    rewardUsd: 200,
     tierFloor: 'T1',
     status: 'open',
     url: 'https://github.com/verastd/forge-app/issues/2',
@@ -64,7 +60,6 @@ export const TASK_FIXTURES: readonly TaskFixture[] = [
       "Make the project's helper tool explain itself clearly when something goes wrong.",
     size: 'XS',
     rewardClass: 'R1',
-    rewardUsd: 50,
     tierFloor: 'T0',
     status: 'open',
     url: 'https://github.com/verastd/forge-app/issues/3',
@@ -82,7 +77,6 @@ export const TASK_FIXTURES: readonly TaskFixture[] = [
       'Sharpen the instructions file that every helper agent reads before it starts work.',
     size: 'XS',
     rewardClass: 'R1',
-    rewardUsd: 50,
     // It edits a protected path (AGENTS.md), so only maintainers take it.
     tierFloor: 'T2',
     status: 'open',
@@ -100,7 +94,6 @@ export const TASK_FIXTURES: readonly TaskFixture[] = [
     civilianSummary: 'Turn the daily project summary into something a human can read over coffee.',
     size: 'S',
     rewardClass: 'R2',
-    rewardUsd: 200,
     tierFloor: 'T1',
     status: 'open',
     url: 'https://github.com/verastd/forge-app/issues/5',
@@ -133,7 +126,6 @@ export const TASK_FIXTURES: readonly TaskFixture[] = [
     civilianSummary: 'Give the team a simple screen to switch app features on and off.',
     size: 'M',
     rewardClass: 'R3',
-    rewardUsd: 600,
     tierFloor: 'T1',
     status: 'open',
     url: 'https://github.com/verastd/forge-app/issues/7',
@@ -151,7 +143,6 @@ export const TASK_FIXTURES: readonly TaskFixture[] = [
       "Pull the app's wording into one place so it can be translated into other languages.",
     size: 'S',
     rewardClass: 'R2',
-    rewardUsd: 200,
     tierFloor: 'T0',
     status: 'open',
     url: 'https://github.com/verastd/forge-app/issues/8',
@@ -204,7 +195,6 @@ export function profileFixture(): ContributorProfile {
       {
         pr: 1,
         rewardClass: 'R1',
-        usdEquivalent: 50,
         survivalEndsAt: isoDaysFromNow(12),
       },
     ],

@@ -26,6 +26,7 @@ import type { BridgeStage, BridgeStatus, CheckResults, RailList, TaskDetail } fr
 
 import { Chip } from '../Chip';
 import { LeaseCountdown } from '../LeaseCountdown';
+import { RunEstimate } from '../RunEstimate';
 import { useSession } from '../SessionProvider';
 import { useToast } from '../Toast';
 import { AgentHandoff, CallbackOutcome } from './AgentHandoff';
@@ -44,7 +45,7 @@ import {
   releaseTask,
 } from '../../lib/api';
 import { DEMO_IDENTITY, LEASE_HOURS_BY_SIZE } from '../../lib/fixtures';
-import { SIZE_LABEL, rewardLabel, tierFloorLabel } from '../../lib/format';
+import { rewardLabel, tierFloorLabel } from '../../lib/format';
 import { describeClaimError, describeTaskError, startedSince } from '../../lib/handoff';
 import type { StartOutcome } from '../../lib/handoff';
 import { isDemoMode } from '../../lib/mode';
@@ -438,7 +439,7 @@ export function TaskView({
   }
 
   const { task, acceptanceCriteria, brief } = detail;
-  const reward = rewardLabel(task.rewardClass, task.rewardUsd);
+  const reward = rewardLabel(task.rewardClass);
   const signInHref = `/signin?${new URLSearchParams({ next: `/contribute/task/${task.id}` }).toString()}`;
   const startRails = (rails?.rails ?? []).filter((rail) => rail.mode === 'start' && rail.enabled);
   const agentStart = flags?.agent_start === true;
@@ -463,7 +464,7 @@ export function TaskView({
           {task.title}
         </p>
         <div className="row" style={{ marginTop: 12 }}>
-          <Chip>{SIZE_LABEL[task.size]}</Chip>
+          <RunEstimate size={task.size} />
           {reward !== null && <Chip tone="accent">{reward}</Chip>}
           <Chip>{tierFloorLabel(task.tierFloor)}</Chip>
           {lease !== null && <LeaseCountdown leaseEndsAt={lease.leaseEndsAt} leaseHours={lease.leaseHours} />}
