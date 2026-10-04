@@ -244,6 +244,37 @@ test.describe('moving around', () => {
     expect(walked.z).toBeLessThan(before.z);
   });
 
+  test('a drag pulls the cave: dragging right turns the view left, dragging down tilts it up', async ({ page }) => {
+    test.setTimeout(90_000);
+    await openLobby(page);
+    const root = lobbyRoot(page);
+    await expect(root).toHaveAttribute('data-pitch', /^-?\d+\.\d\d$/);
+    const yawOf = async (): Promise<number> => Number(await root.getAttribute('data-yaw'));
+    const pitchOf = async (): Promise<number> => Number(await root.getAttribute('data-pitch'));
+    const box = await root.locator('canvas').boundingBox();
+    if (box === null) {
+      throw new Error('the lobby has no canvas on screen');
+    }
+    const x = box.x + box.width / 2;
+    const y = box.y + box.height / 2;
+
+    // 150 px right: about 0.48 rad of yaw, and yaw grows turning right, so it falls.
+    const startYaw = await yawOf();
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x + 150, y, { steps: 6 });
+    await page.mouse.up();
+    await expect.poll(yawOf, { timeout: 10_000 }).toBeLessThan(startYaw - 0.3);
+
+    // 100 px down: about 0.32 rad of pitch, and pitch grows looking down, so it falls.
+    const startPitch = await pitchOf();
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x, y + 100, { steps: 6 });
+    await page.mouse.up();
+    await expect.poll(pitchOf, { timeout: 10_000 }).toBeLessThan(startPitch - 0.2);
+  });
+
   test('walking into the wall stops at its edge', async ({ page }) => {
     test.setTimeout(120_000);
     // A step from the wall, facing it, through the lobby's own restore: any

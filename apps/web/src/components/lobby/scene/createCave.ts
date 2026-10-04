@@ -235,7 +235,7 @@ function rockSteps(lowTier: boolean, done: (geometry: THREE.CylinderGeometry) =>
 // ---------- the module ----------
 
 export interface CaveHud {
-  /** The lobby root: gets `data-x`, `data-y`, `data-z` and `data-yaw`. */
+  /** The lobby root: gets `data-x`, `data-y`, `data-z`, `data-yaw` and `data-pitch`. */
   root: HTMLElement;
   /** The layer the peers' name tags live in, laid exactly over the canvas. */
   people: HTMLElement;
@@ -765,6 +765,7 @@ export function createCave(canvas: HTMLCanvasElement, opts: CaveOptions): Cave {
         root.dataset.y = fixed(motion.pos.y);
         root.dataset.z = fixed(motion.pos.z);
         root.dataset.yaw = fixed(normalizeYaw(motion.yaw));
+        root.dataset.pitch = fixed(motion.pitch);
         const key = poseKey();
         if (key !== focusKey) {
           focusKey = key;
