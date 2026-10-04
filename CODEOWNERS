@@ -84,3 +84,11 @@
 /apps/api/src/forge_api/routers/bridge.py      @verastd @forge-cold
 /apps/api/src/forge_api/models.py              @verastd @forge-cold
 /apps/api/src/forge_api/main.py                @verastd @forge-cold
+# The Propose floor's rules: who may second, consent, object, vote and publish,
+# whose notifications each member sees, and the task text a passed proposal becomes.
+/apps/api/src/forge_api/services/proposals.py     @verastd @forge-cold
+/apps/api/src/forge_api/services/members.py       @verastd @forge-cold
+/apps/api/src/forge_api/services/notifications.py @verastd @forge-cold
+/apps/api/src/forge_api/routers/proposals.py      @verastd @forge-cold
+/apps/api/src/forge_api/routers/members.py        @verastd @forge-cold
+/apps/api/src/forge_api/routers/notifications.py  @verastd @forge-cold

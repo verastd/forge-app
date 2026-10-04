@@ -4,8 +4,10 @@ Routers are thin: they parse the request, call a service, and return the model.
 Every piece of behaviour worth testing lives under services/ (AGENTS.md).
 """
 
+import asyncio
 import os
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import AsyncIterator, Iterable, Mapping, Sequence
+from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI, Request
@@ -22,7 +24,19 @@ from starlette.responses import Response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from forge_api import __version__
-from forge_api.routers import bridge, flags, health, mcp, oauth, upland, upland_scrape
+from forge_api.routers import (
+    bridge,
+    flags,
+    health,
+    mcp,
+    members,
+    notifications,
+    oauth,
+    proposals,
+    upland,
+    upland_scrape,
+)
+from forge_api.services import proposals as proposals_service
 from forge_api.services.errors import ApiError
 
 #: `next dev` (3000) and the Playwright web server (3100). Staging/production
@@ -139,7 +153,20 @@ def invalid_request(status: int, fields: list[str]) -> JSONResponse:
     return JSONResponse(status_code=status, content={"error": "invalid_request", "fields": fields})
 
 
-app = FastAPI(title="FORGE API", version=__version__)
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """The proposals ticker runs for the app's lifetime: every 60 s it applies the
+    proposal deadlines that have passed (services/proposals.py `run_ticker`; a failing
+    beat is logged and the next one tries again). Cancelled cleanly on shutdown."""
+    ticker = asyncio.create_task(proposals_service.run_ticker(), name="proposals-ticker")
+    try:
+        yield
+    finally:
+        ticker.cancel()
+        await asyncio.gather(ticker, return_exceptions=True)
+
+
+app = FastAPI(title="FORGE API", version=__version__, lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -147,6 +174,9 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    # The Propose countdowns run on the server's clock, read from this header: a browser
+    # hides it from a cross-origin page unless it is exposed (it isn't CORS-safelisted).
+    expose_headers=["Date"],
 )
 # Added last, so it runs first: the connector paths' CORS, before the app-wide policy.
 app.add_middleware(ConnectorCORSMiddleware)
@@ -190,3 +220,6 @@ app.include_router(upland.router)
 app.include_router(upland_scrape.router)
 app.include_router(oauth.router)
 app.include_router(mcp.router)
+app.include_router(members.router)
+app.include_router(proposals.router)
+app.include_router(notifications.router)

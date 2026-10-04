@@ -56,15 +56,17 @@ plus the agent hand-off and the FORGE connector that ADR-005 adds
 - `apps/web/src/app/auth/` — the `/auth/signin`, `/auth/callback`,
   `/auth/signout` and `/auth/demo` routes, and `/auth/github/agent`, the
   one-time GitHub authorization that starts Copilot on a contributor's
-  fork (spent on that one start, never stored, then revoked).
+  fork (spent on that one start, never stored, then revoked). After a
+  GitHub sign-in the callback also records the new member with the API
+  (`members-hello.ts`).
 - `apps/web/src/app/bff/` (with `apps/web/src/lib/bff-forward.ts`, which
   does the minting) — the same-origin proxy that mints the API assertion
-  for `/apps/data`'s data, the Contribute page's Bridge calls and the
-  connected-agents list.
+  for `/apps/data`'s data, the Contribute page's Bridge calls, the
+  connected-agents list, every action on the Propose floor and the bell.
 - `apps/web/src/app/api/lobby/` — the lobby's LiveKit room-token route,
   which signs who each voice and name tag in the Apps lobby belongs to.
-- `apps/web/src/middleware.ts` — the `/me`, `/apps/data` and
-  `/oauth/authorize` sign-in gate.
+- `apps/web/src/middleware.ts` — the `/me`, `/apps/data`,
+  `/oauth/authorize` and `/propose/new` sign-in gate.
 - `apps/web/src/lib/session.ts` and `apps/web/src/lib/auth/` — the session
   helpers, the Origin check, and where every secret is read from the
   environment.
@@ -72,7 +74,9 @@ plus the agent hand-off and the FORGE connector that ADR-005 adds
   build offers the practice account at all (fixed at build time), and the
   security headers.
 - `apps/api/src/forge_api/services/identity.py` — where the API verifies
-  that assertion, and the `FORGE_ADMIN_IDS` operator check.
+  that assertion, and the `FORGE_ADMIN_IDS` operator check, which also
+  decides who may switch the Propose floor's Test timers, end a debate or
+  close a vote early, and publish a passed proposal as a Contribute task.
 - `.gitleaksignore` — fingerprints the secret scan skips (known false
   positives only). Core-owned, so no PR can suppress a finding about itself.
 - `AGENTS.md`, `CLAUDE.md` and `.gemini/` — the operating manual coding
@@ -114,6 +118,26 @@ needs a sign-in to the hardware-2FA cold account to merge (see
 `CODEOWNERS`'s own header for exactly what that does and doesn't buy). A
 report against any of them gets priority triage within the response SLO
 above.
+
+### The Propose floor's rules are in scope too
+
+`apps/api/src/forge_api/services/proposals.py`, `services/members.py`,
+`services/notifications.py` and their routers (`routers/proposals.py`,
+`routers/members.py`, `routers/notifications.py`) decide who may second,
+consent, object, vote and publish on the Propose floor (the API makes
+every one of those checks, never only the page), whose notifications each
+member sees, and what a passed proposal's Contribute task says, which
+becomes the brief every contributor's agent is given. A way to act as
+someone else, vote outside a proposal's eligible set, publish without being
+an admin, read someone else's notifications, or get text past the admin
+into a published task is worth a report. Like the paths above, they are
+protected paths: a pull request that changes them needs the cold account's
+review (`CODEOWNERS`, `.github/forge-protocol.json`).
+
+Known and accepted for the pilot, so not worth a report: anyone signed in
+with GitHub takes part, throwaway accounts included; consents and votes are
+public by name; and an admin is trusted with the text of the tasks they
+publish ([ADR-006](docs/adr/ADR-006-proposals.md)).
 
 ## What is actually enforced today
 

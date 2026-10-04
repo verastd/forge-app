@@ -1,4 +1,9 @@
-/* /propose is fully static — just typography, in the site's existing tokens. */
+/* The Propose screens (Phase 5): the floor, the new-proposal form and a
+ * proposal's page. Everything else they use comes from globals.css (.card,
+ * .btn, .chip, .text-input, .disclosure, .demo-banner). Mobile first: every
+ * rule here holds at 390 px, and wider screens only get more room. */
+
+/* --- the rules explainer ------------------------------------------------------ */
 
 .flowLine {
   font-family: var(--font-mono);
@@ -19,4 +24,559 @@
   font-family: var(--font-mono);
   font-weight: 700;
   color: var(--accent);
+}
+
+.ruleTitle {
+  font-size: 0.95rem;
+  margin-top: 6px;
+}
+
+/* --- the floor --------------------------------------------------------------------- */
+
+.sectionHead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.count {
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  color: var(--text-faint);
+}
+
+.tiles {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.tiles > li {
+  min-width: 0;
+}
+
+.tile {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  height: 100%;
+  min-width: 0;
+}
+
+/* The title's link covers the whole card, so the card opens from anywhere. */
+.tileLink::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: var(--radius);
+}
+
+.tileLink:focus-visible {
+  outline: none;
+}
+
+.tileLink:focus-visible::after {
+  outline: 2px solid var(--spark);
+  outline-offset: 3px;
+}
+
+.tileHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.tileId {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.tileTitle {
+  font-size: 1.05rem;
+  font-weight: 700;
+  line-height: 1.38;
+  overflow-wrap: anywhere;
+}
+
+.tileMeta {
+  font-size: 0.86rem;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.tileFoot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 12px;
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border-strong);
+}
+
+.countdown {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--spark);
+}
+
+.countdownOver {
+  color: var(--warn);
+}
+
+/* The floor is paused: no deadline runs, so none counts down. */
+.countdownPaused {
+  color: var(--warn);
+}
+
+.pausedBanner {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--warn-line);
+  border-radius: var(--radius-sm);
+  background: var(--warn-soft);
+  color: var(--text);
+}
+
+.pausedTitle {
+  font-weight: 750;
+  color: var(--warn);
+}
+
+/* "Show earlier": a button under its list, and what went wrong if it didn't load. */
+.more {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.timersBanner {
+  padding: 10px 14px;
+  border: 1px solid var(--warn-line);
+  border-radius: var(--radius-sm);
+  background: var(--warn-soft);
+  color: var(--warn);
+  font-weight: 700;
+}
+
+.onFloor {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+}
+
+/* The admins' Test timers switch. */
+.adminSwitch {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+}
+
+.switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  width: fit-content;
+  padding: 4px 2px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.switch:disabled,
+.switch[aria-disabled='true'] {
+  cursor: progress;
+  opacity: 0.7;
+}
+
+.switchTrack {
+  position: relative;
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 40px;
+  height: 22px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-elev-2);
+  transition: background 140ms var(--ease), border-color 140ms var(--ease);
+}
+
+.switchThumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  transition: transform 140ms var(--ease), background 140ms var(--ease);
+}
+
+.switch[aria-checked='true'] .switchTrack {
+  background: var(--warn-soft);
+  border-color: var(--warn);
+}
+
+.switch[aria-checked='true'] .switchThumb {
+  transform: translateX(18px);
+  background: var(--warn);
+}
+
+/* --- a proposal's page --------------------------------------------------------------- */
+
+/* A title is up to 100 characters with no spaces at all (a snake_case name, a URL): it wraps
+   anywhere rather than pushing the page wider than a phone. */
+.title {
+  overflow-wrap: anywhere;
+}
+
+.meta {
+  margin-top: 12px;
+}
+
+.deadline {
+  margin-top: 10px;
+}
+
+.deadline .countdown {
+  font-size: 0.92rem;
+}
+
+/* The pitch and every comment are plain text: line breaks kept, nothing rendered. */
+.pitch {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--text);
+  max-width: 72ch;
+}
+
+.progress {
+  font-weight: 700;
+  color: var(--text);
+}
+
+.tally {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+}
+
+.tallyCounts {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  color: var(--text);
+}
+
+.action {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.yourAnswer {
+  font-weight: 700;
+  color: var(--ok);
+}
+
+.practiceNote {
+  font-size: 0.86rem;
+  font-weight: 700;
+  color: var(--warn);
+}
+
+.confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--warn-line);
+  border-radius: var(--radius-sm);
+  background: var(--warn-soft);
+}
+
+.vote {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--spark-line);
+  border-radius: var(--radius-sm);
+  min-width: 0;
+}
+
+.vote legend {
+  padding: 0 6px;
+  font-weight: 750;
+  color: var(--text);
+}
+
+.vote .btn[aria-pressed='true'] {
+  box-shadow: 0 0 0 2px var(--spark-line);
+}
+
+.problem {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--danger-line);
+  border-radius: var(--radius-sm);
+  background: var(--danger-soft);
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+/* Where a write's outcome is said, and where focus goes once it is over. Empty until then. */
+.outcomeLine {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-radius: var(--radius-sm);
+}
+
+.outcomeLine:empty {
+  display: none;
+}
+
+.outcomeLine:focus {
+  outline: none;
+}
+
+.outcomeLine:focus-visible {
+  outline: 2px solid var(--spark);
+  outline-offset: 3px;
+}
+
+.outcome {
+  padding: 10px 14px;
+  border: 1px solid var(--ok-line);
+  border-radius: var(--radius-sm);
+  background: var(--ok-soft);
+  color: var(--text);
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
+/* A comment that wasn't posted, kept so nothing typed is lost. */
+.unsent {
+  margin: 0;
+  padding: 8px 12px;
+  border-left: 3px solid var(--danger-line);
+  background: var(--bg-inset);
+  color: var(--text-muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* A button whose label can outgrow a phone screen wraps instead of overflowing. */
+.btnWrap {
+  white-space: normal;
+  text-align: center;
+}
+
+/* A link inside running text: the app's links are otherwise unstyled. */
+.inlineLink {
+  color: var(--spark);
+  text-decoration: underline;
+  text-decoration-color: var(--spark-line);
+  text-underline-offset: 3px;
+}
+
+.inlineLink:hover {
+  text-decoration-color: var(--spark);
+}
+
+.thread {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.comment {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+  min-width: 0;
+}
+
+.comment:focus {
+  outline: none;
+}
+
+.comment:focus-visible {
+  outline: 2px solid var(--spark);
+  outline-offset: 2px;
+}
+
+.commentHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  overflow-wrap: anywhere;
+}
+
+.commentText {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--text-muted);
+}
+
+.timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.timeline li {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 2px;
+  font-size: 0.88rem;
+}
+
+.when {
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+.what {
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+/* --- forms --------------------------------------------------------------------------- */
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 720px;
+}
+
+.subTitle {
+  font-size: 1rem;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.field label,
+.fieldLabel {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+/* A value the form shows but doesn't let anyone change (the tier floor, for now). */
+.fixedValue {
+  padding: 9px 12px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 0.95rem;
+}
+
+.help {
+  font-size: 0.84rem;
+  color: var(--text-faint);
+}
+
+.input {
+  width: 100%;
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+
+textarea.input {
+  resize: vertical;
+  min-height: 5.5em;
+}
+
+.input[aria-invalid='true'] {
+  border-color: var(--danger-line);
+}
+
+.fieldFoot {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.fieldError {
+  font-size: 0.84rem;
+  font-weight: 650;
+  color: var(--danger);
+}
+
+.counter {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  color: var(--text-faint);
+}
+
+.counterOver {
+  color: var(--danger);
+  font-weight: 700;
+}
+
+.selects {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+}
+
+@media (min-width: 720px) {
+  .timeline li {
+    grid-template-columns: minmax(150px, auto) 1fr;
+    gap: 4px 14px;
+    align-items: baseline;
+  }
 }

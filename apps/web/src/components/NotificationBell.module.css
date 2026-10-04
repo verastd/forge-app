@@ -1,0 +1,144 @@
+/* The bell: a round button beside the account slot, the same size as the
+ * avatar, and the disclosure panel it opens. The map's palette: gold for
+ * anything unread. */
+
+.wrap {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.trigger {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-elev-2);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition:
+    border-color 140ms var(--ease),
+    background 140ms var(--ease),
+    color 140ms var(--ease);
+}
+
+.trigger:hover {
+  border-color: var(--accent-line);
+  background: var(--bg-elev-3);
+  color: var(--text);
+}
+
+.icon {
+  width: 18px;
+  height: 18px;
+}
+
+.badge {
+  position: absolute;
+  top: -5px;
+  right: -6px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+  box-shadow: 0 0 0 2px var(--bg);
+}
+
+.panel {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: -46px;
+  z-index: 50;
+  width: min(340px, calc(100vw - 32px));
+  max-height: min(70vh, 520px);
+  overflow-y: auto;
+  padding: 14px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-elev);
+  box-shadow: var(--shadow-lift);
+}
+
+.panel[hidden] {
+  display: none;
+}
+
+.panelHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-bottom: 10px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.title {
+  font-size: 0.92rem;
+  font-weight: 750;
+}
+
+.note {
+  padding: 6px 2px;
+  font-size: 0.86rem;
+  color: var(--text-faint);
+}
+
+.problem {
+  margin-top: 8px;
+  font-size: 0.86rem;
+  color: var(--danger);
+}
+
+.list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 0.86rem;
+  overflow-wrap: anywhere;
+}
+
+a.item:hover {
+  background: var(--bg-elev-2);
+  color: var(--text);
+}
+
+.unread .item {
+  color: var(--text);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.read .item {
+  opacity: 0.8;
+}
+
+.message {
+  font-weight: 600;
+}
+
+.time {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--text-faint);
+}

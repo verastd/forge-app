@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 
 import { AccountMenu } from './AccountMenu';
 import { Chip } from './Chip';
+import { NotificationBell } from './NotificationBell';
 import { useDegraded } from '../lib/degraded';
 
 const LINKS: ReadonlyArray<{ href: string; label: string }> = [
@@ -62,6 +63,7 @@ export function Nav() {
             offline demo data
           </Chip>
         )}
+        <NotificationBell />
         <AccountMenu />
       </div>
     </header>

@@ -1,7 +1,9 @@
 /**
  * Server-only: how this origin speaks to the API for someone. Used by the
  * Bridge BFF (`/bff/bridge/*`), the connected-agents BFF
- * (`/bff/oauth/grants*`) and the Copilot callback's one server-side start.
+ * (`/bff/oauth/grants*`), the Proposals and notifications BFFs
+ * (`/bff/proposals*`, `/bff/notifications*`), the Copilot callback's one
+ * server-side start and the sign-in callback's members hello.
  *
  * Same model as the Upland BFF (`app/bff/upland/[...path]/route.ts`), which
  * keeps its own copy so its behaviour stays exactly as it is:
@@ -16,8 +18,9 @@
  *   `Retry-After` in whole seconds when upstream sends one (the dispatch rate
  *   limit). Cookies, the browser's own headers and whatever else upstream
  *   adds stay behind;
- * - request bodies are JSON and at most 16 KB, read by the stream rather than
- *   by trusting Content-Length;
+ * - request bodies are JSON and at most 16 KB (a route may allow more:
+ *   `maxBodyBytes`), read by the stream rather than by trusting
+ *   Content-Length;
  * - state-changing methods must come from a page on this origin;
  * - nothing goes to an API that isn't https (`apiUrl`): 503 `not_configured`;
  * - a request the API took but didn't answer in time is 504
@@ -66,13 +69,22 @@ export function isSameOrigin(request: NextRequest): boolean {
 }
 
 export interface ForwardSpec {
-  method: 'GET' | 'POST' | 'DELETE';
+  /** PATCH and PUT are the Proposals BFF's (`/bff/proposals/*`): an edit, the settings, a draft task. */
+  method: 'GET' | 'POST' | 'DELETE' | 'PATCH' | 'PUT';
   /** The API path, already validated and encoded by the route, e.g. `/api/bridge/claim`. */
   upstreamPath: string;
   /** `optional`: forwarded as nobody when signed out. `required`: 401 when signed out. */
   identity: 'required' | 'optional';
   timeoutMs?: number;
+  /**
+   * The body cap, when a route needs more than {@link MAX_BODY_BYTES}: a
+   * proposal's 4,000-character pitch can run past 16 KB as UTF-8.
+   */
+  maxBodyBytes?: number;
 }
+
+/** The methods that carry a request body here. */
+const WITH_BODY: ReadonlySet<ForwardSpec['method']> = new Set(['POST', 'PATCH', 'PUT']);
 
 /** The assertion header for `session`, or null when this server cannot vouch for anyone. */
 async function assertionFor(session: Pick<SessionClaims, 'sub' | 'login'>): Promise<string | null> {
@@ -112,8 +124,8 @@ export async function forward(request: NextRequest, spec: ForwardSpec): Promise<
 
   const headers: Record<string, string> = { accept: 'application/json' };
   let body: Uint8Array | undefined;
-  if (spec.method === 'POST') {
-    const read = await readBody(request, MAX_BODY_BYTES);
+  if (WITH_BODY.has(spec.method)) {
+    const read = await readBody(request, spec.maxBodyBytes ?? MAX_BODY_BYTES);
     if (read === null) return bffError(413, 'too_large');
     if (read.byteLength > 0) {
       const type = request.headers.get('content-type');

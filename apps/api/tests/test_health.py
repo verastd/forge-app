@@ -34,6 +34,14 @@ def test_cors_allows_the_dev_and_playwright_origins(client: TestClient, origin: 
     assert response.headers["access-control-allow-origin"] == origin
 
 
+def test_cors_lets_the_web_read_the_servers_date(client: TestClient) -> None:
+    """The Propose countdowns take the server's time from `Date`, which a browser hides
+    from a cross-origin page unless the answer exposes it (review-pages L5)."""
+    response = client.get("/api/health", headers={"Origin": "http://localhost:3100"})
+    assert response.headers["access-control-allow-origin"] == "http://localhost:3100"
+    assert response.headers["access-control-expose-headers"] == "Date"
+
+
 def test_cors_origins_are_configurable_via_env() -> None:
     assert allowed_origins({}) == DEFAULT_CORS_ORIGINS.split(",")
     assert allowed_origins({"FORGE_CORS_ORIGINS": ""}) == DEFAULT_CORS_ORIGINS.split(",")

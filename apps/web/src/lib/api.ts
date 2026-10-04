@@ -215,13 +215,16 @@ export function failureOf(error: unknown): { code: string } & ApiErrorExtra {
  * Whether a write that failed (a claim, a start, a relay, a release, a pull
  * request handed in) may still have happened: no answer reached the page (it
  * gave up waiting, the network dropped, or what came back wasn't the answer
- * it expects), or the BFF stopped waiting on the API (504 `upstream_timeout`).
- * Either way the API may have it, so the page must read the task again rather
- * than say that nothing changed.
+ * it expects), the BFF stopped waiting on the API (504 `upstream_timeout`),
+ * or a 5xx came back without an error code: the host's own timeout or crash
+ * page, which can follow a write the API has already stored. Either way the
+ * API may have it, so the page must read the task again rather than say that
+ * nothing changed.
  */
 export function mayHaveHappened(error: unknown): boolean {
   if (error instanceof ApiError) return error.code === 'upstream_timeout';
-  return error instanceof RequestError && error.status === undefined;
+  if (!(error instanceof RequestError)) return false;
+  return error.status === undefined || (error.status >= 500 && error.status <= 599);
 }
 
 /**

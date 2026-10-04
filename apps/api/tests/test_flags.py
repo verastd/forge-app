@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from forge_api.models import FlagConfig
 from forge_api.services import flags as flags_service
 
 
@@ -65,6 +66,7 @@ def test_all_flags_false_when_no_source_is_present(
         "apps_lobby": False,
         "mcp_connector": False,
         "agent_start": False,
+        "proposals": False,
     }
 
 
@@ -104,6 +106,7 @@ def test_env_json_bad_json_fails_closed_even_over_a_valid_earlier_layer(
         "apps_lobby": False,
         "mcp_connector": False,
         "agent_start": False,
+        "proposals": False,
     }
 
 
@@ -119,6 +122,7 @@ def test_env_path_missing_file_fails_closed(
         "apps_lobby": False,
         "mcp_connector": False,
         "agent_start": False,
+        "proposals": False,
     }
 
 
@@ -141,6 +145,7 @@ def test_known_flag_non_boolean_fails_closed_even_with_a_valid_sibling_key(
         "apps_lobby": False,
         "mcp_connector": False,
         "agent_start": False,
+        "proposals": False,
     }
 
 
@@ -157,6 +162,7 @@ def test_non_object_top_level_fails_closed(
         "apps_lobby": False,
         "mcp_connector": False,
         "agent_start": False,
+        "proposals": False,
     }
 
 
@@ -217,6 +223,30 @@ def test_a_non_boolean_agent_start_fails_every_flag_closed(
     assert flags_service.is_enabled("mcp_connector") is False
 
 
+def test_proposals_is_on_in_the_repo_config_and_can_be_switched_off(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # On in the checked-in file so the operator can test the floor; off by default.
+    assert flags_service.DEFAULT_FLAGS["proposals"] is False
+    assert flags_service.is_enabled("proposals") is True
+    monkeypatch.setenv(flags_service.ENV_JSON, json.dumps({"proposals": False}))
+    assert flags_service.is_enabled("proposals") is False
+    assert flags_service.is_enabled("apps_lobby") is True
+
+
+def test_a_non_boolean_proposals_fails_every_flag_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(flags_service.ENV_JSON, json.dumps({"proposals": "on"}))
+    assert flags_service.get_flags().model_dump() == flags_service.DEFAULT_FLAGS
+    assert flags_service.is_enabled("proposals") is False
+
+
+def test_default_flags_name_every_flag_in_the_model() -> None:
+    assert list(flags_service.DEFAULT_FLAGS) == list(FlagConfig.model_fields)
+    assert not any(flags_service.DEFAULT_FLAGS.values())
+
+
 def test_flags_endpoint_returns_every_flag(client: TestClient) -> None:
     payload = client.get("/api/flags").json()
     assert set(payload) == {
@@ -227,5 +257,6 @@ def test_flags_endpoint_returns_every_flag(client: TestClient) -> None:
         "apps_lobby",
         "mcp_connector",
         "agent_start",
+        "proposals",
     }
     assert all(isinstance(value, bool) for value in payload.values())

@@ -7,19 +7,26 @@ Next.js app (via @forge/shared zod schemas) is coded against. Renaming a field h
 without renaming it there is a cross-boundary drift bug the Gauntlet should catch
 (PRD Appendix H.1).
 
-Optional fields are `X | None = None` and Bridge routes serialize with
-`response_model_exclude_none`: zod's `.optional()` accepts a missing key but rejects an
-explicit null, so None must never reach the wire (Upland is the documented exception).
-The rail registry and the brief have their own mirrors: services/rails.py ⇄
+Optional fields are `X | None = None` and Bridge, proposal and notification routes
+serialize with `response_model_exclude_none`: zod's `.optional()` accepts a missing key
+but rejects an explicit null, so None must never reach the wire (Upland is the documented
+exception). The rail registry and the brief have their own mirrors: services/rails.py ⇄
 packages/shared/src/rails.ts and services/brief.py ⇄ packages/shared/src/brief.ts.
+
+A length limit counts characters as Unicode code points: len(), which pydantic's
+min_length/max_length count. The zod side counts the same way (`textLength`), so an emoji
+is one character on both. tests/fixtures/wire-golden.json records every limit.
 """
 
-from typing import Literal, get_args
+from collections.abc import Mapping
+from types import MappingProxyType
+from typing import Annotated, Final, Literal, get_args
 
-from pydantic import BaseModel, Field, SecretStr
+from pydantic import BaseModel, Field, SecretStr, StrictBool, StrictInt
 
 Size = Literal["XS", "S", "M"]
 RewardClass = Literal["none", "R1", "R2", "R3", "R4"]
+#: The lowest tier that may take a task: T3 is never a floor.
 TierFloor = Literal["T0", "T1", "T2"]
 Tier = Literal["T0", "T1", "T2", "T3"]
 TaskStatus = Literal["open", "claimed"]
@@ -50,12 +57,102 @@ BridgeEventSource = Literal["forge", "agent"]
 CheckRunStatus = Literal["queued", "in_progress", "completed"]
 CheckState = Literal["no_pr", "pending", "passed", "failed"]
 
-#: The runtime tuples behind the literals above — START_RAILS, OPEN_RAILS, RAILS and
-#: PROGRESS_STAGES in packages/shared, in the same order.
+#: Stored proposal states (Phase 5 contract §2). `seconded` is momentary: seconding opens
+#: debate at once, so a proposal goes submitted -> debate and its timeline records the
+#: second. `lapsed`: nobody seconded in time; `withdrawn`: the mover withdrew first.
+ProposalState = Literal[
+    "submitted",
+    "debate",
+    "voting",
+    "passed",
+    "failed",
+    "building",
+    "shipped",
+    "lapsed",
+    "withdrawn",
+]
+#: Every kind of line in a proposal's timeline.
+ProposalEventKind = Literal[
+    "moved",
+    "edited",
+    "seconded",
+    "consented",
+    "objected",
+    "commented",
+    "debate_ended",
+    "vote_opened",
+    "voted",
+    "vote_closed",
+    "passed",
+    "failed",
+    "lapsed",
+    "withdrawn",
+    "task_drafted",
+    "task_published",
+    "shipped",
+    "admin_ended_debate",
+    "admin_closed_vote",
+    "test_timers_on",
+    "test_timers_off",
+    # The floor closed while members couldn't act (`proposals` or `github_signin` off),
+    # then opened again with every running deadline moved later by the time it was closed.
+    "floor_paused",
+    "floor_resumed",
+]
+VoteChoice = Literal["yes", "no", "abstain"]
+#: Where a member of the eligible set stands in debate (ProposalYou.consent).
+ConsentChoice = Literal["consented", "objected"]
+NotificationKind = Literal[
+    "proposal_moved",
+    "proposal_seconded",
+    "your_proposal_seconded",
+    "proposal_passed",
+    "proposal_failed",
+    "proposal_lapsed",
+    "vote_opened",
+    "task_published",
+]
+
+#: The runtime tuples behind the literals above — the same names in packages/shared, in
+#: the same order.
 START_RAILS: tuple[StartRail, ...] = get_args(StartRail)
 OPEN_RAILS: tuple[OpenRail, ...] = get_args(OpenRail)
 RAILS: tuple[Rail, ...] = get_args(Rail)
 PROGRESS_STAGES: tuple[ProgressStage, ...] = get_args(ProgressStage)
+PROPOSAL_STATES: tuple[ProposalState, ...] = get_args(ProposalState)
+PROPOSAL_EVENT_KINDS: tuple[ProposalEventKind, ...] = get_args(ProposalEventKind)
+VOTE_CHOICES: tuple[VoteChoice, ...] = get_args(VoteChoice)
+CONSENT_CHOICES: tuple[ConsentChoice, ...] = get_args(ConsentChoice)
+NOTIFICATION_KINDS: tuple[NotificationKind, ...] = get_args(NotificationKind)
+
+#: A member whose proposal is in one of these can't move another (409
+#: one_active_proposal). Every other state is decided.
+ACTIVE_PROPOSAL_STATES: tuple[ProposalState, ...] = ("submitted", "debate", "voting")
+
+#: The most characters each text a member writes may have, and the most acceptance
+#: criteria a draft task lists; each needs at least one. PROPOSAL_LIMITS in
+#: packages/shared, with the same keys.
+PROPOSAL_LIMITS: Final[Mapping[str, int]] = MappingProxyType(
+    {
+        "title": 100,
+        "pitch": 4000,
+        "comment": 2000,
+        "summary": 500,  # a draft task's civilianSummary
+        "criteria": 10,  # acceptance criteria per draft task
+        "criterion": 300,  # characters per acceptance criterion
+    }
+)
+
+#: A proposal's eligible set, frozen at its second, is the members seen in the last this
+#: many days (members.last_seen), plus the mover and the seconder. ELIGIBLE_ACTIVITY_DAYS
+#: in packages/shared.
+ELIGIBLE_ACTIVITY_DAYS: Final = 30
+
+_Title = Annotated[str, Field(min_length=1, max_length=PROPOSAL_LIMITS["title"])]
+_Pitch = Annotated[str, Field(min_length=1, max_length=PROPOSAL_LIMITS["pitch"])]
+_CommentText = Annotated[str, Field(min_length=1, max_length=PROPOSAL_LIMITS["comment"])]
+_Summary = Annotated[str, Field(min_length=1, max_length=PROPOSAL_LIMITS["summary"])]
+_Criterion = Annotated[str, Field(min_length=1, max_length=PROPOSAL_LIMITS["criterion"])]
 
 
 class FlagConfig(BaseModel):
@@ -68,6 +165,7 @@ class FlagConfig(BaseModel):
     apps_lobby: bool
     mcp_connector: bool
     agent_start: bool
+    proposals: bool
 
 
 class TaskCard(BaseModel):
@@ -304,6 +402,213 @@ class AuthorizeError(BaseModel):
 
 class AuthorizeDecision(BaseModel):
     redirectTo: str
+
+
+# ---------------------------------------------------------------------------
+# Proposals: the Propose floor (Phase 5 contract §2), behind the `proposals` flag.
+# Logins, titles, pitches, comments and messages are plain text, rendered as text.
+# Limits apply to what members send (the *Request models and NewProposal), not to
+# what the API answers.
+# ---------------------------------------------------------------------------
+
+
+class ProposalCard(BaseModel):
+    """A proposal as the floor lists it."""
+
+    id: int
+    title: str
+    state: ProposalState
+    mover: str  # GitHub login
+    movedAt: str
+    seconder: str | None = None  # GitHub login, once seconded
+    deadline: str | None = None  # when the current period (lapse, debate or vote) ends
+    commentCount: int
+    objectionCount: int
+
+
+class ProposalList(BaseModel):
+    """GET /api/proposals: newest first. Every active proposal (submitted, debate, voting)
+    and the newest 100 decided ones; `?decidedBefore=<id>` pages the older decided ones."""
+
+    proposals: list[ProposalCard]
+    testTimers: bool  # deadlines are minutes, not days
+    moreDecided: bool | None = None  # true: older decided proposals than these exist
+    floorPaused: bool | None = None  # true: members can't act now, so deadlines wait
+
+
+class ProposalComment(BaseModel):
+    """One comment in the public debate thread."""
+
+    id: int
+    author: str  # GitHub login
+    text: str
+    at: str
+
+
+class ProposalEvent(BaseModel):
+    """One line of a proposal's public timeline."""
+
+    at: str
+    kind: ProposalEventKind
+    actor: str | None = None  # GitHub login; the admin's, for an admin action
+    message: str
+
+
+class ProposalTally(BaseModel):
+    """The vote's count, shown only after the close."""
+
+    yes: int
+    no: int
+    abstain: int
+    eligible: int  # the size of the eligible set
+    quorumMet: bool  # a majority of the eligible set cast a ballot (Abstain counts)
+
+
+class ProposalYou(BaseModel):
+    """What the caller may do now, and where they stand."""
+
+    canEdit: bool
+    canWithdraw: bool
+    canSecond: bool
+    canConsent: bool
+    consent: ConsentChoice | None = None  # once the caller has consented or objected
+    canComment: bool
+    canVote: bool
+    vote: VoteChoice | None = None  # the caller's ballot, changeable until the close
+    isAdmin: bool
+
+
+class DraftTask(BaseModel):
+    """The task a passed proposal becomes. It starts as the proposal's title, the pitch as
+    the summary and no criteria, so it carries no limits; an admin finishes it
+    (DraftTaskRequest) and publishes it to the Contribute board."""
+
+    title: str
+    civilianSummary: str
+    acceptanceCriteria: list[str]
+    size: Size
+    tierFloor: TierFloor
+    rewardClass: RewardClass
+    taskId: int | None = None  # the Contribute task, once published
+
+
+class ProposalDetail(BaseModel):
+    """GET /api/proposals/{id}."""
+
+    proposal: ProposalCard
+    pitch: str
+    eligibleCount: int | None = None  # the size of the eligible set, frozen at the second
+    consentCount: int | None = None  # who has consented, the mover included
+    turnout: int | None = None  # during voting: ballots cast (totals stay hidden)
+    tally: ProposalTally | None = None  # after the close
+    comments: list[ProposalComment]
+    events: list[ProposalEvent]
+    you: ProposalYou | None = None  # identified callers only
+    draft: DraftTask | None = None  # admins only
+    taskId: int | None = None  # the Contribute task, once published
+    # The text's revision: 1, plus 1 for every edit. A second sends the one it read
+    # (SecondRequest).
+    revision: int
+    moreComments: bool | None = None  # true: older comments than `comments` exist
+    floorPaused: bool | None = None  # true: members can't act now, so deadlines wait
+
+
+class ProposalCommentPage(BaseModel):
+    """GET /api/proposals/{id}/comments?before=<commentId>: up to 100 comments older than
+    that one (the newest 100 without it), oldest first."""
+
+    comments: list[ProposalComment]
+    moreComments: bool  # true: even older comments exist
+
+
+class NewProposal(BaseModel):
+    """POST /api/proposals, and PATCH /api/proposals/{id} (the mover, until seconded)."""
+
+    title: _Title
+    pitch: _Pitch  # plain English, plain text
+
+
+class SecondRequest(BaseModel):
+    """POST /api/proposals/{id}/second: the revision of the text the seconder read
+    (ProposalDetail.revision). Another one is 409 proposal_changed. Strict, as zod's
+    z.number().int() is: "2" or 2.0 is refused."""
+
+    revision: Annotated[StrictInt, Field(ge=1)]
+
+
+class ConsentRequest(BaseModel):
+    """POST /api/proposals/{id}/consent: true consents, false objects (final). Strict, as
+    zod's z.boolean() is: "false" or 0 is refused, never read as an objection."""
+
+    consent: StrictBool
+
+
+class VoteRequest(BaseModel):
+    """POST /api/proposals/{id}/vote."""
+
+    choice: VoteChoice
+
+
+class CommentRequest(BaseModel):
+    """POST /api/proposals/{id}/comments."""
+
+    text: _CommentText
+
+
+class DraftTaskRequest(BaseModel):
+    """PUT /api/proposals/{id}/admin/draft-task: a DraftTask without taskId, within the
+    limits."""
+
+    title: _Title
+    civilianSummary: _Summary
+    acceptanceCriteria: list[_Criterion] = Field(
+        min_length=1, max_length=PROPOSAL_LIMITS["criteria"]
+    )
+    size: Size
+    tierFloor: TierFloor
+    rewardClass: RewardClass
+
+
+class ProposalSettings(BaseModel):
+    """PUT /api/proposals/settings (admins): the Test timers switch. Strict, as zod's
+    z.boolean() is."""
+
+    testTimers: StrictBool
+
+
+class ProposalMe(BaseModel):
+    """GET /api/proposals/me."""
+
+    isAdmin: bool
+    activeProposalId: int | None = None  # the caller's proposal in an active state
+    testTimers: bool
+
+
+# ---------------------------------------------------------------------------
+# Notifications: the in-app bell (/api/notifications*)
+# ---------------------------------------------------------------------------
+
+
+class Notification(BaseModel):
+    id: int
+    kind: NotificationKind
+    message: str
+    href: str  # a path on this site, such as /propose/12
+    at: str
+    read: bool
+
+
+class NotificationList(BaseModel):
+    """GET /api/notifications: the newest 30, and how many of all are unread."""
+
+    notifications: list[Notification]
+    unread: int
+
+
+class NotificationReadRequest(BaseModel):
+    """POST /api/notifications/read: marks these, or every one when `ids` is absent."""
+
+    ids: list[int] | None = None
 
 
 class PendingReward(BaseModel):

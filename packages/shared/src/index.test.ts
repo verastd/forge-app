@@ -59,6 +59,7 @@ import {
   ScrapeStatusSchema,
   SubmitRequestSchema,
   TIERS,
+  TIER_FLOORS,
   TaskCardSchema,
   TaskDetailSchema,
   TaskListSchema,
@@ -93,6 +94,7 @@ describe('FlagConfigSchema', () => {
     apps_lobby: true,
     mcp_connector: true,
     agent_start: true,
+    proposals: true,
   };
 
   /** ALL_ON without `name`: a config written before that flag existed. */
@@ -111,6 +113,7 @@ describe('FlagConfigSchema', () => {
       apps_lobby: true,
       mcp_connector: true,
       agent_start: false,
+      proposals: true,
     });
     expect(result.success).toBe(true);
   });
@@ -120,7 +123,7 @@ describe('FlagConfigSchema', () => {
     expect(result.success).toBe(false);
   });
 
-  it.each(['github_signin', 'apps_lobby', 'mcp_connector', 'agent_start'] as const)(
+  it.each(['github_signin', 'apps_lobby', 'mcp_connector', 'agent_start', 'proposals'] as const)(
     'requires %s: a config written before the flag existed is incomplete',
     (name) => {
       expect(FlagConfigSchema.safeParse(ALL_ON).success).toBe(true);
@@ -137,11 +140,12 @@ describe('FlagConfigSchema', () => {
       apps_lobby: false,
       mcp_connector: false,
       agent_start: false,
+      proposals: false,
     });
     expect(result.success).toBe(false);
   });
 
-  it.each(['apps_lobby', 'mcp_connector', 'agent_start'] as const)('rejects a non-boolean %s', (name) => {
+  it.each(['apps_lobby', 'mcp_connector', 'agent_start', 'proposals'] as const)('rejects a non-boolean %s', (name) => {
     expect(FlagConfigSchema.safeParse({ ...ALL_ON, [name]: 'true' }).success).toBe(false);
   });
 
@@ -154,7 +158,9 @@ describe('FlagConfigSchema', () => {
       'apps_lobby',
       'mcp_connector',
       'agent_start',
+      'proposals',
     ]);
+    expect(Object.keys(FlagConfigSchema.shape)).toEqual([...FLAG_NAMES]);
   });
 });
 
@@ -253,11 +259,16 @@ describe('TaskCardSchema', () => {
   });
 });
 
-describe('SIZES / REWARD_CLASSES / TIERS', () => {
+describe('SIZES / REWARD_CLASSES / TIERS / TIER_FLOORS', () => {
   it('are the frozen const tuples', () => {
     expect(SIZES).toEqual(['XS', 'S', 'M']);
     expect(REWARD_CLASSES).toEqual(['none', 'R1', 'R2', 'R3', 'R4']);
     expect(TIERS).toEqual(['T0', 'T1', 'T2', 'T3']);
+    expect(TIER_FLOORS).toEqual(['T0', 'T1', 'T2']);
+  });
+
+  it('a task card takes exactly the tier floors', () => {
+    expect(TaskCardSchema.shape.tierFloor.options).toEqual([...TIER_FLOORS]);
   });
 });
 
@@ -384,6 +395,26 @@ describe('CredentialSchema / DispatchRequestSchema', () => {
     expect(CredentialSchema.safeParse({ key: 'k', orgId: 'o'.repeat(201) }).success).toBe(false);
     expect(CredentialSchema.safeParse({ key: 'k', routineUrl: 'u'.repeat(500) }).success).toBe(true);
     expect(CredentialSchema.safeParse({ key: 'k', routineUrl: 'u'.repeat(501) }).success).toBe(false);
+  });
+
+  it('counts characters as the API does: an astral character is one, not two UTF-16 units', () => {
+    const astral = '\u{1F511}';
+    expect(CredentialSchema.safeParse({ key: astral.repeat(4096) }).success).toBe(true);
+    expect(CredentialSchema.safeParse({ key: astral.repeat(4097) }).success).toBe(false);
+    expect(CredentialSchema.safeParse({ key: 'k', orgId: astral.repeat(200) }).success).toBe(true);
+    expect(CredentialSchema.safeParse({ key: 'k', orgId: astral.repeat(201) }).success).toBe(false);
+    expect(CredentialSchema.safeParse({ key: 'k', orgId: '' }).success).toBe(true);
+  });
+
+  it('explains a limit in plain words', () => {
+    const tooLong = CredentialSchema.safeParse({ key: 'k', orgId: 'o'.repeat(201) });
+    expect(tooLong.success ? [] : tooLong.error.issues.map((issue) => issue.message)).toEqual([
+      'Use at most 200 characters.',
+    ]);
+    const empty = CredentialSchema.safeParse({ key: '' });
+    expect(empty.success ? [] : empty.error.issues.map((issue) => issue.message)).toEqual([
+      'Use 1 to 4096 characters.',
+    ]);
   });
 });
 

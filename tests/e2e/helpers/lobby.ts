@@ -107,7 +107,8 @@ type FlagName =
   | 'github_signin'
   | 'apps_lobby'
   | 'mcp_connector'
-  | 'agent_start';
+  | 'agent_start'
+  | 'proposals';
 
 /**
  * Serves a full, schema-valid flags payload in place of the API's: every
@@ -123,6 +124,7 @@ export async function serveFlags(page: Page, overrides: Partial<Record<FlagName,
     apps_lobby: true,
     mcp_connector: true,
     agent_start: true,
+    proposals: true,
     ...overrides,
   };
   await page.route('**/api/flags', (route) =>

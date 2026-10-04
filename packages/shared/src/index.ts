@@ -24,6 +24,7 @@ export const FLAG_NAMES = [
   'apps_lobby',
   'mcp_connector',
   'agent_start',
+  'proposals',
 ] as const;
 export type FlagName = (typeof FLAG_NAMES)[number];
 
@@ -37,6 +38,8 @@ export const FlagConfigSchema = z.object({
   mcp_connector: z.boolean(),
   /** FORGE starting agents through vendor APIs (start rails), with FORGE_START_RAILS. */
   agent_start: z.boolean(),
+  /** Proposals: /propose, /api/proposals* and the bell's proposal notifications. */
+  proposals: z.boolean(),
 });
 export type FlagConfig = z.infer<typeof FlagConfigSchema>;
 
@@ -53,6 +56,30 @@ export type RewardClass = (typeof REWARD_CLASSES)[number];
 export const TIERS = ['T0', 'T1', 'T2', 'T3'] as const;
 export type Tier = (typeof TIERS)[number];
 
+/** The lowest tier that may take a task: T3 is never a floor. */
+export const TIER_FLOORS = ['T0', 'T1', 'T2'] as const;
+export type TierFloor = (typeof TIER_FLOORS)[number];
+
+// ---------------------------------------------------------------------------
+// Length limits. Every limit on the wire counts characters as Unicode code
+// points, as Python's len() and pydantic's max_length do in apps/api, not as
+// UTF-16 units (zod's own .max()): an emoji is one character on both sides.
+// ---------------------------------------------------------------------------
+
+/** The characters in `text`, counted the way every limit here counts them. Use it for counters. */
+export function textLength(text: string): number {
+  return Array.from(text).length;
+}
+
+/** A string of `min` to `max` characters (textLength). */
+function characters(min: number, max: number) {
+  const message = min > 0 ? `Use ${min} to ${max} characters.` : `Use at most ${max} characters.`;
+  return z.string().refine((value) => {
+    const length = textLength(value);
+    return length >= min && length <= max;
+  }, message);
+}
+
 // ---------------------------------------------------------------------------
 // Task card (the Bridge's plain-language task board — PRD Appendix I.2)
 // ---------------------------------------------------------------------------
@@ -64,7 +91,7 @@ export const TaskCardSchema = z.object({
   size: z.enum(SIZES),
   rewardClass: z.enum(REWARD_CLASSES),
   rewardUsd: z.number().optional(),
-  tierFloor: z.enum(['T0', 'T1', 'T2']),
+  tierFloor: z.enum(TIER_FLOORS),
   status: z.enum(['open', 'claimed']),
   url: z.string(),
   labels: z.array(z.string()),
@@ -179,11 +206,11 @@ export type ForkStatus = z.infer<typeof ForkStatusSchema>;
 
 /** What a contributor pastes for a start rail. Never logged, never echoed. */
 export const CredentialSchema = z.object({
-  key: z.string().min(1).max(4096),
+  key: characters(1, 4096),
   /** devin */
-  orgId: z.string().max(200).optional(),
+  orgId: characters(0, 200).optional(),
   /** claude-routine */
-  routineUrl: z.string().max(500).optional(),
+  routineUrl: characters(0, 500).optional(),
 });
 export type Credential = z.infer<typeof CredentialSchema>;
 
@@ -411,6 +438,351 @@ export const AuthorizeDecisionSchema = z.object({
   redirectTo: z.string(),
 });
 export type AuthorizeDecision = z.infer<typeof AuthorizeDecisionSchema>;
+
+// ---------------------------------------------------------------------------
+// Proposals: the Propose floor (Phase 5 contract §2), behind the `proposals`
+// flag. Robert's Rules: a member moves, another seconds, debate (with a
+// unanimous-consent fast path), a vote when anyone objects, then the outcome.
+// Logins, titles, pitches, comments and messages are plain text: render them
+// as text. Limits apply to what members send, not to what the API answers.
+// ---------------------------------------------------------------------------
+
+/**
+ * Stored states. `seconded` is momentary: seconding opens debate at once, so a
+ * proposal goes `submitted` -> `debate` and its timeline records the second.
+ * `lapsed`: nobody seconded in time; `withdrawn`: the mover withdrew before a
+ * decision.
+ */
+export const PROPOSAL_STATES = [
+  'submitted',
+  'debate',
+  'voting',
+  'passed',
+  'failed',
+  'building',
+  'shipped',
+  'lapsed',
+  'withdrawn',
+] as const;
+export const ProposalStateSchema = z.enum(PROPOSAL_STATES);
+export type ProposalState = z.infer<typeof ProposalStateSchema>;
+
+/**
+ * A member whose proposal is in one of these can't move another (409
+ * one_active_proposal). The floor shows them as "Needs a second", "In debate"
+ * and "Voting"; every other state is decided.
+ */
+export const ACTIVE_PROPOSAL_STATES: readonly ProposalState[] = ['submitted', 'debate', 'voting'];
+
+/** Every kind of line in a proposal's timeline. */
+export const PROPOSAL_EVENT_KINDS = [
+  'moved',
+  'edited',
+  'seconded',
+  'consented',
+  'objected',
+  'commented',
+  'debate_ended',
+  'vote_opened',
+  'voted',
+  'vote_closed',
+  'passed',
+  'failed',
+  'lapsed',
+  'withdrawn',
+  'task_drafted',
+  'task_published',
+  'shipped',
+  'admin_ended_debate',
+  'admin_closed_vote',
+  'test_timers_on',
+  'test_timers_off',
+  // The floor closed while members couldn't act (`proposals` or `github_signin`
+  // off), then opened again with every running deadline moved later by the time
+  // it was closed.
+  'floor_paused',
+  'floor_resumed',
+] as const;
+export const ProposalEventKindSchema = z.enum(PROPOSAL_EVENT_KINDS);
+export type ProposalEventKind = z.infer<typeof ProposalEventKindSchema>;
+
+export const VOTE_CHOICES = ['yes', 'no', 'abstain'] as const;
+export const VoteChoiceSchema = z.enum(VOTE_CHOICES);
+export type VoteChoice = z.infer<typeof VoteChoiceSchema>;
+
+/** Where a member of the eligible set stands in debate (ProposalYou.consent). Objecting is final. */
+export const CONSENT_CHOICES = ['consented', 'objected'] as const;
+export const ConsentChoiceSchema = z.enum(CONSENT_CHOICES);
+export type ConsentChoice = z.infer<typeof ConsentChoiceSchema>;
+
+/**
+ * The most characters (textLength) each text a member writes may have, and the
+ * most acceptance criteria a draft task lists. Each needs at least one.
+ */
+export const PROPOSAL_LIMITS = {
+  title: 100,
+  pitch: 4000,
+  comment: 2000,
+  /** A draft task's civilianSummary. */
+  summary: 500,
+  /** Acceptance criteria per draft task. */
+  criteria: 10,
+  /** Characters per acceptance criterion. */
+  criterion: 300,
+} as const;
+
+/**
+ * A proposal's eligible set, frozen at its second, is the members seen in the
+ * last this many days, plus the mover and the seconder. Quorum is a majority of
+ * it. ELIGIBLE_ACTIVITY_DAYS in apps/api models.py.
+ */
+export const ELIGIBLE_ACTIVITY_DAYS = 30;
+
+/** A proposal as the floor lists it. */
+export const ProposalCardSchema = z.object({
+  id: z.number().int(),
+  title: z.string(),
+  state: ProposalStateSchema,
+  /** The mover's GitHub login. */
+  mover: z.string(),
+  movedAt: z.string(),
+  /** The seconder's GitHub login, once seconded. */
+  seconder: z.string().optional(),
+  /** When the current period (lapse, debate or vote) ends. */
+  deadline: z.string().optional(),
+  commentCount: z.number().int(),
+  objectionCount: z.number().int(),
+});
+export type ProposalCard = z.infer<typeof ProposalCardSchema>;
+
+/**
+ * GET /api/proposals: newest first. Every active proposal (submitted, debate,
+ * voting) and the newest 100 decided ones; `?decidedBefore=<id>` pages the
+ * older decided ones.
+ */
+export const ProposalListSchema = z.object({
+  proposals: z.array(ProposalCardSchema),
+  /** Test timers are on: deadlines are minutes, not days. */
+  testTimers: z.boolean(),
+  /** True: older decided proposals than these exist. */
+  moreDecided: z.boolean().optional(),
+  /** True: members can't act now (sign-in is off), so every deadline waits. */
+  floorPaused: z.boolean().optional(),
+});
+export type ProposalList = z.infer<typeof ProposalListSchema>;
+
+/** One comment in the public debate thread. */
+export const ProposalCommentSchema = z.object({
+  id: z.number().int(),
+  /** The commenter's GitHub login. */
+  author: z.string(),
+  text: z.string(),
+  at: z.string(),
+});
+export type ProposalComment = z.infer<typeof ProposalCommentSchema>;
+
+/** One line of a proposal's public timeline. */
+export const ProposalEventSchema = z.object({
+  at: z.string(),
+  kind: ProposalEventKindSchema,
+  /** Who did it (a GitHub login; the admin's, for an admin action). */
+  actor: z.string().optional(),
+  message: z.string(),
+});
+export type ProposalEvent = z.infer<typeof ProposalEventSchema>;
+
+/** The vote's count, shown only after the close. */
+export const ProposalTallySchema = z.object({
+  yes: z.number().int(),
+  no: z.number().int(),
+  abstain: z.number().int(),
+  /** The size of the eligible set. */
+  eligible: z.number().int(),
+  /** A majority of the eligible set cast a ballot (Abstain counts). */
+  quorumMet: z.boolean(),
+});
+export type ProposalTally = z.infer<typeof ProposalTallySchema>;
+
+/** What the caller may do now, and where they stand. */
+export const ProposalYouSchema = z.object({
+  canEdit: z.boolean(),
+  canWithdraw: z.boolean(),
+  canSecond: z.boolean(),
+  canConsent: z.boolean(),
+  /** Once the caller has consented or objected. */
+  consent: ConsentChoiceSchema.optional(),
+  canComment: z.boolean(),
+  canVote: z.boolean(),
+  /** The caller's ballot, changeable until the vote closes. */
+  vote: VoteChoiceSchema.optional(),
+  isAdmin: z.boolean(),
+});
+export type ProposalYou = z.infer<typeof ProposalYouSchema>;
+
+/**
+ * The task a passed proposal becomes. It starts as the proposal's title, the
+ * pitch as the summary and no criteria, so it carries no limits; an admin
+ * finishes it (DraftTaskRequest) and publishes it to the Contribute board.
+ */
+export const DraftTaskSchema = z.object({
+  title: z.string(),
+  civilianSummary: z.string(),
+  acceptanceCriteria: z.array(z.string()),
+  size: z.enum(SIZES),
+  tierFloor: z.enum(TIER_FLOORS),
+  rewardClass: z.enum(REWARD_CLASSES),
+  /** The Contribute task, once published. */
+  taskId: z.number().int().optional(),
+});
+export type DraftTask = z.infer<typeof DraftTaskSchema>;
+
+/** GET /api/proposals/{id}. */
+export const ProposalDetailSchema = z.object({
+  proposal: ProposalCardSchema,
+  pitch: z.string(),
+  /** The size of the eligible set, frozen at the second. */
+  eligibleCount: z.number().int().optional(),
+  /** Members of the eligible set who have consented, the mover included. */
+  consentCount: z.number().int().optional(),
+  /** During voting: ballots cast so far (the totals stay hidden until the close). */
+  turnout: z.number().int().optional(),
+  /** After the close. */
+  tally: ProposalTallySchema.optional(),
+  comments: z.array(ProposalCommentSchema),
+  events: z.array(ProposalEventSchema),
+  /** Identified callers only. */
+  you: ProposalYouSchema.optional(),
+  /** Admins only. */
+  draft: DraftTaskSchema.optional(),
+  /** The Contribute task, once published. */
+  taskId: z.number().int().optional(),
+  /**
+   * The text's revision: 1, plus 1 for every edit. A second sends the one it
+   * read (SecondRequest).
+   */
+  revision: z.number().int().min(1),
+  /** True: older comments than `comments` exist (GET .../comments?before=). */
+  moreComments: z.boolean().optional(),
+  /** True: members can't act now (sign-in is off), so every deadline waits. */
+  floorPaused: z.boolean().optional(),
+});
+export type ProposalDetail = z.infer<typeof ProposalDetailSchema>;
+
+/**
+ * GET /api/proposals/{id}/comments?before=<commentId>: up to 100 comments
+ * older than that one (the newest 100 without it), oldest first.
+ */
+export const ProposalCommentPageSchema = z.object({
+  comments: z.array(ProposalCommentSchema),
+  /** True: even older comments exist. */
+  moreComments: z.boolean(),
+});
+export type ProposalCommentPage = z.infer<typeof ProposalCommentPageSchema>;
+
+/** POST /api/proposals, and PATCH /api/proposals/{id} (the mover, until seconded). */
+export const NewProposalSchema = z.object({
+  title: characters(1, PROPOSAL_LIMITS.title),
+  /** Plain English, plain text. */
+  pitch: characters(1, PROPOSAL_LIMITS.pitch),
+});
+export type NewProposal = z.infer<typeof NewProposalSchema>;
+
+/**
+ * POST /api/proposals/{id}/second: the revision of the text the seconder read
+ * (ProposalDetail.revision). Another one is 409 proposal_changed.
+ */
+export const SecondRequestSchema = z.object({
+  revision: z.number().int().min(1),
+});
+export type SecondRequest = z.infer<typeof SecondRequestSchema>;
+
+/** POST /api/proposals/{id}/consent: true consents, false objects (final). */
+export const ConsentRequestSchema = z.object({
+  consent: z.boolean(),
+});
+export type ConsentRequest = z.infer<typeof ConsentRequestSchema>;
+
+/** POST /api/proposals/{id}/vote. */
+export const VoteRequestSchema = z.object({
+  choice: VoteChoiceSchema,
+});
+export type VoteRequest = z.infer<typeof VoteRequestSchema>;
+
+/** POST /api/proposals/{id}/comments. */
+export const CommentRequestSchema = z.object({
+  text: characters(1, PROPOSAL_LIMITS.comment),
+});
+export type CommentRequest = z.infer<typeof CommentRequestSchema>;
+
+/** PUT /api/proposals/{id}/admin/draft-task: a DraftTask without taskId, within the limits. */
+export const DraftTaskRequestSchema = z.object({
+  title: characters(1, PROPOSAL_LIMITS.title),
+  civilianSummary: characters(1, PROPOSAL_LIMITS.summary),
+  acceptanceCriteria: z
+    .array(characters(1, PROPOSAL_LIMITS.criterion))
+    .min(1)
+    .max(PROPOSAL_LIMITS.criteria),
+  size: z.enum(SIZES),
+  tierFloor: z.enum(TIER_FLOORS),
+  rewardClass: z.enum(REWARD_CLASSES),
+});
+export type DraftTaskRequest = z.infer<typeof DraftTaskRequestSchema>;
+
+/** PUT /api/proposals/settings (admins): the Test timers switch. */
+export const ProposalSettingsSchema = z.object({
+  testTimers: z.boolean(),
+});
+export type ProposalSettings = z.infer<typeof ProposalSettingsSchema>;
+
+/** GET /api/proposals/me. */
+export const ProposalMeSchema = z.object({
+  isAdmin: z.boolean(),
+  /** The caller's proposal in an active state, if any. */
+  activeProposalId: z.number().int().optional(),
+  testTimers: z.boolean(),
+});
+export type ProposalMe = z.infer<typeof ProposalMeSchema>;
+
+// ---------------------------------------------------------------------------
+// Notifications: the in-app bell (/api/notifications*)
+// ---------------------------------------------------------------------------
+
+export const NOTIFICATION_KINDS = [
+  'proposal_moved',
+  'proposal_seconded',
+  'your_proposal_seconded',
+  'proposal_passed',
+  'proposal_failed',
+  'proposal_lapsed',
+  'vote_opened',
+  'task_published',
+] as const;
+export const NotificationKindSchema = z.enum(NOTIFICATION_KINDS);
+export type NotificationKind = z.infer<typeof NotificationKindSchema>;
+
+export const NotificationSchema = z.object({
+  id: z.number().int(),
+  kind: NotificationKindSchema,
+  message: z.string(),
+  /** Where the item leads: a path on this site, such as /propose/12. */
+  href: z.string(),
+  at: z.string(),
+  read: z.boolean(),
+});
+export type Notification = z.infer<typeof NotificationSchema>;
+
+/** GET /api/notifications: the newest 30, and how many of all are unread. */
+export const NotificationListSchema = z.object({
+  notifications: z.array(NotificationSchema),
+  unread: z.number().int(),
+});
+export type NotificationList = z.infer<typeof NotificationListSchema>;
+
+/** POST /api/notifications/read: marks these, or every one when `ids` is absent. */
+export const NotificationReadRequestSchema = z.object({
+  ids: z.array(z.number().int()).optional(),
+});
+export type NotificationReadRequest = z.infer<typeof NotificationReadRequestSchema>;
 
 // ---------------------------------------------------------------------------
 // Upland data app (ledger.upland.me) — gated by the `upland_data` flag

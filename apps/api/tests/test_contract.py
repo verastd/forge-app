@@ -5,11 +5,13 @@ a missing key and *rejects* an explicit null. So no response body may contain a 
 null anywhere — otherwise `Schema.parse(await res.json())` throws in apps/web. (The
 Upland schemas are the documented exception: their wire uses explicit nulls.)
 
-Every Bridge v2 response is also read back through its pydantic model and must come out
-unchanged: no key the model doesn't declare, nothing missing. The models themselves are
-held to the zod schemas field by field by test_wire_models.py (tests/fixtures/wire-golden.json).
+Every Bridge v2 response, and every proposals and notifications response (Phase 5), is
+also read back through its pydantic model and must come out unchanged: no key the model
+doesn't declare, nothing missing. The models themselves are held to the zod schemas field
+by field by test_wire_models.py (tests/fixtures/wire-golden.json).
 """
 
+from datetime import timedelta
 from typing import Any
 
 import httpx
@@ -27,6 +29,12 @@ from forge_api.models import (
     FlagConfig,
     ForkStatus,
     HealthResponse,
+    NotificationList,
+    ProposalCommentPage,
+    ProposalDetail,
+    ProposalList,
+    ProposalMe,
+    ProposalSettings,
     RailList,
     SavedCredentialList,
     TaskDetail,
@@ -36,6 +44,7 @@ from forge_api.services import bridge as bridge_service
 
 from .bridge_helpers import JULES_KEY, OTHER, USER, BridgeEnv, has_null, install_bridge
 from .conftest import AuthHeaders, FakeClock
+from .proposal_helpers import ADMIN, ALICE, BOB, CAROL, DAVE, DRAFT, Floor, make_floor
 
 CSV_BRANCH = "task/1-polish-the-csv-export-in-the-data-app"
 
@@ -236,3 +245,126 @@ def test_history_is_gone_from_the_contract(client: TestClient) -> None:
     schema = client.get("/openapi.json").json()
     assert not {"/api/history", "/api/export"} & set(schema["paths"])
     assert not [name for name in schema["components"]["schemas"] if name.startswith("History")]
+
+
+# --- Phase 5: proposals and the bell ---------------------------------------------------
+
+
+def test_every_proposals_response_is_null_free_and_matches_its_model(
+    client: TestClient,
+    clock: FakeClock,
+    auth_headers: AuthHeaders,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every proposals and notifications route, in every state a proposal can be in, as
+    an anonymous reader, a member and an admin."""
+    floor: Floor = make_floor(client, clock, auth_headers, monkeypatch)
+    floor.hello(ALICE, BOB, CAROL, DAVE)
+    seen: list[tuple[type[BaseModel], Any]] = []
+
+    def check(model: type[BaseModel], response: httpx.Response) -> Any:
+        assert response.status_code in (200, 201), (response.request.url, response.text)
+        payload = response.json()
+        seen.append((model, payload))
+        return payload
+
+    def every_view(proposal_id: int) -> None:
+        for who in (None, ALICE, CAROL, ADMIN):
+            check(ProposalDetail, floor.get(f"/api/proposals/{proposal_id}", who))
+
+    lapsing = check(ProposalDetail, floor.move(DAVE))["proposal"]["id"]
+    check(ProposalMe, floor.get("/api/proposals/me", DAVE))
+    check(ProposalMe, floor.get("/api/proposals/me", ADMIN))
+    voting = check(ProposalDetail, floor.move(ALICE))["proposal"]["id"]
+    check(ProposalDetail, floor.edit(voting, ALICE, "A better title", "A better pitch"))
+    every_view(voting)
+    check(ProposalDetail, floor.second(voting, BOB))
+    check(ProposalDetail, floor.consent(voting, CAROL, False))
+    check(ProposalDetail, floor.comment(voting, CAROL, "Not yet.\nLet's vote."))
+    every_view(voting)
+    check(ProposalCommentPage, floor.comments_page(voting))
+    check(ProposalSettings, floor.test_timers(True))  # the admin buttons are test tools
+    check(ProposalDetail, floor.end_debate(voting))
+    for who in (ALICE, BOB, CAROL):
+        check(ProposalDetail, floor.vote(voting, who, "yes"))
+    every_view(voting)
+    check(ProposalDetail, floor.close_vote(voting))
+    every_view(voting)
+    check(ProposalDetail, floor.put_draft(voting, DRAFT))
+    check(ProposalDetail, floor.publish(voting))
+    every_view(voting)
+    assert floor.floor().ship(10001) is True
+    every_view(voting)
+    failing = check(ProposalDetail, floor.move(CAROL))["proposal"]["id"]
+    check(ProposalDetail, floor.second(failing, DAVE))
+    check(ProposalDetail, floor.consent(failing, DAVE, False))
+    check(ProposalDetail, floor.end_debate(failing))
+    check(ProposalDetail, floor.close_vote(failing))
+    every_view(failing)
+    withdrawn = check(ProposalDetail, floor.move(BOB))["proposal"]["id"]
+    check(ProposalDetail, floor.withdraw(withdrawn, BOB))
+    floor.wait(timedelta(days=8))
+    every_view(lapsing)
+    every_view(withdrawn)
+    check(ProposalSettings, floor.test_timers(True))
+    check(ProposalList, floor.get("/api/proposals"))
+    check(ProposalList, floor.get("/api/proposals?state=building"))
+    check(ProposalList, floor.get(f"/api/proposals?decidedBefore={withdrawn}"))
+    check(ProposalCommentPage, floor.comments_page(voting, 2))
+    floor.flags(github_signin=False)  # the floor pauses: reads say so
+    check(ProposalList, floor.get("/api/proposals"))
+    check(ProposalDetail, floor.get(f"/api/proposals/{voting}"))
+    floor.flags(github_signin=True)
+    check(NotificationList, floor.get("/api/notifications", CAROL))
+    check(NotificationList, floor.post("/api/notifications/read", CAROL, {"ids": [1]}))
+    check(NotificationList, floor.post("/api/notifications/read", CAROL))
+
+    states = {payload["proposal"]["state"] for model, payload in seen if model is ProposalDetail}
+    paused = [payload for _, payload in seen if payload.get("floorPaused")]
+    assert len(paused) == 2
+    assert states == {
+        "submitted",
+        "debate",
+        "voting",
+        "passed",
+        "failed",
+        "building",
+        "shipped",
+        "lapsed",
+        "withdrawn",
+    }
+    for model, payload in seen:
+        assert not has_null(payload), (model.__name__, payload)
+        assert round_trips(model, payload), (model.__name__, payload)
+
+
+def test_proposals_error_bodies_are_flat_and_null_free(
+    client: TestClient,
+    clock: FakeClock,
+    auth_headers: AuthHeaders,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    floor = make_floor(client, clock, auth_headers, monkeypatch)
+    proposal_id = floor.moved(ALICE)
+    errors = [
+        floor.get("/api/proposals/404"),
+        floor.get("/api/proposals?state=nope"),
+        floor.get("/api/proposals?decidedBefore=nope"),
+        floor.get(f"/api/proposals/{proposal_id}/comments?before=nope"),
+        floor.move(ALICE),
+        floor.second(proposal_id, ALICE),
+        floor.second(proposal_id, BOB, revision=2),  # proposal_changed
+        floor.edit(proposal_id, BOB, "x", "y"),
+        floor.consent(proposal_id, BOB),
+        floor.post("/api/proposals", ALICE, {"title": None}),
+        floor.end_debate(proposal_id, BOB),
+        floor.end_debate(proposal_id),  # test_mode_off
+        floor.client.get("/api/notifications"),
+    ]
+    for response in errors:
+        body = response.json()
+        assert response.status_code >= 400
+        assert isinstance(body.get("error"), str), body
+        assert not has_null(body), body
+    floor.flags(proposals=False)
+    assert floor.get("/api/proposals").json() == {"error": "proposals-disabled"}

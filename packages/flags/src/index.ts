@@ -10,8 +10,8 @@
  * `./react` for the hooks subpath). Feature work lands behind a flag from this
  * package unless a spec says otherwise (AGENTS.md Style).
  */
-export { DEFAULT_FLAGS, isEnabled, parseFlags } from './core.js';
-export type { FlagConfig, FlagName } from './core.js';
+export { DEFAULT_FLAGS, FLAGS_TIMEOUT_MS, fetchFlags, isEnabled, parseFlags } from './core.js';
+export type { FetchFlagsOptions, FlagConfig, FlagName } from './core.js';
 
 import { FLAG_NAMES } from '@forge/shared';
 
