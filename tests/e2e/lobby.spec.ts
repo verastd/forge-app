@@ -108,10 +108,28 @@ test('the heading, the lede and the directory are unchanged, and list the Data a
   ).toBeVisible();
 });
 
+test('with the wall on screen the directory steps out of sight, and comes back for a keyboard', async ({ page }) => {
+  test.setTimeout(90_000);
+  await openLobby(page);
+  const directory = lobbyRoot(page).locator('[data-directory]');
+  await expect(directory).toHaveAttribute('data-directory', 'aside');
+  // Out of sight: a clipped one-pixel box. Still in the page, so a screen reader still has the list.
+  const hidden = await directory.boundingBox();
+  expect(hidden !== null && hidden.width <= 1 && hidden.height <= 1).toBe(true);
+  await expect(page.getByRole('navigation', { name: 'Apps', exact: true })).toHaveCount(1);
+  // A keyboard user tabbing in brings it back for as long as focus is inside it.
+  await directoryLink(page).focus();
+  await expect.poll(async () => (await directory.boundingBox())?.width ?? 0).toBeGreaterThan(100);
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await expect.poll(async () => (await directory.boundingBox())?.width ?? 0).toBeLessThanOrEqual(1);
+});
+
 test.describe('signed out, the Data app asks for a sign-in first', () => {
-  test('from the directory link', async ({ page }) => {
+  test('from the directory link, by keyboard: the way in once the wall is up', async ({ page }) => {
     await page.goto('/apps');
-    await clickThrough(directoryLink(page), SIGN_IN_FOR_DATA);
+    await directoryLink(page).focus();
+    await page.keyboard.press('Enter');
+    await expect(page).toHaveURL(SIGN_IN_FOR_DATA, { timeout: 30_000 });
   });
 
   test('from a tap on its lit screen', async ({ page }) => {
