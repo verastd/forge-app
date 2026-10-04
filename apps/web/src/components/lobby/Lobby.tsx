@@ -77,7 +77,17 @@ const MESSAGES: Partial<Record<LobbyState, string>> = {
 
 const TOAST_MS = 1800;
 
-const cx = (...names: Array<string | false | null | undefined>): string => names.filter(Boolean).join(' ');
+/**
+ * For a browser that runs no script (inside `<noscript>`): the heading and
+ * the directory back in sight, undoing `.aside` and `.directoryAside`.
+ */
+const NO_SCRIPT_SHOWS_THE_PAGE =
+  "[data-lobby] [data-heading='aside'], [data-lobby] [data-directory='aside'] {" +
+  ' position: static !important; width: auto !important; height: auto !important;' +
+  ' margin: 0 !important; overflow: visible !important; clip: auto !important;' +
+  ' clip-path: none !important; white-space: normal !important; }';
+
+const cx =(...names: Array<string | false | null | undefined>): string => names.filter(Boolean).join(' ');
 
 // ---------- reduced motion, as a store ----------
 
@@ -473,6 +483,13 @@ export function Lobby({ heading, directory }: { heading: ReactNode; directory: R
           <div className={cx(!fallback && styles.directoryAside)} data-directory={fallback ? 'shown' : 'aside'}>
             {directory}
           </div>
+          {/* A browser that runs no script never gets the wall, and the state stays at
+              the server's 'loading': there the heading and the directory are the page,
+              so this undoes their hiding. Only such a browser reads it, so a visitor
+              with scripts never sees them come and go while the wall loads. */}
+          <noscript>
+            <style>{NO_SCRIPT_SHOWS_THE_PAGE}</style>
+          </noscript>
         </div>
         {live && (
           <aside className={styles.chat} aria-label="People nearby">
