@@ -22,7 +22,7 @@ from collections.abc import Mapping
 from types import MappingProxyType
 from typing import Annotated, Final, Literal, get_args
 
-from pydantic import BaseModel, Field, SecretStr, StrictBool, StrictInt
+from pydantic import BaseModel, Field, SecretStr, StrictBool, StrictInt, field_validator
 
 Size = Literal["XS", "S", "M"]
 RewardClass = Literal["none", "R1", "R2", "R3", "R4"]
@@ -606,9 +606,19 @@ class NotificationList(BaseModel):
 
 
 class NotificationReadRequest(BaseModel):
-    """POST /api/notifications/read: marks these, or every one when `ids` is absent."""
+    """POST /api/notifications/read: marks these, or every one when `ids` is absent. Strict,
+    as zod's z.array(z.number().int()).optional() is: "1", true or 1.0 is refused, and so is
+    an explicit null, which must never read as "every one"."""
 
-    ids: list[int] | None = None
+    ids: list[StrictInt] | None = None
+
+    @field_validator("ids", mode="before")
+    @classmethod
+    def _sent_means_a_list(cls, value: object) -> object:
+        # Only an `ids` the caller sent gets here: the default (absent) isn't validated.
+        if value is None:
+            raise ValueError("ids, when sent, is a list")
+        return value
 
 
 class PendingReward(BaseModel):

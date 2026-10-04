@@ -338,6 +338,29 @@ def test_the_floor_pauses_while_proposals_are_off(floor: Floor) -> None:
     assert floor.state(proposal_id) == "voting"
 
 
+def test_a_proposal_brought_as_the_floor_opens_gets_its_whole_lapse(floor: Floor) -> None:
+    """The first thing the floor hears after it opens again can be a new proposal from a
+    member with nothing on the floor. It used to be written before the pause ended, so the
+    end of the pause moved its fresh deadline by the whole time the floor was closed, and
+    its timeline said so. The pause ends first now: only proposals that lived through it
+    move."""
+    floor.hello(ALICE, BOB)
+    earlier = floor.moved(BOB)
+    earlier_deadline = floor.now() + PILOT_TIMERS.lapse
+    floor.wait(HOUR)
+    floor.flags(proposals=False)
+    assert tick(floor.db(), floor.now()) == 0  # the beat records that the floor closed
+    floor.wait(HOUR * 6)
+    floor.flags(proposals=True)
+    response = floor.move(ALICE)  # no beat or read in between
+    assert response.status_code == 201, response.text
+    fresh = response.json()
+    assert fresh["proposal"]["deadline"] == at(floor.now() + PILOT_TIMERS.lapse)
+    assert [event["kind"] for event in fresh["events"]] == ["moved"]
+    assert floor.detail(earlier)["proposal"]["deadline"] == at(earlier_deadline + HOUR * 6)
+    assert floor.kinds(earlier) == ["moved", "floor_paused", "floor_resumed"]
+
+
 def test_a_vote_waits_while_the_floor_is_closed(floor: Floor) -> None:
     """Review M1: a vote that ran out while nobody could vote closed without quorum."""
     floor.hello(ALICE, BOB, CAROL, DAVE)

@@ -1251,6 +1251,9 @@ class Proposals:
         pitch = clean_paragraphs(request.pitch, PROPOSAL_LIMITS["pitch"])
         _cleaned({"title": title, "pitch": pitch})
         with self.db.transaction():
+            # A pause the floor is coming out of ends first, so it moves only the deadlines
+            # that lived through it, never the one this motion is about to get.
+            self.floor_open()
             active = self._active_of(identity.sub)
             if active is not None:
                 raise _refuse(

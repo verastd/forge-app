@@ -168,12 +168,21 @@ def test_marking_read(floor: Floor) -> None:
     assert read(floor, BOB, {"ids": []})["unread"] == 1
     assert read(floor, BOB)["unread"] == 0  # no body: every one
     assert all(item["read"] for item in floor.bell(BOB)["notifications"])
-    assert read(floor, CAROL, {"ids": None})["unread"] == 0  # null reads as absent
+    refused = floor.post("/api/notifications/read", CAROL, {"ids": None})
+    assert refused.status_code == 400 and refused.json()["fields"] == ["ids"]
+    assert floor.bell(CAROL)["unread"] == 1  # an explicit null is not "every one"
     assert newest != oldest
 
 
 def test_the_read_body_is_validated(floor: Floor) -> None:
-    for body, fields in (({"ids": "all"}, ["ids"]), ({"ids": [1, "two"]}, ["ids.1"])):
+    for body, fields in (
+        ({"ids": "all"}, ["ids"]),
+        ({"ids": [1, "two"]}, ["ids.1"]),
+        ({"ids": None}, ["ids"]),
+        ({"ids": ["1"]}, ["ids.0"]),  # strict, as zod is: nothing is coerced
+        ({"ids": [True]}, ["ids.0"]),
+        ({"ids": [1.0]}, ["ids.0"]),
+    ):
         response = floor.post("/api/notifications/read", ALICE, body)
         assert response.status_code == 400 and response.json()["fields"] == fields
     response = floor.client.post(

@@ -437,5 +437,5 @@ def test_a_notification_list_is_the_items_and_the_unread_count() -> None:
 def test_marking_read_names_the_ids_or_none_for_all_of_them() -> None:
     assert NotificationReadRequest.model_validate({}).ids is None
     assert NotificationReadRequest.model_validate({"ids": [1, 2]}).ids == [1, 2]
-    for ids in (["one"], [1.5]):
+    for ids in (["one"], [1.5], ["1"], [True], [1.0], None):  # strict, and never null
         assert not takes(NotificationReadRequest, {}, "ids", ids)
