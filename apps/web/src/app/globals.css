@@ -90,6 +90,8 @@ body {
 
 html {
   background: var(--bg);
+  /* The home hero is full bleed (100vw); never let a scrollbar's width of it scroll sideways. */
+  overflow-x: clip;
 }
 
 body {
@@ -622,13 +624,72 @@ a.faint:hover {
 /* --- hero ------------------------------------------------------------------ */
 
 .hero {
-  display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  position: relative;
+  isolation: isolate;
+  display: flex;
   align-items: center;
-  gap: 24px;
-  padding: 56px 0 48px;
-  margin-bottom: 36px;
+  min-height: clamp(560px, 80vh, 860px);
+  padding: 64px 0 56px;
+  margin: -40px 0 36px;
+}
+
+/*
+ * The animated hero (components/hero): the grid is full bleed, out past the
+ * page's column to the viewport's edges, behind the copy. The brand gradient
+ * underneath is what shows before the first frame, without WebGL2 and without
+ * JavaScript; the canvas fades in over it.
+ */
+.forge-hero-backdrop {
+  position: absolute;
+  inset: 0 auto 0 50%;
+  width: 100vw;
+  margin-left: -50vw;
+  z-index: -1;
+  overflow: hidden;
+  background: var(--bg);
   border-bottom: 1px solid var(--border);
+}
+
+.forge-hero-fallback,
+.forge-hero-layer,
+.forge-hero-grain,
+.forge-hero-scrim {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.forge-hero-fallback {
+  background:
+    radial-gradient(ellipse 60% 40% at 65% 55%, rgba(251, 191, 36, 0.22), transparent 70%),
+    radial-gradient(ellipse 30% 20% at 40% 70%, rgba(34, 211, 238, 0.12), transparent 70%),
+    linear-gradient(#060a12, #0a1020);
+}
+
+.forge-hero-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  transition: opacity 700ms var(--ease);
+}
+
+.forge-hero[data-hero='ready'] .forge-hero-canvas {
+  opacity: 1;
+}
+
+.forge-hero-grain {
+  mix-blend-mode: overlay;
+  opacity: 0.13;
+}
+
+/* Keeps the copy readable: dark on the left where it sits, and at the top and bottom. */
+.forge-hero-scrim {
+  background:
+    linear-gradient(90deg, rgba(6, 10, 18, 0.85) 0%, rgba(6, 10, 18, 0.55) 35%, rgba(6, 10, 18, 0) 65%),
+    linear-gradient(180deg, rgba(6, 10, 18, 0.7) 0%, rgba(6, 10, 18, 0) 22%, rgba(6, 10, 18, 0) 70%, rgba(6, 10, 18, 0.85) 100%);
 }
 
 .hero-copy {
@@ -713,80 +774,6 @@ a.faint:hover {
   margin-top: 28px;
 }
 
-/* The map plate: an isometric city block, drawn in SVG, tilted in CSS. */
-.hero-map {
-  position: relative;
-  aspect-ratio: 1 / 1;
-  width: 100%;
-  max-width: 460px;
-  justify-self: center;
-  perspective: 1200px;
-}
-
-.hero-map svg {
-  width: 100%;
-  height: 100%;
-  overflow: visible;
-  transform: rotateX(56deg) rotateZ(-38deg) scale(0.92);
-  transform-origin: 50% 50%;
-}
-
-.map-ground {
-  fill: var(--bg-elev);
-  stroke: var(--border-strong);
-  stroke-width: 1.5;
-}
-
-.map-street {
-  fill: none;
-  stroke: #0a1122;
-  stroke-width: 7;
-}
-
-.map-avenue {
-  fill: none;
-  stroke: #0a1122;
-  stroke-width: 11;
-}
-
-.map-lane {
-  fill: none;
-  stroke: rgba(255, 194, 61, 0.28);
-  stroke-width: 1;
-  stroke-dasharray: 6 8;
-}
-
-.map-lot {
-  fill: var(--bg-elev-3);
-  stroke: var(--border-strong);
-  stroke-width: 1;
-}
-
-.map-lot-owned {
-  fill: var(--accent);
-  stroke: var(--accent-hover);
-}
-
-.map-lot-listed {
-  fill: var(--accent-soft);
-  stroke: var(--accent);
-  stroke-dasharray: 3 3;
-}
-
-.map-lot-live {
-  fill: var(--spark);
-  stroke: #9beeff;
-  animation: lot-pulse 2.4s var(--ease) infinite;
-}
-
-.map-pin {
-  fill: var(--spark);
-  opacity: 0.25;
-  transform-box: fill-box;
-  transform-origin: center;
-  animation: pin-ring 2.4s var(--ease) infinite;
-}
-
 @keyframes lot-pulse {
   0%,
   100% {
@@ -794,17 +781,6 @@ a.faint:hover {
   }
   50% {
     opacity: 0.55;
-  }
-}
-
-@keyframes pin-ring {
-  0% {
-    transform: scale(0.6);
-    opacity: 0.45;
-  }
-  100% {
-    transform: scale(2.2);
-    opacity: 0;
   }
 }
 
@@ -1820,142 +1796,17 @@ details.disclosure[open] > summary::before {
   border: 0;
 }
 
-/* --- splash: the intro ------------------------------------------------------ */
-
-/*
- * The FORGE clip, played once per session and dissolved into the live hero.
- * See src/components/Splash.tsx — it solves the two layer boxes; this file
- * paints the ground and masks each layer down to its one feature.
- *
- * `data-splash` on <html> is the single switch:
- *
- *   on      — playing; the page underneath is locked
- *   leaving — dissolving; scroll is already back
- *   off     — this session is done with it (also set pre-paint by layout.tsx
- *             for a returning visitor, anyone who asked for less motion, and
- *             every route but the home page, which is the only one with a hero
- *             for the clip to hand off to)
- */
-
-html[data-splash='on'],
-html[data-splash='on'] body {
-  overflow: hidden;
-}
-
-html[data-splash='off'] .splash {
-  display: none;
-}
-
-.splash {
-  position: fixed;
-  inset: 0;
-  z-index: 200;
-  overflow: hidden;
-  cursor: pointer;
-  /* The page's own ground, exactly — so the dissolve reveals the grid, the nav
-     and the copy, and never a change of backdrop underneath them. */
-  background: var(--bg);
-  opacity: 1;
-  transition: opacity 900ms var(--ease);
-}
-
-.splash-leaving {
-  opacity: 0;
-  pointer-events: none;
-}
-
-/*
- * A layer is the whole clip, positioned and sized by Splash.tsx so that one
- * feature lands on its hero counterpart, then feathered to nothing around that
- * feature. The mask is what keeps the clip's own background off the screen:
- * the percentages are fractions of the layer box, which is a fraction of the
- * frame, so they track the feature at every scale.
- */
-.splash-layer {
-  position: absolute;
-  object-fit: fill;
-  pointer-events: none;
-}
-
-/*
- * Wordmark: ink centred at 33.28% / 50.09%, half-extent 13.65% / 4.35%. Solid
- * to 14.04% / 7.8%, gone by 18% / 10%. Tight vertically so the clip's
- * reflection under the letters never shows; the far edge lands at 51.28%,
- * short of the plate's own left corner at 52.1%, so this layer cannot leak a
- * second plate at the wrong scale.
- */
-.splash-layer-mark {
-  -webkit-mask-image: radial-gradient(
-    ellipse 18% 10% at 33.28% 50.09%,
-    #000 0,
-    #000 78%,
-    transparent 100%
-  );
-  mask-image: radial-gradient(ellipse 18% 10% at 33.28% 50.09%, #000 0, #000 78%, transparent 100%);
-}
-
-/*
- * Parcel plate: lots centred at 67.53% / 52.18%. Solid to 15.58% / 16.4%,
- * which takes in the slab and its glow, and gone by 19% / 20%. The near edge
- * lands at 48.53%, clear of this layer's own copy of the wordmark, which ends
- * at 46.93% — the mirror of the rule above.
- */
-.splash-layer-plate {
-  -webkit-mask-image: radial-gradient(
-    ellipse 19% 20% at 67.53% 52.18%,
-    #000 0,
-    #000 82%,
-    transparent 100%
-  );
-  mask-image: radial-gradient(ellipse 19% 20% at 67.53% 52.18%, #000 0, #000 82%, transparent 100%);
-}
-
-.splash-skip {
-  position: absolute;
-  right: 20px;
-  bottom: 20px;
-  padding: 7px 15px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-pill);
-  background: rgba(12, 19, 34, 0.72);
-  color: var(--text-muted);
-  font-family: var(--font-mono);
-  font-size: 0.72rem;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  cursor: pointer;
-  transition:
-    color 140ms var(--ease),
-    border-color 140ms var(--ease);
-}
-
-.splash-skip:hover {
-  color: var(--text);
-  border-color: var(--accent-line);
-}
-
-.splash-skip:focus-visible {
-  outline: 2px solid var(--spark);
-  outline-offset: 3px;
-}
-
-@media (max-width: 640px) {
-  .splash-skip {
-    right: 14px;
-    bottom: 14px;
-  }
-}
-
 @media (max-width: 860px) {
   .hero {
-    grid-template-columns: 1fr;
-    padding: 40px 0 36px;
+    min-height: clamp(520px, 78vh, 720px);
+    padding: 48px 0 40px;
   }
 
-  .hero-map {
-    max-width: 320px;
-    order: -1;
-    margin: -20px auto -30px;
+  /* One column: the copy covers more of the grid, so the scrim does too. */
+  .forge-hero-scrim {
+    background:
+      linear-gradient(90deg, rgba(6, 10, 18, 0.82) 0%, rgba(6, 10, 18, 0.6) 60%, rgba(6, 10, 18, 0.35) 100%),
+      linear-gradient(180deg, rgba(6, 10, 18, 0.6) 0%, rgba(6, 10, 18, 0) 25%, rgba(6, 10, 18, 0) 70%, rgba(6, 10, 18, 0.85) 100%);
   }
 }
 
@@ -1991,9 +1842,8 @@ html[data-splash='off'] .splash {
     bottom: -3px;
   }
 
-  /* The tilted plate draws wider than its box, so the box shrinks with the screen. */
-  .hero-map {
-    max-width: min(280px, 72vw);
+  .hero {
+    margin-top: -28px;
   }
 
   .step-label {
