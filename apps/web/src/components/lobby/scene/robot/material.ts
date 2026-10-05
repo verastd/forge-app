@@ -4,9 +4,10 @@
  * (@forge/lobby's ZONE) with each robot's own uniforms.
  *
  * - shell, trim: the robot's two paints; joints a fixed dark gunmetal.
- * - torso: shell, with the chestplate on its flat front panel: the image
- *   (or the generated emblem) behind glass, lit from within like a screen so
- *   it reads in the dark cave, in a thin frame of the accent colour. Until
+ * - torso: shell, with the chestplate covering its flat front panel edge to
+ *   edge: the image (or the generated emblem) behind glass, lit from within
+ *   like a screen so it reads in the dark cave, with a thin line of the
+ *   accent colour just past its edge, on the panel's bevel. Until
  *   the image arrives the panel shows a moving scan in the accent colour, and
  *   the image fades in over it.
  * - head, headTrim: the robot's own head, with a dark glass face screen
@@ -50,9 +51,9 @@ export interface RobotUniforms {
 
 const f = (n: number): string => n.toFixed(4);
 
-// The chestplate sits inside the torso's front panel with a margin all round.
+// The chestplate covers the torso's whole flat front panel.
 const chestCentre = [(CHEST_PANEL.minX + CHEST_PANEL.maxX) / 2, (CHEST_PANEL.minY + CHEST_PANEL.maxY) / 2];
-const chestHalf = [(CHEST_PANEL.maxX - CHEST_PANEL.minX) / 2 - 0.022, (CHEST_PANEL.maxY - CHEST_PANEL.minY) / 2 - 0.024];
+const chestHalf = [(CHEST_PANEL.maxX - CHEST_PANEL.minX) / 2, (CHEST_PANEL.maxY - CHEST_PANEL.minY) / 2];
 const faceCentre = [(FACE_PANEL.minX + FACE_PANEL.maxX) / 2, (FACE_PANEL.minY + FACE_PANEL.maxY) / 2];
 const faceHalf = [(FACE_PANEL.maxX - FACE_PANEL.minX) / 2 - 0.024, (FACE_PANEL.maxY - FACE_PANEL.minY) / 2 - 0.02];
 
@@ -116,10 +117,11 @@ if (robotZone == ${ZONE.trim} || robotZone == ${ZONE.headTrim}) {
 } else if (robotZone == ${ZONE.torso} && vBindN.z > 0.55 && vBind.z > 0.09) {
   vec2 p = vBind.xy - vec2(${f(chestCentre[0]!)}, ${f(chestCentre[1]!)});
   vec2 halfSize = vec2(${f(chestHalf[0]!)}, ${f(chestHalf[1]!)});
-  float d = robotRoundRect(p, halfSize, 0.018);
+  float d = robotRoundRect(p, halfSize, 0.012);
   float aa = fwidth(d) * 1.2;
-  float plate = 1.0 - smoothstep(-aa, aa, d + 0.006);
-  float frame = (1.0 - smoothstep(-aa, aa, d)) - plate;
+  // The image fills the panel; the accent line sits just outside it, on the bevel.
+  float plate = 1.0 - smoothstep(-aa, aa, d);
+  float frame = (1.0 - smoothstep(-aa, aa, d - 0.004)) - plate;
   vec2 uv = p / (2.0 * halfSize) + 0.5;
   // Cover the plate: crop the image's long side, keep it centred.
   float plateAspect = ${f(chestHalf[0]! / chestHalf[1]!)};
