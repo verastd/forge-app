@@ -17,6 +17,10 @@ connector's OAuth token) and remembers what happened in the state database:
   relay), which also feeds the 10-an-hour limit on vendor calls per user, with a keyed
   fingerprint of the credential that started a session (never the credential itself).
 - `bridge_submits`: when each contributor handed in a pull request (10 a minute at most).
+- `bridge_copies` (Phase 7): each contributor's copy of verastd/forge-app, by GitHub user
+  id: its full name, and when FORGE first recorded it and last brought it up to date.
+- `bridge_repo_actions` (Phase 7): when each contributor set up their copy or sent work
+  for review, for the 10-an-hour limit on each.
 
 A lease holds its task while its clock runs, and past it while its pull request is open:
 the clock waits while the maintainers have the ball (PRD §4 Stage 3). A pull request
@@ -57,7 +61,7 @@ import sqlite3
 import threading
 import unicodedata
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal, Protocol, cast
@@ -76,6 +80,7 @@ from forge_api.models import (
     CheckResults,
     ClaimResponse,
     ContributorProfile,
+    CopyResult,
     Credential,
     DispatchRequest,
     DispatchResult,
@@ -83,9 +88,13 @@ from forge_api.models import (
     ForkStatus,
     LedgerEvent,
     ProgressStage,
+    PullRequestRef,
     Rail,
     RailInfo,
     RailList,
+    RepoActionRequest,
+    RepoCopy,
+    ReviewResult,
     RewardClass,
     SavedCredentialList,
     Size,
@@ -96,8 +105,15 @@ from forge_api.models import (
     Tier,
     TierFloor,
 )
+from forge_api.services import copies
 from forge_api.services import flags as flags_service
-from forge_api.services.brief import UPSTREAM_REPO, branch_name, compile_brief, is_valid_login
+from forge_api.services.brief import (
+    UPSTREAM_REPO,
+    branch_name,
+    compile_brief,
+    is_valid_copy,
+    is_valid_login,
+)
 from forge_api.services.errors import ApiError
 from forge_api.services.github_reads import (
     PASSING,
@@ -108,6 +124,7 @@ from forge_api.services.github_reads import (
     check_state,
     failure_notes,
     pull_url,
+    within,
 )
 from forge_api.services.identity import Identity
 from forge_api.services.rail_adapters import (
@@ -119,6 +136,8 @@ from forge_api.services.rail_adapters import (
     make_client,
 )
 from forge_api.services.rail_adapters.base import (
+    FORK_REPO_NAME,
+    STATUS_BAD_GATEWAY,
     JSONTooDeep,
     log_failure,
     parse_json,
@@ -616,6 +635,166 @@ def _task_shipped(db: StateDB, task_id: int, now: datetime) -> None:
 
 # --- end of Phase 5 block -------------------------------------------------------------
 
+# --- Phase 7: "your copy" and "Send for review" (contract §3) --------------------------
+#
+# New in this block: two new tables (the contributor's copy, and the hourly limit on
+# setting it up and on sending work for review) and the helpers the Bridge's `copy` and
+# `review` use. Every GitHub call is services/copies.py's.
+
+#: Copy and review actions one contributor may start per window, each action counted apart
+#: (failed ones too: each one asks GitHub for something).
+REPO_ACTION_LIMIT = 10
+REPO_ACTION_WINDOW = timedelta(hours=1)
+
+register_schema(
+    "bridge_copies",
+    [
+        """CREATE TABLE IF NOT EXISTS bridge_copies (
+            github_id INTEGER PRIMARY KEY,
+            repo_id INTEGER NOT NULL,
+            owner_id INTEGER NOT NULL,
+            full_name TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            synced_at TEXT NOT NULL
+        )""",
+        """CREATE TABLE IF NOT EXISTS bridge_repo_actions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            sub TEXT NOT NULL,
+            action TEXT NOT NULL,
+            at TEXT NOT NULL
+        )""",
+        "CREATE INDEX IF NOT EXISTS bridge_repo_actions_sub "
+        "ON bridge_repo_actions (sub, action, at)",
+    ],
+)
+
+RepoAction = Literal["copy", "review"]
+
+
+@dataclass(frozen=True)
+class CopyRecord:
+    """A contributor's copy as FORGE recorded it. Its name is what GitHub called it then; its
+    repository id and owner id are what identify it (`Bridge.copy_of` resolves the name)."""
+
+    full_name: str
+    created_at: datetime
+    synced_at: datetime
+    repo_id: int
+    owner_id: int
+
+    @property
+    def owner(self) -> str:
+        return self.full_name.split("/", 1)[0]
+
+
+def _github_id(sub: str) -> int | None:
+    """A caller's GitHub user id as `bridge_copies` keys it, or None when it can't be one."""
+    return int(sub) if sub.isdigit() and 0 < int(sub) <= _SQLITE_MAX_INT else None
+
+
+def load_copy(db: StateDB, sub: str) -> CopyRecord | None:
+    """The caller's copy, once FORGE has set it up."""
+    github_id = _github_id(sub)
+    if github_id is None:
+        return None
+    row = db.query_one("SELECT * FROM bridge_copies WHERE github_id = ?", (github_id,))
+    if row is None or not is_valid_copy(row["full_name"]):
+        return None
+    return CopyRecord(
+        full_name=row["full_name"],
+        created_at=_from_db(row["created_at"]),
+        synced_at=_from_db(row["synced_at"]),
+        repo_id=row["repo_id"],
+        owner_id=row["owner_id"],
+    )
+
+
+def save_copy(
+    db: StateDB,
+    github_id: int,
+    repo_id: int,
+    owner_id: int,
+    full_name: str,
+    *,
+    synced: bool,
+    now: datetime,
+) -> None:
+    """Record the caller's copy (upsert): GitHub's ids for it and its owner, and its name
+    now. `synced_at` moves only when GitHub brought it up to date; a copy recorded for the
+    first time takes now either way, since its task branch was just made from (or found
+    next to) upstream's latest main."""
+    db.execute(
+        "INSERT INTO bridge_copies (github_id, repo_id, owner_id, full_name, created_at, "
+        "synced_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (github_id) DO UPDATE SET "
+        "repo_id = excluded.repo_id, owner_id = excluded.owner_id, "
+        "full_name = excluded.full_name, "
+        "synced_at = CASE WHEN ? THEN excluded.synced_at ELSE bridge_copies.synced_at END",
+        (github_id, repo_id, owner_id, full_name, _to_db(now), _to_db(now), 1 if synced else 0),
+    )
+
+
+def take_repo_action_slot(db: StateDB, sub: str, action: RepoAction, now: datetime) -> None:
+    """Count one `action` by `sub`, or raise `429 rate_limited` (with Retry-After) when the
+    hour's REPO_ACTION_LIMIT is used up. The check and the count are one transaction."""
+    with db.transaction():
+        db.execute(
+            "DELETE FROM bridge_repo_actions WHERE sub = ? AND action = ? AND at <= ?",
+            (sub, action, _to_db(now - REPO_ACTION_WINDOW)),
+        )
+        rows = db.query_all(
+            "SELECT at FROM bridge_repo_actions WHERE sub = ? AND action = ? ORDER BY at",
+            (sub, action),
+        )
+        if len(rows) >= REPO_ACTION_LIMIT:
+            oldest = _from_db(rows[len(rows) - REPO_ACTION_LIMIT]["at"])
+            retry = _retry_after(oldest + REPO_ACTION_WINDOW, now)
+            raise ApiError(
+                429,
+                {"error": "rate_limited", "limit": REPO_ACTION_LIMIT, "retryAfter": retry},
+                headers={"Retry-After": str(retry)},
+            )
+        db.execute(
+            "INSERT INTO bridge_repo_actions (sub, action, at) VALUES (?, ?, ?)",
+            (sub, action, _to_db(now)),
+        )
+
+
+def has_event(db: StateDB, lease_id: int, kind: BridgeEventKind, message: str) -> bool:
+    row = db.query_one(
+        "SELECT 1 AS hit FROM bridge_events WHERE lease_id = ? AND kind = ? AND message = ?",
+        (lease_id, kind, message),
+    )
+    return row is not None
+
+
+def parse_repo_action(body: bytes) -> RepoActionRequest:
+    """A /copy or /review body, validated without ever echoing it (the token is in it), as
+    /dispatch reads its own. A token that isn't printable ASCII is no GitHub token."""
+    try:
+        data = parse_json(body)
+    except JSONTooDeep:
+        raise ApiError(400, {"error": "invalid_request", "fields": ["body"]}) from None
+    except (ValueError, UnicodeDecodeError):
+        raise ApiError(422, {"error": "invalid_request", "fields": ["body"]}) from None
+    if not isinstance(data, dict):
+        raise ApiError(422, {"error": "invalid_request", "fields": ["body"]})
+    try:
+        parsed = RepoActionRequest.model_validate(data)
+    except ValidationError as exc:
+        fields = sorted(
+            {
+                ".".join(str(part) for part in error["loc"])
+                for error in exc.errors(include_url=False, include_input=False)
+            }
+        )
+        raise ApiError(422, {"error": "invalid_request", "fields": fields}) from None
+    if not _KEY.fullmatch(parsed.token.get_secret_value()):
+        raise ApiError(422, {"error": "invalid_request", "fields": ["token"]})
+    return parsed
+
+
+# --- end of Phase 7 block -------------------------------------------------------------
+
 # --- the store ------------------------------------------------------------------------
 
 
@@ -1014,12 +1193,13 @@ class LeaseStore:
     ) -> list[BridgeEvent]:
         """The newest `limit` events, oldest first. FORGE's own events only, unless
         `with_agent_text`: what an agent wrote (source "agent") goes to the lease holder
-        alone, because agent text on a public page is a defacement vector."""
+        alone, because agent text on a public page is a defacement vector, and so does the
+        note about the holder's copy (`copy_ready`, Phase 7), which speaks to them."""
         sql = (
             "SELECT * FROM bridge_events WHERE lease_id = ? ORDER BY id DESC LIMIT ?"
             if with_agent_text
             else "SELECT * FROM bridge_events WHERE lease_id = ? AND source = 'forge' "
-            "ORDER BY id DESC LIMIT ?"
+            "AND kind != 'copy_ready' ORDER BY id DESC LIMIT ?"
         )
         rows = self.db.query_all(sql, (lease_id, limit))
         return [
@@ -1146,6 +1326,7 @@ class LeaseStore:
 _store = LeaseStore()
 _github = GitHubReads()
 _rail_client: httpx.Client | None = None
+_repo_client: httpx.Client | None = None  # Phase 7
 _source: TaskSource = CompositeTaskSource(FixtureTaskSource(), PublishedTaskSource())  # Phase 5
 _providers_lock = threading.Lock()
 
@@ -1166,6 +1347,16 @@ def get_rail_client() -> httpx.Client:
         if _rail_client is None:
             _rail_client = make_client()
         return _rail_client
+
+
+def get_repo_client() -> httpx.Client:
+    """The client FORGE's GitHub calls as a contributor go through (services/copies.py:
+    no redirects, no cookies, 5 s to connect, 8 s a call). Phase 7."""
+    global _repo_client
+    with _providers_lock:
+        if _repo_client is None:
+            _repo_client = copies.make_client()
+        return _repo_client
 
 
 def get_task_source() -> TaskSource:
@@ -1214,13 +1405,16 @@ def _hours_left(end: datetime, now: datetime) -> str:
 
 def pull_counts(pull: PullRequest, lease: Lease, task: TaskFixture, now: datetime) -> bool:
     """Whether `pull` is this lease's work. It must target verastd/forge-app, come from
-    the holder's own fork (by GitHub user id: a login can change hands), be opened after
-    the claim (and, for a lease whose time ran out, before it did), and name the task:
-    come from the task's branch, or carry `[#<id>]` in its title or "Closes #<id>"
+    the holder's own fork and be opened by the holder (both by GitHub user id: a login can
+    change hands, and anyone may open a pull request from a public fork's branch), be
+    opened after the claim (and, for a lease whose time ran out, before it did), and name
+    the task: come from the task's branch, or carry `[#<id>]` in its title or "Closes #<id>"
     (Fixes, Resolves) in its description."""
     if pull.base_repo.lower() != UPSTREAM_REPO or pull.head_owner_id is None:
         return False
     if str(pull.head_owner_id) != lease.holder_sub or pull.created_at is None:
+        return False
+    if pull.author_id is None or str(pull.author_id) != lease.holder_sub:
         return False
     # GitHub keeps whole seconds; a claim keeps microseconds.
     if pull.created_at < lease.claimed_at.replace(microsecond=0):
@@ -1240,11 +1434,13 @@ class Bridge:
         source: TaskSource,
         github: GitHubReads,
         rail_client: httpx.Client | None = None,
+        repo_client: httpx.Client | None = None,
     ) -> None:
         self.store = store
         self.source = source
         self.github = github
         self._rail_client = rail_client
+        self._repo_client = repo_client
 
     @classmethod
     def for_tools(cls, db: StateDB) -> "Bridge":
@@ -1254,6 +1450,11 @@ class Bridge:
     @property
     def rail_client(self) -> httpx.Client:
         return self._rail_client if self._rail_client is not None else get_rail_client()
+
+    @property
+    def repo_client(self) -> httpx.Client:
+        """FORGE's GitHub calls as a contributor (Phase 7)."""
+        return self._repo_client if self._repo_client is not None else get_repo_client()
 
     def vault(self) -> Vault:
         return Vault.from_env(self.store.db, now_fn=self.store.now)
@@ -1338,23 +1539,104 @@ class Bridge:
     def card(self, task: TaskFixture) -> TaskCard:
         return self._card(task, self.store.latest(task.id), self.store.now())
 
-    def brief(self, task_id: int, login: str | None) -> str:
-        """The brief for `prompt_url` links; an invalid login gets the generic brief."""
+    def brief(self, task_id: int, login: str | None, copy: str | None = None) -> str:
+        """The brief for `prompt_url` links; an invalid login gets the generic brief. `copy`
+        (Phase 7) counts only when it is a full name whose owner is `login`."""
         task = self.task(task_id)
+        login = login if is_valid_login(login) else None
+        owner = copy.split("/", 1)[0] if is_valid_copy(copy) else None
+        if login is None or owner is None or owner.lower() != login.lower():
+            copy = None
+        return compile_brief(task, task.acceptanceCriteria, login, copy)
+
+    def copy_of(self, identity: Identity | None) -> CopyRecord | None:
+        """The caller's copy, once FORGE has set it up (Phase 7), under the name GitHub gives
+        it now. It is found by its repository id (`GET /repositories/{id}`, public, cached
+        5 minutes), which outlasts a rename, and counts only while GitHub says it is a fork
+        of verastd/forge-app owned by the caller's GitHub id: a name alone may change hands
+        (a renamed account's old login is anyone's), and the session's login may be days
+        old. When GitHub can't say, the stored name counts only while its owner id is the
+        caller's and it is still named after their login."""
+        if identity is None:
+            return None
+        record = load_copy(self.store.db, identity.sub)
+        if record is None:
+            return None
+        try:
+            repo = self.github.repository(record.repo_id)
+        except GitHubUnavailable as exc:
+            logger.info("GitHub unavailable for a copy's name: %s", exc)
+            if str(record.owner_id) != identity.sub:
+                return None
+            return record if record.owner.lower() == identity.login.lower() else None
+        if (
+            repo is None
+            or str(repo.owner_id) != identity.sub
+            or not repo.fork
+            or repo.parent != UPSTREAM_REPO.lower()
+        ):
+            return None
+        return replace(record, full_name=repo.full_name)
+
+    def brief_for(self, task: TaskFixture, identity: Identity | None) -> str:
+        """The brief, personalized with the caller's login and, once FORGE knows it, their
+        copy: what TaskDetail, the start rails and the connector hand an agent."""
+        copy = self.copy_of(identity)
         return compile_brief(
-            task, task.acceptanceCriteria, login if is_valid_login(login) else None
+            task,
+            task.acceptanceCriteria,
+            identity.login if identity is not None else None,
+            copy.full_name if copy is not None else None,
         )
+
+    def work_repo(self, identity: Identity) -> str:
+        """The repository the caller's agent works in: their copy once FORGE knows it, else
+        `<login>/forge-app` (Phase 7)."""
+        copy = self.copy_of(identity)
+        return copy.full_name if copy is not None else f"{identity.login}/{FORK_REPO_NAME}"
 
     def task_detail(self, task_id: int, identity: Identity | None) -> TaskDetail:
         task = self.task(task_id)
+        copy = self.copy_of(identity)
+        branch = branch_name(task.id, task.title)
+        lease = self.store.latest(task.id)
+        holder = (
+            identity is not None
+            and copy is not None
+            and lease is not None
+            and lease.holder_sub == identity.sub
+            and lease.is_active(self.store.now())
+        )
         return TaskDetail(
             task=self.card(task),
             acceptanceCriteria=list(task.acceptanceCriteria),
-            branch=branch_name(task.id, task.title),
-            brief=compile_brief(
-                task, task.acceptanceCriteria, identity.login if identity is not None else None
+            branch=branch,
+            brief=self.brief_for(task, identity),
+            # Phase 7: the holder's copy, and whether there is something to send for review.
+            copy=(
+                RepoCopy(fullName=copy.full_name, syncedAt=iso(copy.synced_at))
+                if holder and copy is not None
+                else None
+            ),
+            canSendForReview=(
+                self._can_send_for_review(lease, copy, branch)
+                if holder and lease is not None and copy is not None
+                else None
             ),
         )
+
+    def _can_send_for_review(self, lease: Lease, copy: CopyRecord, branch: str) -> bool | None:
+        """True when the task's branch in the copy is ahead of upstream main and no open or
+        merged pull request is known for the claim; None when GitHub can't say right now
+        (public reads, 60 s cache)."""
+        if lease.merged or lease.pull_open:
+            return False
+        try:
+            ahead = self.github.ahead_by(copy.owner, branch)
+        except GitHubUnavailable as exc:
+            logger.info("GitHub unavailable for task %s: %s", lease.task_id, exc)
+            return None
+        return ahead is not None and ahead > 0
 
     # claim and release
 
@@ -1462,7 +1744,7 @@ class Bridge:
         task = self.task(request.taskId)
         lease = self.held_lease(identity, task.id)
         meta = rail_meta(request.rail)
-        brief = compile_brief(task, task.acceptanceCriteria, identity.login)
+        brief = self.brief_for(task, identity)
         now = self.store.now()
         if meta.mode == "open":
             if not self.store.recently_opened(lease.id, request.rail, now - OPENED_DEDUPE):
@@ -1496,6 +1778,7 @@ class Bridge:
                     branch=branch_name(task.id, task.title),
                     login=identity.login,
                     credential=credential,
+                    repo=self.work_repo(identity),
                 )
             )
         except AdapterError as exc:
@@ -1654,11 +1937,18 @@ class Bridge:
             detail = "Your pull request was closed without merging."
         elif READY_STAGES.intersection(self.store.progress_stages(lease.id)):
             stage = "ready_to_submit"
-            detail = (
-                "Your agent says the work is ready, but there's no pull request for it yet. "
-                "Use “When your agent has pushed its branch: open the pull request”, or ask "
-                "your agent to open it."
-            )
+            if is_holder and self.copy_of(viewer) is not None:
+                # Phase 7: their copy is set up, so FORGE can open the pull request for them.
+                detail = (
+                    "Your agent says the work is ready. Press Send for review on the task page, "
+                    "and FORGE opens the pull request for you."
+                )
+            else:
+                detail = (
+                    "Your agent says the work is ready, but there's no pull request for it yet. "
+                    "Use “When your agent has pushed its branch: open the pull request”, or ask "
+                    "your agent to open it."
+                )
         elif (signal := self.store.latest_signal(lease.id)) is not None:
             stage = "agent_working"
             kind, rail, last_stage = signal
@@ -1888,7 +2178,11 @@ class Bridge:
             raise ApiError(503, {"error": "github_unavailable"}) from None
         if pull is None:
             raise ApiError(404, {"error": "pr_not_found", "prNumber": number})
-        if pull.head_owner_id is None or str(pull.head_owner_id) != identity.sub:
+        if (
+            pull.head_owner_id is None
+            or str(pull.head_owner_id) != identity.sub
+            or str(pull.author_id) != identity.sub
+        ):
             raise ApiError(403, {"error": "not_your_pr", "prNumber": number})
         if not pull_counts(pull, lease, task, self.store.now()) or (
             number != lease.pr_number and self.store.pull_taken(number, lease.id)
@@ -1900,6 +2194,130 @@ class Bridge:
                 lease, "submitted", source, f"Pull request #{number} was handed in for checks."
             )
         return self.status_of(lease, identity, task)
+
+    # Phase 7: "your copy" and "Send for review" (contract §3)
+
+    def _repo_action(
+        self, identity: Identity, request: RepoActionRequest, action: RepoAction
+    ) -> tuple[TaskFixture, Lease, copies.AsContributor, copies.GitHubUser]:
+        """What both actions check first, in order: the task, that the caller holds it
+        (409 not_claimed, 403 not_holder, 409 already_shipped), the hourly limit (429
+        rate_limited), and that the token is the caller's own GitHub account (403
+        wrong_account). The action's time budget starts here, so the claim lookup counts;
+        the caller runs this inside `within`, which holds its public reads to it."""
+        deadline = copies.clock() + copies.ACTION_BUDGET_SECONDS
+        task = self.task(request.taskId)
+        lease = self.held_lease(identity, task.id)
+        take_repo_action_slot(self.store.db, identity.sub, action, self.store.now())
+        gh = copies.AsContributor(self.repo_client, request.token.get_secret_value(), deadline)
+        return task, lease, gh, copies.caller(gh, identity.sub)
+
+    def copy(self, identity: Identity, request: RepoActionRequest) -> CopyResult:
+        """Set up the caller's copy of verastd/forge-app (or find it), bring it up to date and
+        make the task's branch in it, as them; record the copy and, while they still hold the
+        task, say so on its timeline (to them alone)."""
+        with within(copies.ACTION_BUDGET_SECONDS):
+            task, lease, gh, user = self._repo_action(identity, request, "copy")
+            branch = branch_name(task.id, task.title)
+            setup = copies.set_up_copy(gh, user, branch)
+        now = self.store.now()
+        save_copy(
+            self.store.db,
+            user.id,
+            setup.repo_id,
+            setup.owner_id,
+            setup.full_name,
+            synced=setup.synced,
+            now=now,
+        )
+        message = f"FORGE set up your copy, {setup.full_name}, and the branch {branch}."
+        current = self.store.lease(lease.id)
+        if (
+            current is not None
+            and current.released_at is None
+            and current.is_active(now)
+            and not has_event(self.store.db, lease.id, "copy_ready", message)
+        ):
+            self.store.add_event(current, "copy_ready", "forge", message)
+        return CopyResult(
+            fullName=setup.full_name,
+            branch=branch,
+            synced=setup.synced,
+            branchCreated=setup.branch_created,
+            branchFromLatest=setup.branch_from_latest,
+        )
+
+    def review(self, identity: Identity, request: RepoActionRequest) -> ReviewResult:
+        """Check the diff of the task's branch in the caller's copy, then open its pull
+        request as them, or find their own one already open; record it for the claim like
+        any other pull request. All within the action's time budget."""
+        with within(copies.ACTION_BUDGET_SECONDS):
+            return self._review(identity, request)
+
+    def _review(self, identity: Identity, request: RepoActionRequest) -> ReviewResult:
+        task, lease, gh, user = self._repo_action(identity, request, "review")
+        if lease.pull_open and lease.pr_number is not None:
+            # One pull request per claim: the one already recorded (from any branch) stands.
+            number = lease.pr_number
+            return ReviewResult(
+                pullRequest=PullRequestRef(number=number, url=pull_url(number)), created=False
+            )
+        copy = self.copy_of(identity)
+        # The copy FORGE recorded must still be this account's: a login that has changed
+        # hands since would make `owner:branch` someone else's.
+        if copy is None or copy.owner.lower() != user.login.lower():
+            raise ApiError(409, {"error": "no_copy"})
+        branch = branch_name(task.id, task.title)
+        comparison = copies.compare(gh, copy.owner, branch)
+        if comparison is None:
+            raise ApiError(409, {"error": "branch_missing"})
+        if comparison.ahead_by == 0 or not comparison.files:
+            raise ApiError(409, {"error": "no_changes"})
+        checked = comparison.head_sha
+        if checked is None:
+            raise copies.github_failed("compare", STATUS_BAD_GATEWAY)
+        # The rules come from upstream main, read publicly; without them, no pull request.
+        try:
+            rules = self.github.protocol_rules()
+        except GitHubUnavailable as exc:
+            logger.warning("The protocol rules can't be read: %s", exc)
+            rules = None
+        if rules is None:
+            raise copies.checks_unavailable()
+        copies.check_diff(comparison, rules)
+        pull = copies.open_pull(gh, user, copy.owner, branch)
+        if pull is not None:
+            self._record_review_pull(lease, task, pull)
+            return ReviewResult(
+                pullRequest=PullRequestRef(number=pull.number, url=pull.url), created=False
+            )
+        # The claim may have ended while GitHub answered: check again before the one write.
+        lease = self.held_lease(identity, task.id)
+        body = copies.pull_body(
+            task.id, task.title, task.url, task.acceptanceCriteria, user.login, checked
+        )
+        title = copies.pull_title(task.id, task.title)
+        pull = copies.create_pull(gh, copy.owner, branch, title, body)
+        lease = self._record_review_pull(lease, task, pull)
+        if lease.pr_number == pull.number:
+            message = f"Sent for review: pull request #{pull.number}."
+            if pull.head_sha != checked:
+                message += (
+                    f" Its branch changed after FORGE checked it at {checked[:7]}: the pull "
+                    f"request opened at {pull.head_sha[:7]}."
+                )
+            self.store.add_event(lease, "review_sent", "forge", message)
+        return ReviewResult(
+            pullRequest=PullRequestRef(number=pull.number, url=pull.url), created=True
+        )
+
+    def _record_review_pull(self, lease: Lease, task: TaskFixture, pull: PullRequest) -> Lease:
+        """Record `pull` for the claim when it is the claim's (pull_counts) and nobody else's."""
+        if pull_counts(pull, lease, task, self.store.now()) and not self.store.pull_taken(
+            pull.number, lease.id
+        ):
+            return self.store.record_pull(lease, pull)
+        return lease
 
     def report_progress(
         self,

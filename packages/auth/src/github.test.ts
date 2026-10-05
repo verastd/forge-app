@@ -1,6 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { AuthError, authorizeUrl, exchangeCode, fetchGitHubUser, revokeGitHubToken } from './index.js';
+import {
+  AuthError,
+  authorizeUrl,
+  exchangeCode,
+  fetchGitHubUser,
+  PUBLIC_REPO_SCOPE,
+  publicRepoAuthorizeUrl,
+  revokeGitHubToken,
+} from './index.js';
 import type { FetchLike } from './index.js';
 
 const STATE = 'Xq3vG0b1k9Zr8dT2yWc4nHs6uJm5pLf7aEo-_iRkQzA';
@@ -95,6 +103,60 @@ describe('authorizeUrl', () => {
     expect(params.get('code_challenge')).toBe('c c');
     expect(params.has('scope')).toBe(false);
     expect([...params.keys()]).toHaveLength(5);
+  });
+});
+
+describe('publicRepoAuthorizeUrl (the OAuth App behind "your copy" and "Send for review")', () => {
+  const REPO = {
+    clientId: 'Ov23liForgeRepoClient',
+    redirectUri: 'https://forge.example/auth/github/repo/callback',
+    state: STATE,
+    codeChallenge: CHALLENGE,
+  };
+
+  it('asks for public_repo and nothing wider, with S256 PKCE and no sign-up', () => {
+    const url = new URL(publicRepoAuthorizeUrl(REPO));
+
+    expect(`${url.origin}${url.pathname}`).toBe('https://github.com/login/oauth/authorize');
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      client_id: REPO.clientId,
+      redirect_uri: REPO.redirectUri,
+      state: STATE,
+      scope: 'public_repo',
+      code_challenge: CHALLENGE,
+      code_challenge_method: 'S256',
+      allow_signup: 'false',
+    });
+    expect(url.searchParams.getAll('scope')).toEqual(['public_repo']);
+    expect(url.hash).toBe('');
+    expect(PUBLIC_REPO_SCOPE).toBe('public_repo');
+  });
+
+  it('encodes every value, so none can widen the scope or add a parameter', () => {
+    const params = new URL(
+      publicRepoAuthorizeUrl({
+        clientId: 'id&scope=repo,admin:org',
+        redirectUri: 'https://forge.example/auth/github/repo/callback?a=1&scope=repo',
+        state: 's#t&allow_signup=true',
+        codeChallenge: 'c c&code_challenge_method=plain',
+      }),
+    ).searchParams;
+
+    expect(params.get('client_id')).toBe('id&scope=repo,admin:org');
+    expect(params.get('redirect_uri')).toBe('https://forge.example/auth/github/repo/callback?a=1&scope=repo');
+    expect(params.get('state')).toBe('s#t&allow_signup=true');
+    expect(params.get('code_challenge')).toBe('c c&code_challenge_method=plain');
+    expect(params.getAll('scope')).toEqual(['public_repo']);
+    expect(params.getAll('allow_signup')).toEqual(['false']);
+    expect(params.getAll('code_challenge_method')).toEqual(['S256']);
+    expect([...params.keys()]).toHaveLength(7);
+  });
+
+  it('leaves the sign-in URL exactly as it was: no scope, no allow_signup', () => {
+    const params = new URL(authorizeUrl(REPO)).searchParams;
+
+    expect(params.has('scope')).toBe(false);
+    expect(params.has('allow_signup')).toBe(false);
   });
 });
 

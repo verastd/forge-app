@@ -1,5 +1,6 @@
 """The wire models: Bridge v2 (Phase 4 contract §3), Proposals and notifications (Phase 5
-contract §2) and the house model (Phase 6 contract §2).
+contract §2), the house model (Phase 6 contract §2) and the copy and "Send for review"
+(Phase 7 contract §4).
 
 tests/fixtures/wire-golden.json records every model's fields as this file describes
 them, length limits included; packages/shared/src/wire.test.ts describes the zod schemas
@@ -19,9 +20,11 @@ from pydantic import BaseModel, Field, SecretStr, ValidationError
 from pydantic.fields import FieldInfo
 
 from forge_api.models import (
+    BRIDGE_EVENT_KINDS,
     OPEN_RAILS,
     PROGRESS_STAGES,
     RAILS,
+    REPO_ACTION_ERRORS,
     START_RAILS,
     AuthorizeCheck,
     AuthorizeDecision,
@@ -36,6 +39,7 @@ from forge_api.models import (
     ConnectedAgent,
     ConnectedAgentList,
     ConsentRequest,
+    CopyResult,
     Credential,
     DispatchRequest,
     DispatchResult,
@@ -60,9 +64,13 @@ from forge_api.models import (
     ProposalSettings,
     ProposalTally,
     ProposalYou,
+    PullRequestRef,
     RailInfo,
     RailList,
     RailMeta,
+    RepoActionRequest,
+    RepoCopy,
+    ReviewResult,
     SavedCredential,
     SavedCredentialList,
     SecondRequest,
@@ -126,6 +134,11 @@ WIRE_MODELS: list[type[BaseModel]] = [
     SecondRequest,
     HouseSpec,
     HouseDraft,
+    RepoCopy,
+    RepoActionRequest,
+    CopyResult,
+    PullRequestRef,
+    ReviewResult,
 ]
 
 _SIMPLE = {str: "string", SecretStr: "string", bool: "boolean", int: "integer", float: "number"}
@@ -172,14 +185,15 @@ def _kind(annotation: Any) -> dict[str, Any]:
 
 
 def describe(model: type[BaseModel]) -> dict[str, Any]:
-    """{field: {type, values?, items?, ref?, limits?, optional?}} in declaration order."""
+    """{field: {type, values?, items?, ref?, limits?, optional?}} in declaration order, by
+    the name the wire uses (a field's alias, when it has one: TaskDetail.copy_ is `copy`)."""
     described: dict[str, Any] = {}
     for name, field in model.model_fields.items():
         entry = _kind(field.annotation)
         entry.update(_limits(field.metadata, array=entry["type"] == "array"))
         if not field.is_required():
             entry["optional"] = True
-        described[name] = entry
+        described[field.alias or name] = entry
     return described
 
 
@@ -324,3 +338,81 @@ def test_values_outside_the_vocabularies_are_rejected(
 def test_feedback_carries_notes_not_a_prompt() -> None:
     assert set(FeedbackResponse.model_fields) == {"relayed", "notes", "relayedTo"}
     assert FeedbackResponse(relayed=True, notes="n", relayedTo="jules").relayedTo == "jules"
+
+
+def test_phase_7_vocabularies_match_the_zod_side() -> None:
+    """BRIDGE_EVENT_KINDS and REPO_ACTION_ERRORS in packages/shared, in the same order (its
+    index.test.ts holds the same lists)."""
+    assert BRIDGE_EVENT_KINDS == (
+        "claimed",
+        "dispatched",
+        "opened",
+        "progress",
+        "submitted",
+        "released",
+        "relayed",
+        "copy_ready",
+        "review_sent",
+    )
+    assert REPO_ACTION_ERRORS == (
+        "not_holder",
+        "already_shipped",
+        "rate_limited",
+        "wrong_account",
+        "copy_not_ready",
+        "copy_mismatch",
+        "no_copy",
+        "branch_missing",
+        "no_changes",
+        "too_large",
+        "tests_modified",
+        "protected_paths",
+        "checks_unavailable",
+        "head_taken",
+        "github_failed",
+    )
+
+
+def test_a_one_time_token_never_prints_and_its_length_is_bounded() -> None:
+    request = RepoActionRequest.model_validate({"taskId": 1, "token": SECRET})
+    assert request.token.get_secret_value() == SECRET
+    for rendered in (repr(request), str(request), request.model_dump_json()):
+        assert SECRET not in rendered
+    RepoActionRequest.model_validate({"taskId": 1, "token": "t" * 4096})
+    for token in ("", "t" * 4097):
+        with pytest.raises(ValidationError):
+            RepoActionRequest.model_validate({"taskId": 1, "token": token})
+
+
+def test_task_detail_says_copy_on_the_wire_and_leaves_unknowns_out() -> None:
+    card = TaskCard(
+        id=1,
+        title="t",
+        civilianSummary="s",
+        size="S",
+        rewardClass="none",
+        tierFloor="T0",
+        status="claimed",
+        url="u",
+        labels=[],
+    )
+    detail = TaskDetail(
+        task=card,
+        acceptanceCriteria=[],
+        branch="task/1-t",
+        brief="b",
+        copy=RepoCopy(fullName="maya/forge-app", syncedAt="2026-10-05T12:00:00Z"),
+        canSendForReview=True,
+    )
+    dumped = detail.model_dump(exclude_none=True)
+    assert dumped["copy"] == {"fullName": "maya/forge-app", "syncedAt": "2026-10-05T12:00:00Z"}
+    assert dumped["canSendForReview"] is True
+    assert detail.copy_ is not None and detail.copy_.fullName == "maya/forge-app"
+    bare = TaskDetail(task=card, acceptanceCriteria=[], branch="task/1-t", brief="b")
+    assert set(bare.model_dump(exclude_none=True)) == {
+        "task",
+        "acceptanceCriteria",
+        "branch",
+        "brief",
+    }
+    assert TaskDetail.model_validate(dumped).copy_ == detail.copy_

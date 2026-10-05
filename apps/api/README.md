@@ -2,8 +2,9 @@
 
 FastAPI (Python 3.12, uv) backend for the beta app, the Bridge, the FORGE
 connector (PRD §4.9, Appendix I; `docs/adr/ADR-005-agent-handoff.md`), the
-Propose floor (`docs/adr/ADR-006-proposals.md`) and the house model that
-drafts a passed proposal's task (`docs/adr/ADR-007-house-model.md`).
+Propose floor (`docs/adr/ADR-006-proposals.md`), the house model that
+drafts a passed proposal's task (`docs/adr/ADR-007-house-model.md`), and a
+contributor's copy and Send for review (`docs/adr/ADR-008-copy-and-review.md`).
 
 ```bash
 cd apps/api
@@ -39,9 +40,16 @@ src/forge_api/
     rails.py           the rail registry (mirrors packages/shared/src/rails.ts)
     bridge.py          the Bridge: tasks, claims, hand-offs, status, checks, relays, submission;
                        also the tasks published from proposals (ids from 10001) and the hook
-                       that tells the proposals service when one ships
+                       that tells the proposals service when one ships, and the contributor's
+                       copy and Send for review (POST /api/bridge/copy and /review: the claim,
+                       the hourly limit, the records, the timeline)
+    copies.py          every GitHub call FORGE makes as a contributor, with their one-time
+                       token: their copy (fork, sync, the task's branch) and Send for review
+                       (the diff's pre-check, then the pull request and its description)
     vault.py           saved agent keys, encrypted (FORGE_VAULT_KEY)
-    github_reads.py    pull requests (by branch, number or search), check runs and forks from GitHub
+    github_reads.py    public reads: pull requests (by branch, number or search), check runs,
+                       forks, how far a copy's task branch is ahead of main, and upstream main's
+                       .github/forge-protocol.json (the rules Send for review checks against)
     rail_adapters/     one module per start rail's vendor API, and the outbound rules (base.py)
     bridge_mcp.py      the connector's tools, prompt and server instructions
     mcp_types.py       the seam between the MCP server and those tools
@@ -91,3 +99,21 @@ estimate and needs `--yes`:
 ```bash
 uv run python -m forge_api.tools.house_eval --model <id> --out house-eval.md --yes
 ```
+
+**Your copy and Send for review** (`services/copies.py`, `services/bridge.py`;
+`docs/architecture.md`, "Your copy and Send for review"). `POST
+/api/bridge/copy` and `POST /api/bridge/review` take `{taskId, token}`:
+the one-time GitHub token the web server got from FORGE's OAuth App
+(scope `public_repo`) for that one press, which the web revokes right
+after. Only the web server calls them (the BFF forwards neither); each
+reads its own body so nothing echoes the token, which is never logged or
+stored. Both act only for the claim's holder, 10 times an hour each, and
+check with `GET /user` that the token is the caller's before anything
+else. Copy forks `verastd/forge-app` into the caller's account, syncs it
+and makes the task's branch; review checks the diff against upstream
+main's `.github/forge-protocol.json`, then opens the pull request as the
+caller with the template's test attestation checked. Every GitHub call
+is in `copies.py`, only to `https://api.github.com`, with 8 s a call
+and 40 s for the whole action. Tests never reach GitHub:
+`tests/test_bridge_copies.py` answers as GitHub through httpx's
+`MockTransport` and asserts every request FORGE sends.

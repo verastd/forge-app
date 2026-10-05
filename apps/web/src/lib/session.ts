@@ -10,7 +10,8 @@ import type { SessionClaims, SessionInput } from '@forge/auth';
 import { loadFlags } from '@forge/flags';
 import { cookies } from 'next/headers';
 
-import { githubAppConfig, isProduction, sessionKeys } from './auth/config';
+import { githubAppConfig, githubRepoConfig, isProduction, sessionKeys } from './auth/config';
+import type { GitHubAppConfig } from './auth/config';
 import { visitorSession } from './auth/visitor';
 import { isDemoMode } from './mode';
 
@@ -48,6 +49,19 @@ export async function signInAvailability(): Promise<SignInAvailability> {
   if (keys.practiceOnly || githubAppConfig() === null) return 'unavailable';
   const flags = await loadFlags();
   return flags.github_signin ? 'github' : 'unavailable';
+}
+
+/**
+ * FORGE's OAuth App for "your copy" and "Send for review" (Phase 7), or null
+ * while that is off: its settings are missing or unusable
+ * (`githubRepoConfig`), or sign-in here isn't GitHub, since only a GitHub
+ * account can have a copy. The task page shows the three steps only when this
+ * is set, and `POST /auth/github/repo` and its callback check it again.
+ */
+export async function repoApp(): Promise<GitHubAppConfig | null> {
+  const config = githubRepoConfig();
+  if (config === null) return null;
+  return (await signInAvailability()) === 'github' ? config : null;
 }
 
 /**

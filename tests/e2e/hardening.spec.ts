@@ -80,11 +80,17 @@ test.describe('protected paths', () => {
       // The ones that were already covered stay covered.
       'apps/web/src/app/bff/bridge/[...path]/route.ts',
       'apps/web/src/app/auth/callback/route.ts',
+      // "Your copy" and "Send for review" (Phase 7): the OAuth App's one-time token, end to end.
+      'apps/web/src/app/auth/github/repo/',
+      'apps/web/src/app/auth/one-time-token.ts',
+      'apps/web/src/lib/auth/repo-app.ts',
       'apps/web/src/lib/launch.ts',
       'apps/api/src/forge_api/services/vault.py',
     ];
     const files = sensitive.flatMap(filesUnder);
     expect(files).toContain('apps/web/src/components/contribute/StartRails.tsx');
+    expect(files).toContain('apps/web/src/components/contribute/RepoSteps.tsx');
+    expect(files).toContain('apps/web/src/app/auth/github/repo/callback/route.ts');
     expect(files).toContain('apps/api/src/forge_api/fixtures/tasks.json');
     for (const file of files) {
       expect(guardedBy(file, manifest.protectedPaths), `${file} in protectedPaths`).toBe(true);

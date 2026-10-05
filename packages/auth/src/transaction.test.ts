@@ -3,9 +3,11 @@ import { describe, expect, it } from 'vitest';
 
 import {
   createPkcePair,
+  isRepoAction,
   openSession,
   openTransaction,
   randomToken,
+  REPO_ACTIONS,
   safeNext,
   sealSession,
   sealTransaction,
@@ -84,6 +86,7 @@ describe('sealTransaction and openTransaction', () => {
     const largest: TransactionInput[] = [
       { ...TX, next },
       { ...TX, next, purpose: 'agent', taskId: Number.MAX_SAFE_INTEGER, rail: `c${'a'.repeat(31)}` },
+      { ...TX, next, purpose: 'repo', taskId: Number.MAX_SAFE_INTEGER, action: 'review' },
     ];
 
     for (const attempt of largest) {
@@ -342,6 +345,106 @@ describe('agent attempts (the one-time authorization that starts an agent)', () 
     ['task 0', { ...AGENT_FIELDS, taskId: 0 }],
     ['a rail with a dot', { ...AGENT_FIELDS, rail: 'co.pilot' }],
     ['a rail as a number', { ...AGENT_FIELDS, rail: 1 }],
+  ])('openTransaction refuses a forged payload with %s', async (_label, overrides) => {
+    await expect(openTransaction(await forge(payload(overrides)), [SECRET], { now: NOW })).resolves.toBeNull();
+  });
+});
+
+describe('repo attempts (the OAuth App\'s one-time authorization for "your copy" or "Send for review")', () => {
+  const REPO: TransactionInput = {
+    ...TX,
+    next: '/contribute/task/7',
+    purpose: 'repo',
+    taskId: 7,
+    action: 'copy',
+  };
+  const REPO_FIELDS = { purpose: 'repo', taskId: 7, action: 'copy' };
+
+  it.each(['copy', 'review'] as const)('open with their purpose, task and action (%s)', async (action) => {
+    const attempt: TransactionInput = { ...REPO, purpose: 'repo', taskId: 7, action };
+    const token = await sealTransaction(attempt, SECRET, { now: NOW });
+
+    await expect(openTransaction(token, [SECRET], { now: NOW })).resolves.toEqual({
+      ...attempt,
+      iat: NOW,
+      exp: NOW + TRANSACTION_TTL_SECONDS,
+    });
+  });
+
+  it('seal only the attempt fields, dropping any other key', async () => {
+    const token = await sealTransaction({ ...REPO, extra: 1 } as TransactionInput, SECRET, { now: NOW });
+    const claims = await openTransaction(token, [SECRET], { now: NOW });
+
+    expect(Object.keys(claims ?? {}).sort()).toEqual([
+      'action',
+      'exp',
+      'iat',
+      'next',
+      'purpose',
+      'state',
+      'taskId',
+      'verifier',
+    ]);
+  });
+
+  it('a sign-in attempt and an agent attempt still open with no action', async () => {
+    const agent: TransactionInput = { ...TX, next: '/contribute/task/7', purpose: 'agent', taskId: 7, rail: 'copilot' };
+    for (const attempt of [TX, agent]) {
+      const claims = await openTransaction(await sealTransaction(attempt, SECRET, { now: NOW }), [SECRET], { now: NOW });
+
+      expect(claims).not.toBeNull();
+      expect(Object.keys(claims ?? {})).not.toContain('action');
+    }
+  });
+
+  it('know exactly two actions', () => {
+    expect(REPO_ACTIONS).toEqual(['copy', 'review']);
+    expect(isRepoAction('copy')).toBe(true);
+    expect(isRepoAction('review')).toBe(true);
+    for (const other of ['fork', 'merge', 'COPY', 'copy ', '', null, undefined, 1, ['copy']]) {
+      expect(isRepoAction(other), String(other)).toBe(false);
+    }
+  });
+
+  it.each<[string, unknown]>([
+    ['a purpose with no task', { ...TX, purpose: 'repo', action: 'copy' }],
+    ['a purpose with no action', { ...TX, purpose: 'repo', taskId: 7 }],
+    ['an action with no purpose', { ...TX, action: 'copy' }],
+    ['a task and action with no purpose', { ...TX, taskId: 7, action: 'copy' }],
+    ['an unknown action', { ...REPO, action: 'merge' }],
+    ['an action GitHub would call a fork', { ...REPO, action: 'fork' }],
+    ['an uppercase action', { ...REPO, action: 'COPY' }],
+    ['an empty action', { ...REPO, action: '' }],
+    ['an action as a number', { ...REPO, action: 1 }],
+    ['a repo attempt with a rail', { ...REPO, rail: 'copilot' }],
+    ['an agent attempt with an action', { ...TX, purpose: 'agent', taskId: 7, rail: 'copilot', action: 'copy' }],
+    ['task 0', { ...REPO, taskId: 0 }],
+    ['a negative task', { ...REPO, taskId: -1 }],
+    ['a fractional task', { ...REPO, taskId: 1.5 }],
+    ['a task as a string', { ...REPO, taskId: '7' }],
+    ['a repo attempt with an unsafe next', { ...REPO, next: 'https://evil.com' }],
+  ])('sealTransaction throws invalid_claims for %s', async (_label, tx) => {
+    await expect(sealTransaction(tx as TransactionInput, SECRET, { now: NOW })).rejects.toMatchObject({
+      name: 'AuthError',
+      code: 'invalid_claims',
+    });
+  });
+
+  it('opens the untouched forged repo payload, so each refusal below is its own claim', async () => {
+    await expect(openTransaction(await forge(payload(REPO_FIELDS)), [SECRET], { now: NOW })).resolves.toEqual(
+      payload(REPO_FIELDS),
+    );
+  });
+
+  it.each<[string, Record<string, unknown>]>([
+    ['a purpose with no task or action', { purpose: 'repo' }],
+    ['an action with no purpose', { action: 'copy' }],
+    ['a task and action with no purpose', { taskId: 7, action: 'copy' }],
+    ['an unknown action', { ...REPO_FIELDS, action: 'push' }],
+    ['a null action', { ...REPO_FIELDS, action: null }],
+    ['a repo attempt with a rail', { ...REPO_FIELDS, rail: 'copilot' }],
+    ['an agent attempt with an action', { purpose: 'agent', taskId: 7, rail: 'copilot', action: 'review' }],
+    ['a task as a string', { ...REPO_FIELDS, taskId: '7' }],
   ])('openTransaction refuses a forged payload with %s', async (_label, overrides) => {
     await expect(openTransaction(await forge(payload(overrides)), [SECRET], { now: NOW })).resolves.toBeNull();
   });

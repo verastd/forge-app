@@ -8,6 +8,8 @@
  * back here too, and takes its own branch below; the sign-in path is
  * unchanged, except that once the session is set it says hello to the API
  * for the new member (`members-hello.ts`), best effort, after the redirect.
+ * A `repo` attempt (the OAuth App's, `/auth/github/repo`) has its own
+ * callback and is refused here.
  */
 import {
   AuthError,
@@ -30,11 +32,22 @@ import { redirectTo, signInFailed } from '../../../lib/auth/http';
 import { postAsUser } from '../../../lib/bff-forward';
 import type { ApiOutcome } from '../../../lib/bff-forward';
 import { getSession, setSessionCookie, signInAvailability } from '../../../lib/session';
+import { revokeNow } from '../one-time-token';
+import type { LogLine } from '../one-time-token';
 import { startWithToken } from './agent-start';
 import { sayHello } from './members-hello';
 import type { Member } from './members-hello';
 
 export const dynamic = 'force-dynamic';
+
+/** A server log line at its level. Only codes and fixed words go in, never a token or a code. */
+const logLine: LogLine = (line, level) => {
+  if (level === 'info') {
+    console.info(line);
+  } else {
+    console.warn(line);
+  }
+};
 
 export async function GET(request: NextRequest): Promise<Response> {
   const store = await cookies();
@@ -45,6 +58,9 @@ export async function GET(request: NextRequest): Promise<Response> {
   store.set(COOKIE.transaction(prod), '', { ...cookieOptions('transaction', prod), maxAge: 0 });
   if (tx === null) return signInFailed('expired');
   if (tx.purpose === 'agent') return agentCallback(request, tx);
+  // "Your copy" and "Send for review" come back to /auth/github/repo/callback,
+  // never here: an OAuth App attempt is no sign-in, whatever the query says.
+  if (tx.purpose === 'repo') return signInFailed('state');
 
   const params = request.nextUrl.searchParams;
   if (!constantTimeEqual(params.get('state') ?? '', tx.state)) return signInFailed('state');
@@ -138,16 +154,17 @@ async function agentCallback(
       userIdOf: async (token) => String((await fetchGitHubUser(token)).id),
       dispatch: (token) =>
         postAsUser('/api/bridge/dispatch', session, { taskId: tx.taskId, rail: tx.rail, credential: { key: token } }),
-      // After the response, so the redirect never waits on GitHub. Logged without the token.
+      // Started now, not after the response: the redirect doesn't wait on GitHub, and `after`
+      // holds the function open until it is done, even for a browser that has already left
+      // (review-web W-M1). Logged either way, without the token.
       revoke: (token) => {
-        after(async () => {
-          const revoked = await revokeGitHubToken({
-            clientId: config.clientId,
-            clientSecret: config.clientSecret,
-            accessToken: token,
-          });
-          if (!revoked) console.warn('agent authorization: GitHub did not confirm the one-time token was revoked');
-        });
+        after(
+          revokeNow(
+            () => revokeGitHubToken({ clientId: config.clientId, clientSecret: config.clientSecret, accessToken: token }),
+            logLine,
+            'agent authorization',
+          ),
+        );
       },
     });
   } catch (error) {

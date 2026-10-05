@@ -11,6 +11,12 @@
  * Pure: the caller (`./api`) keeps one {@link PracticeTask} per claimed task
  * for the life of the tab and passes it in. Open-rail links stay real links;
  * only the bookkeeping behind them is simulated.
+ *
+ * The task page's three steps are practised too (Phase 7): "Get started" and
+ * "Refresh your copy" set up a pretend copy, and "Send for review" sends the
+ * pretend work on, all without a word to GitHub or the API. A practice run
+ * handed to an agent once the copy exists waits, once its agent has
+ * "pushed", for the person to send it for review, as a real one does.
  */
 
 import {
@@ -27,6 +33,7 @@ import type {
   BridgeStatus,
   CheckResults,
   ClaimResponse,
+  CopyResult,
   DispatchRequest,
   DispatchResult,
   FeedbackResponse,
@@ -49,6 +56,12 @@ const CHECKS_PASSED = 3;
 
 const SAMPLE_FAILURE = 'gauntlet: FAIL G2.3 — acceptance test issue-1/test_csv_export.py::test_headers';
 
+/**
+ * The practice account's pretend copy. Only ever shown as text: no link or
+ * agent is ever pointed at it, since nobody's real copy is behind it.
+ */
+export const PRACTICE_COPY = 'you/forge-app';
+
 /** What the practice app remembers about one task it holds, for the life of the tab. */
 export interface PracticeTask {
   taskId: number;
@@ -59,6 +72,11 @@ export interface PracticeTask {
   /** The last hand-off. */
   rail?: Rail;
   handedOffAtMs?: number;
+  /** When "Get started" first made the pretend copy, and when it was last brought up to date. */
+  copiedAtMs?: number;
+  copySyncedAtMs?: number;
+  /** When the pretend work was sent for review. */
+  reviewedAtMs?: number;
 }
 
 function isoOf(ms: number): string {
@@ -69,14 +87,21 @@ function forgeEvent(atMs: number, kind: BridgeEvent['kind'], message: string, ra
   return { at: isoOf(atMs), kind, source: 'forge', message, ...(rail === undefined ? {} : { rail }) };
 }
 
-/** GET /api/bridge/tasks/{id}, from the fixtures. The practice account has no fork, so the brief names none. */
-export function localTaskDetail(task: TaskFixture): TaskDetail {
+/**
+ * GET /api/bridge/tasks/{id}, from the fixtures, with the pretend copy once
+ * "Get started" made one. The practice account has no real copy on GitHub,
+ * so the brief names none.
+ */
+export function localTaskDetail(task: TaskFixture, practice?: PracticeTask): TaskDetail {
   const { acceptanceCriteria, ...card } = task;
   return {
     task: { ...card },
     acceptanceCriteria: [...acceptanceCriteria],
     branch: branchName(task.id, task.title),
     brief: compileBrief(task, acceptanceCriteria, null),
+    ...(practice?.copySyncedAtMs === undefined
+      ? {}
+      : { copy: { fullName: PRACTICE_COPY, syncedAt: isoOf(practice.copySyncedAtMs) } }),
   };
 }
 
@@ -141,13 +166,39 @@ export function localDispatch(
   };
 }
 
-/** Which stage the practice run has reached: claimed until the hand-off, then one stage per 45 seconds. */
+/** The stage a run working in the copy stops at until it is sent for review. */
+const READY_INDEX = BRIDGE_STAGES.indexOf('ready_to_submit');
+
+/**
+ * Whether the practice run works in the pretend copy: the copy was there when
+ * the task went to an agent. Then the agent pushes to it and waits for "Send
+ * for review"; otherwise it opens its pull request itself, as before.
+ */
+function worksInCopy(practice: PracticeTask): boolean {
+  return (
+    practice.copiedAtMs !== undefined &&
+    practice.handedOffAtMs !== undefined &&
+    practice.copiedAtMs <= practice.handedOffAtMs
+  );
+}
+
+/**
+ * Which stage the practice run has reached: claimed until the hand-off, then
+ * one stage per 45 seconds. A run in the copy holds at "ready to submit"
+ * until it is sent for review, and moves on one stage per 45 seconds from then.
+ */
 export function stageFor(practice: PracticeTask | undefined, nowMs = Date.now()): BridgeStage {
   if (practice?.handedOffAtMs === undefined) {
     return 'claimed';
   }
   const elapsed = Math.max(0, nowMs - practice.handedOffAtMs) / 1000;
-  const index = 1 + Math.floor(elapsed / SECONDS_PER_STAGE);
+  let index = 1 + Math.floor(elapsed / SECONDS_PER_STAGE);
+  if (worksInCopy(practice)) {
+    index =
+      practice.reviewedAtMs === undefined
+        ? Math.min(index, READY_INDEX)
+        : READY_INDEX + 1 + Math.floor(Math.max(0, nowMs - practice.reviewedAtMs) / 1000 / SECONDS_PER_STAGE);
+  }
   return BRIDGE_STAGES[Math.min(index, BRIDGE_STAGES.length - 1)] ?? 'agent_working';
 }
 
@@ -174,7 +225,9 @@ function agentEvents(practice: PracticeTask, nowMs: number): BridgeEvent[] {
     return [];
   }
   const reached = BRIDGE_STAGES.indexOf(stageFor(practice, nowMs));
-  return AGENT_LINES.filter((line) => BRIDGE_STAGES.indexOf(line.stage) <= reached).map((line) => ({
+  // In the copy, the person sends the work for review: the agent opens no pull request itself.
+  const lines = worksInCopy(practice) ? AGENT_LINES.filter((line) => line.progress !== 'pr_opened') : AGENT_LINES;
+  return lines.filter((line) => BRIDGE_STAGES.indexOf(line.stage) <= reached).map((line) => ({
     at: isoOf((practice.handedOffAtMs ?? nowMs) + (BRIDGE_STAGES.indexOf(line.stage) - 1) * SECONDS_PER_STAGE * 1000),
     kind: 'progress',
     source: 'agent',
@@ -273,6 +326,62 @@ export function localFeedback(
     practice: {
       ...practice,
       events: [...practice.events, forgeEvent(nowMs, 'relayed', `Practice: the notes would go to ${label}. Nothing was sent.`, rail)],
+    },
+  };
+}
+
+/**
+ * POST /api/bridge/copy, practised: "Get started" makes the pretend copy and
+ * the task's branch in it, and "Refresh your copy" brings it up to date.
+ * Nothing is sent anywhere.
+ */
+export function localCopy(
+  task: TaskFixture,
+  practice: PracticeTask,
+  nowMs = Date.now(),
+): { result: CopyResult; practice: PracticeTask } {
+  const branch = branchName(task.id, task.title);
+  const first = practice.copiedAtMs === undefined;
+  const message = first
+    ? `Practice: FORGE would set up your copy, ${PRACTICE_COPY}, and the branch ${branch}. Nothing was sent.`
+    : `Practice: FORGE would bring your copy, ${PRACTICE_COPY}, up to date. Nothing was sent.`;
+  return {
+    result: { fullName: PRACTICE_COPY, branch, synced: true, branchCreated: first, branchFromLatest: true },
+    practice: {
+      ...practice,
+      copiedAtMs: practice.copiedAtMs ?? nowMs,
+      copySyncedAtMs: nowMs,
+      events: [...practice.events, forgeEvent(nowMs, 'copy_ready', message)],
+    },
+  };
+}
+
+/** Why a practice review can't go: no pretend copy yet, or no pretend work pushed to it. */
+export type PracticeReviewRefusal = 'no_copy' | 'no_changes';
+
+/**
+ * POST /api/bridge/review, practised: once the pretend agent has pushed, the
+ * work "goes" for review and the run moves on to its checks. Nothing is sent
+ * anywhere, and no pull request exists, so there is no link to one.
+ */
+export function localReview(
+  practice: PracticeTask,
+  nowMs = Date.now(),
+): { refused: PracticeReviewRefusal } | { practice: PracticeTask } {
+  if (practice.copiedAtMs === undefined) {
+    return { refused: 'no_copy' };
+  }
+  if (practice.reviewedAtMs === undefined && BRIDGE_STAGES.indexOf(stageFor(practice, nowMs)) < READY_INDEX) {
+    return { refused: 'no_changes' };
+  }
+  return {
+    practice: {
+      ...practice,
+      reviewedAtMs: practice.reviewedAtMs ?? nowMs,
+      events: [
+        ...practice.events,
+        forgeEvent(nowMs, 'review_sent', 'Practice: sent for review. FORGE would open the pull request now. Nothing was sent.'),
+      ],
     },
   };
 }

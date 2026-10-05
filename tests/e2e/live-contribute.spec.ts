@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import type { APIRequestContext, BrowserContext, Locator, Page, Request, Route } from '@playwright/test';
 
 import { openTransaction } from '../../packages/auth/dist/index.js';
-import { RAIL_REGISTRY } from '../../packages/shared/dist/index.js';
+import { COPY_STEP, RAIL_REGISTRY } from '../../packages/shared/dist/index.js';
 import golden from '../fixtures/brief-golden.json';
 import { SESSION_SECRET } from './helpers/env';
 import { plantPracticeSession, signInAs } from './helpers/session';
@@ -114,7 +114,7 @@ async function holdingTaskOne(
   await serve(page, '**/bff/bridge/rails', options.rails ?? rails());
   await serve(page, '**/bff/bridge/status/1', options.status ?? status());
   await page.goto(options.path ?? '/contribute/task/1');
-  await expect(page.getByRole('heading', { name: 'Get your agent on it' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Your agent', exact: true })).toBeVisible();
 }
 
 function href(page: Page, name: string): Promise<string | null> {
@@ -134,7 +134,7 @@ test.describe('claiming, on the live build', () => {
       'href',
       '/signin?next=%2Fcontribute%2Ftask%2F1',
     );
-    await expect(page.getByRole('heading', { name: 'Get your agent on it' })).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: 'Your agent', exact: true })).toHaveCount(0);
     // Nothing practice-flavoured on the build we ship.
     await expect(page.getByText(/practice/i)).toHaveCount(0);
   });
@@ -171,7 +171,7 @@ test.describe('claiming, on the live build', () => {
     await expect(page.getByRole('button', { name: 'Claim this' })).toBeEnabled();
   });
 
-  test('a claim that lands opens "Get your agent on it" and the progress view', async ({ page, context, baseURL }) => {
+  test('a claim that lands opens the three steps and the progress view', async ({ page, context, baseURL }) => {
     await signInAs(context, baseURL ?? '', IDENTITY);
     await serviceDown(page);
     await openBridge(page);
@@ -190,7 +190,7 @@ test.describe('claiming, on the live build', () => {
     // The 45-second march and its beta note are gone from the build we ship.
     await expect(page.getByText(/Beta note|simulated/)).toHaveCount(0);
     // Keyboard and screen-reader users land on what the claim opened (review-web L4).
-    await expect(page.getByRole('heading', { name: 'Get your agent on it' })).toBeFocused();
+    await expect(page.getByRole('heading', { name: 'Your copy', exact: true })).toBeFocused();
   });
 
   test('a claim FORGE’s rules turn down says which rule, in plain words', async ({ page, context, baseURL }) => {
@@ -223,7 +223,7 @@ test.describe('claiming, on the live build', () => {
     for (const [, , , sentence] of answers) {
       await page.getByRole('button', { name: 'Claim this' }).click();
       await expect(page.getByText(sentence)).toBeVisible();
-      await expect(page.getByRole('heading', { name: 'Get your agent on it' })).toHaveCount(0);
+      await expect(page.getByRole('heading', { name: 'Your agent', exact: true })).toHaveCount(0);
     }
   });
 
@@ -269,7 +269,7 @@ test.describe('"Open my agent", signed in', () => {
     await serve(page, '**/bff/bridge/rails', rails());
     await serve(page, '**/bff/bridge/status/1', status());
     await page.goto('/contribute/task/1');
-    await expect(page.getByRole('heading', { name: 'Get your agent on it' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Your agent', exact: true })).toBeVisible();
 
     expect(new URL((await href(page, 'Open Claude Code on the web')) ?? '').searchParams.get('prompt')).toBe(fromApi);
     expect(new URL((await href(page, 'Open Codex app')) ?? '').searchParams.get('prompt')).toBe(fromApi);
@@ -582,7 +582,7 @@ test.describe('"Start it for me", signed in', () => {
     await page.route('**/bff/bridge/dispatch', () => undefined);
     await page.clock.install();
     await page.goto('/contribute/task/1');
-    await expect(page.getByRole('heading', { name: 'Get your agent on it' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Your agent', exact: true })).toBeVisible();
 
     await page.getByRole('group', { name: 'Start it for me' }).getByRole('button', { name: /^Google Jules/ }).click();
     const panel = page.getByRole('region', { name: 'Start Google Jules' });
@@ -611,7 +611,7 @@ test.describe('"Start it for me", signed in', () => {
     await expect(prompt).not.toHaveAttribute('open');
     await expect(panel.getByLabel("Your routine's URL")).toHaveAttribute('type', 'password');
     await expect(panel.getByLabel("Your routine's token")).toHaveAttribute('type', 'password');
-    await expect(panel.getByRole('link', { name: /create a routine for your fork/ })).toHaveAttribute(
+    await expect(panel.getByRole('link', { name: /create a routine for your copy/ })).toHaveAttribute(
       'href',
       'https://claude.ai/code/routines',
     );
@@ -637,8 +637,8 @@ test.describe('"Start it for me", signed in', () => {
     const panel = page.getByRole('region', { name: 'Start GitHub Copilot' });
     await expect(panel.locator('input[type="password"]')).toHaveCount(0);
     // No GITHUB_APP_SLUG on this server: the install step is words, not a link to nowhere.
-    await expect(panel.getByText("Install FORGE's GitHub app on your fork.")).toBeVisible();
-    await expect(panel.getByRole('link', { name: "Install FORGE's GitHub app on your fork." })).toHaveCount(0);
+    await expect(panel.getByText("Install FORGE's GitHub app on your copy.")).toBeVisible();
+    await expect(panel.getByRole('link', { name: "Install FORGE's GitHub app on your copy." })).toHaveCount(0);
 
     await panel.getByRole('button', { name: 'Start GitHub Copilot' }).click();
     await expect(page).toHaveTitle('On the way to GitHub');
@@ -676,7 +676,7 @@ test.describe('the outcome the Copilot callback sends back', () => {
     await expect(page).toHaveURL(/\/contribute\/task\/1$/);
 
     await page.reload();
-    await expect(page.getByRole('heading', { name: 'Get your agent on it' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Your agent', exact: true })).toBeVisible();
     await expect(page.getByText('GitHub Copilot is working on it.')).toHaveCount(0);
   });
 
@@ -705,12 +705,9 @@ test.describe('the outcome the Copilot callback sends back', () => {
   }) => {
     await holdingTaskOne(page, context, baseURL, { path: '/contribute/task/1?start_error=rail_setup_needed' });
     const outcome = page.getByRole('alert').filter({ hasText: 'GitHub Copilot' });
-    await expect(outcome.getByText("GitHub Copilot isn't connected to your fork yet. Finish the setup steps below, then try again.")).toBeVisible();
-    await expect(outcome.getByRole('link', { name: 'Fork forge-app on GitHub.' })).toHaveAttribute(
-      'href',
-      'https://github.com/verastd/forge-app/fork',
-    );
-    await expect(outcome.getByText("Install FORGE's GitHub app on your fork.")).toBeVisible();
+    await expect(outcome.getByText("GitHub Copilot isn't connected to your copy yet. Finish the setup steps below, then try again.")).toBeVisible();
+    await expect(outcome.getByRole('link', { name: COPY_STEP })).toHaveAttribute('href', '#copy-title');
+    await expect(outcome.getByText("Install FORGE's GitHub app on your copy.")).toBeVisible();
   });
 
   test('?start_error= reads as a sentence, and nothing in the query string is shown as text', async ({
@@ -1020,7 +1017,7 @@ test.describe('after the hand-off', () => {
       [400, { error: 'pr_not_for_task' }, {}, "That pull request isn't for this task."],
       [400, { error: 'invalid_pr_url' }, {}, "That isn't a link to a pull request on verastd/forge-app."],
       [404, { error: 'pr_not_found', prNumber: 78 }, {}, 'GitHub has no pull request at that link.'],
-      [403, { error: 'not_your_pr', prNumber: 78 }, {}, "That pull request comes from someone else's fork."],
+      [403, { error: 'not_your_pr', prNumber: 78 }, {}, "That pull request comes from someone else's copy, not yours."],
       [429, { error: 'submit_limit' }, { 'retry-after': '30' }, "You've handed in links too often just now. Try again in about 1 minute."],
     ];
     const sent: unknown[] = [];
@@ -1084,13 +1081,13 @@ test.describe('after the hand-off', () => {
     });
     try {
       await page.goto('/contribute/task/1');
-      await expect(page.getByRole('heading', { name: 'Get your agent on it' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Your agent', exact: true })).toBeVisible();
     } finally {
       answerStatus();
     }
 
     await expect(page.getByText("This task isn't yours any more: it was released, or its time ran out.", { exact: false })).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'Get your agent on it' })).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: 'Your agent', exact: true })).toHaveCount(0);
     await expect(page.getByRole('region', { name: 'Where it is' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Claim this' })).toBeEnabled();
   });
@@ -1141,7 +1138,7 @@ test.describe('no answer to a claim, a release or a pull request handed in', () 
     await page.getByRole('button', { name: 'Claim this' }).click();
 
     await expect(page.getByText(MAY_HAVE)).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'Get your agent on it' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Your agent', exact: true })).toBeVisible();
     await expect(page.getByText(/yours for \d+h/)).toBeVisible();
   });
 
@@ -1166,7 +1163,7 @@ test.describe('no answer to a claim, a release or a pull request handed in', () 
     await page.getByRole('button', { name: 'Claim this' }).click();
 
     await expect(page.getByText(MAY_HAVE)).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'Get your agent on it' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Your agent', exact: true })).toBeVisible();
     await expect(page.getByText(/nothing (was )?changed/)).toHaveCount(0);
   });
 
@@ -1297,7 +1294,7 @@ test.describe('no answer to a claim, a release or a pull request handed in', () 
     await page.route('**/bff/bridge/submit/1', () => undefined);
     await page.clock.install();
     await page.goto('/contribute/task/1');
-    await expect(page.getByRole('heading', { name: 'Get your agent on it' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Your agent', exact: true })).toBeVisible();
 
     await page.getByRole('button', { name: 'Release this task' }).click();
     await page.getByRole('button', { name: 'Yes, release it' }).click();
@@ -1326,7 +1323,7 @@ async function holdingTaskOneAfterSetup(page: Page, statusBody: unknown): Promis
   await serve(page, '**/bff/bridge/rails', rails());
   await serve(page, '**/bff/bridge/status/1', statusBody);
   await page.goto('/contribute/task/1');
-  await expect(page.getByRole('heading', { name: 'Get your agent on it' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Your agent', exact: true })).toBeVisible();
 }
 
 test.describe('/me: your agent keys and connected agents', () => {

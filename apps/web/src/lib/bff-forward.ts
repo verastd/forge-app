@@ -3,7 +3,9 @@
  * Bridge BFF (`/bff/bridge/*`), the connected-agents BFF
  * (`/bff/oauth/grants*`), the Proposals and notifications BFFs
  * (`/bff/proposals*`, `/bff/notifications*`), the Copilot callback's one
- * server-side start and the sign-in callback's members hello.
+ * server-side start, the repo callback's one copy or review ("your copy",
+ * "Send for review": `/api/bridge/copy` and `/review` are never reachable
+ * from the browser, only from here) and the sign-in callback's members hello.
  *
  * Same model as the Upland BFF (`app/bff/upland/[...path]/route.ts`), which
  * keeps its own copy so its behaviour stays exactly as it is:
@@ -172,23 +174,29 @@ export async function forward(request: NextRequest, spec: ForwardSpec): Promise<
 /** What the API said to a server-side call: success, or its error code (and `status`, for `rail_failed`). */
 export type ApiOutcome = { ok: true } | { ok: false; code: string; status?: number };
 
+/** A refusal, worded as {@link ApiOutcome} words it. */
+export type ApiRefusal = Extract<ApiOutcome, { ok: false }>;
+
 /**
- * POST `payload` as JSON to the API path `path`, speaking for `session`, from
- * this server (no browser request behind it). The payload may hold a
- * credential: it goes to the API and nowhere else, and is never logged.
+ * What the API said to a server-side call, keeping a success's JSON body
+ * (null when it isn't JSON). A refusal that lists `paths` (the files a review
+ * was refused for) comes back with how many, as `files`, and never the paths;
+ * one that names a pull request (`prNumber`: `head_taken`), with its number as `pr`.
  */
-export async function postAsUser(
+export type ApiResult = { ok: true; body: unknown } | (ApiRefusal & { files?: number; pr?: number });
+
+/** The one server-side POST behind {@link postAsUser} and {@link postAsUserForResult}, or why it got no answer. */
+async function sendAsUser(
   path: string,
   session: Pick<SessionClaims, 'sub' | 'login'>,
   payload: unknown,
-  timeoutMs = START_TIMEOUT_MS,
-): Promise<ApiOutcome> {
+  timeoutMs: number,
+): Promise<Response | ApiRefusal> {
   const authorization = await assertionFor(session);
   const base = apiUrl();
   if (authorization === null || base === null) return { ok: false, code: 'not_configured' };
-  let response: Response;
   try {
-    response = await fetch(`${base}${path}`, {
+    return await fetch(`${base}${path}`, {
       method: 'POST',
       headers: { accept: 'application/json', 'content-type': 'application/json', authorization },
       body: JSON.stringify(payload),
@@ -201,19 +209,77 @@ export async function postAsUser(
     const timedOut = error instanceof Error && error.name === 'TimeoutError';
     return { ok: false, code: timedOut ? 'upstream_timeout' : 'service_unreachable' };
   }
+}
+
+/** A refusal body's fields, or none. */
+function refusalFields(body: unknown): Record<string, unknown> {
+  return typeof body === 'object' && body !== null ? (body as Record<string, unknown>) : {};
+}
+
+/**
+ * The API's refusal in `body` (from `response`): its own error code, or
+ * `fallback` when the body names none, with the `status` it carries
+ * (GitHub's or a vendor's), or the response's own status for the fallback.
+ */
+function refusalOf(response: Response, body: unknown, fallback: string): ApiRefusal {
+  const fields = refusalFields(body);
+  const code = typeof fields.error === 'string' && /^[a-z][a-z_-]{0,39}$/.test(fields.error) ? fields.error : fallback;
+  const status =
+    typeof fields.status === 'number' && Number.isInteger(fields.status) && fields.status >= 100 && fields.status <= 599
+      ? fields.status
+      : code === fallback
+        ? response.status
+        : undefined;
+  return { ok: false, code, ...(status === undefined ? {} : { status }) };
+}
+
+/**
+ * POST `payload` as JSON to the API path `path`, speaking for `session`, from
+ * this server (no browser request behind it). The payload may hold a
+ * credential: it goes to the API and nowhere else, and is never logged.
+ */
+export async function postAsUser(
+  path: string,
+  session: Pick<SessionClaims, 'sub' | 'login'>,
+  payload: unknown,
+  timeoutMs = START_TIMEOUT_MS,
+): Promise<ApiOutcome> {
+  const response = await sendAsUser(path, session, payload, timeoutMs);
+  if (!(response instanceof Response)) return response;
   if (response.ok) {
     // The body is the DispatchResult; nothing here needs it, so it is not read.
     await response.body?.cancel().catch(() => undefined);
     return { ok: true };
   }
+  return refusalOf(response, await response.json().catch(() => null), 'rail_failed');
+}
+
+/**
+ * {@link postAsUser}, keeping the answer: a success comes back with its JSON
+ * body, for the caller to check against the contract ("Send for review" needs
+ * the pull request's number). A refusal that names no code is `api_failed`,
+ * with the API's status, one that lists `paths` says only how many
+ * (`files`), and one that names a pull request gives its number (`pr`). Same
+ * rules otherwise: the payload (here, GitHub's one-time token) goes to the
+ * API and nowhere else, and is never logged.
+ */
+export async function postAsUserForResult(
+  path: string,
+  session: Pick<SessionClaims, 'sub' | 'login'>,
+  payload: unknown,
+  timeoutMs = START_TIMEOUT_MS,
+): Promise<ApiResult> {
+  const response = await sendAsUser(path, session, payload, timeoutMs);
+  if (!(response instanceof Response)) return response;
+  if (response.ok) return { ok: true, body: await response.json().catch(() => null) };
   const body: unknown = await response.json().catch(() => null);
-  const fields = typeof body === 'object' && body !== null ? (body as Record<string, unknown>) : {};
-  const code = typeof fields.error === 'string' && /^[a-z][a-z_-]{0,39}$/.test(fields.error) ? fields.error : 'rail_failed';
-  const status =
-    typeof fields.status === 'number' && Number.isInteger(fields.status) && fields.status >= 100 && fields.status <= 599
-      ? fields.status
-      : code === 'rail_failed'
-        ? response.status
-        : undefined;
-  return { ok: false, code, ...(status === undefined ? {} : { status }) };
+  const refusal = refusalOf(response, body, 'api_failed');
+  const { paths, prNumber } = refusalFields(body);
+  return {
+    ...refusal,
+    ...(Array.isArray(paths) && paths.length > 0 ? { files: Math.min(paths.length, 999) } : {}),
+    ...(typeof prNumber === 'number' && Number.isSafeInteger(prNumber) && prNumber > 0 && prNumber <= 999_999_999
+      ? { pr: prNumber }
+      : {}),
+  };
 }

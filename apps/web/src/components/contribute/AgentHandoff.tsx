@@ -1,12 +1,14 @@
 'use client';
 
 /**
- * "Get your agent on it": the two ways in, once you hold the claim.
+ * Step 2, "Your agent": the two ways in, once you hold the claim.
  *
  * 1. Start it for me — shown only while the `agent_start` flag is on and the
  *    API lists at least one start rail it will start.
  * 2. Open my agent — always: a link per agent that opens it with the task
- *    already typed in.
+ *    already typed in, in the contributor's copy once FORGE has set it up
+ *    (step 1). Before that both stay usable, with a line saying the agent
+ *    needs the copy first.
  *
  * Copy and paste survives only as the closed "Using another agent?" fallback
  * at the bottom (Phase 4: no copy/paste in the flow).
@@ -17,9 +19,11 @@ import { railMeta } from '@forge/shared';
 
 import { CopyBox } from '../CopyBox';
 import { OpenRails } from './OpenRails';
+import { StepTitle } from './RepoSteps';
 import { SetupSteps, StartRails } from './StartRails';
 import { describeStartError, startedSentence } from '../../lib/handoff';
 import type { StartOutcome } from '../../lib/handoff';
+import type { CopyStep } from '../../lib/launch';
 import styles from './contribute.module.css';
 
 /**
@@ -50,6 +54,8 @@ export function AgentHandoff({
   taskId,
   brief,
   login,
+  copy,
+  copyStep,
   appSlug,
   practice,
   agentStart,
@@ -67,6 +73,10 @@ export function AgentHandoff({
   /** The text every rail hands over: the API's `TaskDetail.brief`. */
   brief: string;
   login: string | null;
+  /** The copy's full name for the links (`TaskDetail.copy.fullName`), or null for none or a pretend one. */
+  copy: string | null;
+  /** What step 1 offers: before the copy ("Get started") the agent needs it first, and the steps that bring a copy up to date point there. */
+  copyStep: CopyStep;
   appSlug: string | null;
   practice: boolean;
   /** The `agent_start` flag. */
@@ -87,10 +97,10 @@ export function AgentHandoff({
 
   return (
     <section className="card stack" aria-labelledby="handoff-title">
-      {/* Focusable, so a claim can take keyboard and screen-reader users straight here. */}
-      <h2 id="handoff-title" tabIndex={-1}>
-        Get your agent on it
-      </h2>
+      <StepTitle id="handoff-title" number={2} done={false}>
+        Your agent
+      </StepTitle>
+      {copyStep === 'get-started' && <p className="muted">Your agent needs your copy first: press Get started above.</p>}
       {practice && (
         <p className="faint">
           Practice account: a start here is pretend and sends nothing anywhere. The &ldquo;Open my
@@ -104,7 +114,7 @@ export function AgentHandoff({
           <div className={styles.partHead}>
             <h3 id="start-title">Start it for me</h3>
             <p className="muted">
-              FORGE starts your agent for you. It works in your fork and opens a pull request.
+              FORGE starts your agent for you. It works in your copy and opens a pull request.
             </p>
           </div>
           <StartRails
@@ -133,6 +143,8 @@ export function AgentHandoff({
           taskId={taskId}
           brief={brief}
           login={login}
+          copy={copy}
+          copyStep={copyStep}
           appSlug={appSlug}
           connector={connector}
           onOpened={onOpened}

@@ -71,9 +71,9 @@ def test_start_rails_say_which_credential_and_where_the_key_comes_from() -> None
     assert all(url.startswith("https://") for url in key_urls.values())
 
 
-def test_every_rail_has_a_blurb_a_plan_and_one_time_steps_starting_with_the_fork() -> None:
+def test_every_rail_has_a_blurb_a_plan_and_one_time_steps_starting_with_the_copy() -> None:
     for meta in rails.RAIL_REGISTRY:
-        assert meta.setup[0] == "Fork forge-app on GitHub.", meta.id
+        assert meta.setup[0] == rails.COPY_STEP, meta.id
         assert all(step.endswith(".") and step == step.strip() for step in meta.setup), meta.id
         assert meta.blurb.endswith(".") and ". " not in meta.blurb, meta.id  # one sentence
         assert meta.plan, meta.id
@@ -117,10 +117,10 @@ def test_a_rail_info_is_the_registry_entry_plus_enabled() -> None:
     assert list(RailInfo.model_fields)[: len(RailMeta.model_fields)] == list(RailMeta.model_fields)
 
 
-def test_the_routine_prompt_opts_in_only_to_a_forge_brief_in_the_fork() -> None:
+def test_the_routine_prompt_opts_in_only_to_a_forge_brief_in_the_copy() -> None:
     prompt = rails.ROUTINE_PROMPT
     assert "routine-fire-payload" in prompt  # what opts the routine in to the fired text
     assert 'starts with "FORGE task #"' in prompt
-    assert "only in my fork" in prompt and "the branch the brief names" in prompt
+    assert "only in my copy" in prompt and "the branch the brief names" in prompt
     for refused in ("secrets", "another repository", "settings", ".github/"):
         assert refused in prompt

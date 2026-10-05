@@ -7,6 +7,7 @@ import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
@@ -51,6 +52,9 @@ BRIDGE_ENV = (
 #: GitHub user ids of the test accounts (a pull request is matched to its holder by id).
 GITHUB_IDS = {"octo-contributor": 1001, "octo-operator": 1002, "other-dev": 1003}
 
+#: The repository's own protocol rules: the stand-in serves them as upstream main's.
+PROTOCOL_FILE = Path(__file__).resolve().parents[3] / ".github" / "forge-protocol.json"
+
 
 def github_time(moment: datetime) -> str:
     """A time as GitHub writes it: whole seconds, Z."""
@@ -84,6 +88,15 @@ class FakeGitHub:
     now: Callable[[], datetime] | None = None
     #: GitHub user ids by login; unknown logins get a fresh one.
     ids: dict[str, int] = field(default_factory=lambda: dict(GITHUB_IDS))
+    #: Phase 7: how far `<owner>:<branch>` is ahead of upstream main (GitHub's compare), by
+    #: lowercased owner and branch; a head that isn't here answers 404.
+    aheads: dict[str, int] = field(default_factory=dict)
+    #: Phase 7: repositories by GitHub id (`GET /repositories/{id}`): the contributors'
+    #: copies, as GitHub names them now. An id that isn't here answers 404.
+    repositories: dict[int, dict[str, Any]] = field(default_factory=dict)
+    #: Phase 7: upstream main's .github/forge-protocol.json (None: 404), served as the
+    #: Contents API does, base64 in JSON.
+    protocol: bytes | None = field(default_factory=PROTOCOL_FILE.read_bytes)
 
     def user_id(self, login: str) -> int:
         return self.ids.setdefault(login.lower(), 5000 + len(self.ids))
@@ -184,6 +197,22 @@ class FakeGitHub:
             return json_response(200, {"total_count": len(runs), "check_runs": runs})
         if path == "/search/issues":
             return json_response(200, self.search(query.get("q", [""])[0]))
+        if path.startswith("/repositories/"):
+            repository = self.repositories.get(int(path.rsplit("/", 1)[1]))
+            if repository is None:
+                return json_response(404, {"message": "Not Found"})
+            return json_response(200, repository)
+        if path == "/repos/verastd/forge-app/contents/.github/forge-protocol.json":
+            if self.protocol is None or query.get("ref") != ["main"]:
+                return json_response(404, {"message": "Not Found"})
+            encoded = base64.b64encode(self.protocol).decode()
+            return json_response(200, {"type": "file", "encoding": "base64", "content": encoded})
+        if path.startswith("/repos/verastd/forge-app/compare/main..."):
+            owner, _, branch = path.split("...", 1)[1].partition(":")
+            ahead = self.aheads.get(f"{owner.lower()}:{branch}")
+            if ahead is None:
+                return json_response(404, {"message": "Not Found"})
+            return json_response(200, {"status": "ahead", "ahead_by": ahead, "behind_by": 0})
         if path.startswith("/repos/"):
             repo = self.repos.get(path.removeprefix("/repos/").lower())
             return (

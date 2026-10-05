@@ -5,6 +5,11 @@
  *
  * Plain-language task cards rendered from the same tasks the GitHub-native
  * client sees. The Bridge is a client, never a bypass (PRD §4.9 invariant 1).
+ *
+ * The repo callback lands here, with `?repo_error=expired`, when GitHub sent
+ * someone back with no attempt FORGE could go by (it took too long, or the
+ * attempt was another's): there is no task to go back to, so the board says
+ * so, once.
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -15,6 +20,7 @@ import { FilterChip } from '../../components/Chip';
 import { TaskCard } from '../../components/TaskCard';
 import { fetchTasks } from '../../lib/api';
 import { SIZE_FILTER_LABEL } from '../../lib/format';
+import { describeRepoError } from '../../lib/handoff';
 
 type Filter = 'all' | Size | 'reward';
 
@@ -30,6 +36,19 @@ export default function ContributePage() {
   const [failed, setFailed] = useState(false);
   const [filter, setFilter] = useState<Filter>('all');
   const [attempt, setAttempt] = useState(0);
+  const [expired, setExpired] = useState(false);
+
+  // `?repo_error=expired`, said once: read from the address bar (no Suspense
+  // boundary needed for that), then dropped from it so a reload doesn't repeat it.
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (url.searchParams.get('repo_error') !== 'expired') {
+      return;
+    }
+    setExpired(true);
+    url.searchParams.delete('repo_error');
+    window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -81,6 +100,12 @@ export default function ContributePage() {
           app.
         </p>
       </div>
+
+      {expired && (
+        <div className="card" role="alert">
+          <p className="muted">{describeRepoError('expired')}</p>
+        </div>
+      )}
 
       <div className="row" role="group" aria-label="Filter tasks">
         {FILTERS.map((option) => (

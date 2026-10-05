@@ -132,7 +132,7 @@ test.describe('the live app, with nothing behind it', () => {
     // No lease, no countdown, no next step — and the button is still there to
     // try again, because trying again is the only thing that can help.
     await expect(page.getByText(/yours for \d+h/)).toHaveCount(0);
-    await expect(page.getByRole('heading', { name: 'Get your agent on it' })).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: 'Your agent', exact: true })).toHaveCount(0);
     await expect(page.getByText('Your agent is working')).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Claim this' })).toBeEnabled();
   });
@@ -152,7 +152,7 @@ test.describe('the live app, with nothing behind it', () => {
 
     await page.goto('/contribute/task/1');
     await page.getByRole('button', { name: 'Claim this' }).click();
-    await expect(page.getByRole('heading', { name: 'Get your agent on it' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Your agent', exact: true })).toBeVisible();
 
     await page.getByRole('button', { name: /^Google Jules/ }).click();
     const panel = page.getByRole('region', { name: 'Start Google Jules' });

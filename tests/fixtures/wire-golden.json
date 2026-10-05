@@ -260,6 +260,15 @@
       },
       "brief": {
         "type": "string"
+      },
+      "copy": {
+        "type": "object",
+        "ref": "RepoCopy",
+        "optional": true
+      },
+      "canSendForReview": {
+        "type": "boolean",
+        "optional": true
       }
     },
     "ForkStatus": {
@@ -376,7 +385,9 @@
           "progress",
           "submitted",
           "released",
-          "relayed"
+          "relayed",
+          "copy_ready",
+          "review_sent"
         ]
       },
       "source": {
@@ -1297,6 +1308,58 @@
       "appliedToDraft": {
         "type": "boolean",
         "optional": true
+      }
+    },
+    "RepoCopy": {
+      "fullName": {
+        "type": "string"
+      },
+      "syncedAt": {
+        "type": "string"
+      }
+    },
+    "RepoActionRequest": {
+      "taskId": {
+        "type": "integer"
+      },
+      "token": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 4096
+      }
+    },
+    "CopyResult": {
+      "fullName": {
+        "type": "string"
+      },
+      "branch": {
+        "type": "string"
+      },
+      "synced": {
+        "type": "boolean"
+      },
+      "branchCreated": {
+        "type": "boolean"
+      },
+      "branchFromLatest": {
+        "type": "boolean"
+      }
+    },
+    "PullRequestRef": {
+      "number": {
+        "type": "integer"
+      },
+      "url": {
+        "type": "string"
+      }
+    },
+    "ReviewResult": {
+      "pullRequest": {
+        "type": "object",
+        "ref": "PullRequestRef"
+      },
+      "created": {
+        "type": "boolean"
       }
     }
   }

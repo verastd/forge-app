@@ -192,13 +192,35 @@ export const RailListSchema = z.object({
 });
 export type RailList = z.infer<typeof RailListSchema>;
 
+/**
+ * The contributor's copy of verastd/forge-app: the GitHub fork FORGE set up (or
+ * found) for them on "Get started" (Phase 7 contract §3). The page never calls
+ * it a fork.
+ */
+export const RepoCopySchema = z.object({
+  /** `owner/name` on GitHub: maya/forge-app, or another name such as maya/forge-app-1. */
+  fullName: z.string(),
+  /** When FORGE last brought it up to date (ISO 8601, Z). */
+  syncedAt: z.string(),
+});
+export type RepoCopy = z.infer<typeof RepoCopySchema>;
+
 /** GET /api/bridge/tasks/{id}: the card plus what an agent needs; `brief` is
- * personalized with the caller's login. */
+ * personalized with the caller's login, and with their copy once FORGE knows it. */
 export const TaskDetailSchema = z.object({
   task: TaskCardSchema,
   acceptanceCriteria: z.array(z.string()),
   branch: z.string(),
   brief: z.string(),
+  /** Holder only: their copy, once FORGE has set it up. Absent for everyone else. */
+  copy: RepoCopySchema.optional(),
+  /**
+   * Holder only: true when the task's branch in their copy is ahead of
+   * verastd/forge-app main and no open (or merged) pull request is known for
+   * the claim, so "Send for review" has something to send. Absent when FORGE
+   * can't tell (no copy yet, GitHub unreachable) and for everyone else.
+   */
+  canSendForReview: z.boolean().optional(),
 });
 export type TaskDetail = z.infer<typeof TaskDetailSchema>;
 
@@ -208,6 +230,85 @@ export const ForkStatusSchema = z.object({
   url: z.string().optional(),
 });
 export type ForkStatus = z.infer<typeof ForkStatusSchema>;
+
+// ---------------------------------------------------------------------------
+// "Your copy" and "Send for review" (Phase 7 contract §3): POST
+// /api/bridge/copy and /api/bridge/review, called by the web server only, with
+// GitHub's one-time token for that one action. The token is never logged,
+// stored or echoed; the web revokes it right after.
+// ---------------------------------------------------------------------------
+
+/** POST /api/bridge/copy and POST /api/bridge/review. */
+export const RepoActionRequestSchema = z.object({
+  taskId: z.number().int(),
+  /** The one-time GitHub token (OAuth App, scope public_repo). Never logged, never echoed. */
+  token: characters(1, 4096),
+});
+export type RepoActionRequest = z.infer<typeof RepoActionRequestSchema>;
+
+/** 200 from POST /api/bridge/copy. */
+export const CopyResultSchema = z.object({
+  /** The copy's `owner/name`. */
+  fullName: z.string(),
+  /** The task's branch in the copy. */
+  branch: z.string(),
+  /** False: the copy has changes of its own, so FORGE couldn't bring its main up to date. */
+  synced: z.boolean(),
+  /** True: FORGE made the branch now. False: it was already there and was left alone. */
+  branchCreated: z.boolean(),
+  /**
+   * False only when FORGE made the branch from the copy's own main because
+   * GitHub refused verastd/forge-app's latest main; true otherwise (including
+   * when the branch was already there).
+   */
+  branchFromLatest: z.boolean(),
+});
+export type CopyResult = z.infer<typeof CopyResultSchema>;
+
+/** An upstream pull request, by number and link. */
+export const PullRequestRefSchema = z.object({
+  number: z.number().int(),
+  /** https://github.com/verastd/forge-app/pull/<number> */
+  url: z.string(),
+});
+export type PullRequestRef = z.infer<typeof PullRequestRefSchema>;
+
+/** 201 (created: true) or 200 (created: false, one was already open) from POST /api/bridge/review. */
+export const ReviewResultSchema = z.object({
+  pullRequest: PullRequestRefSchema,
+  created: z.boolean(),
+});
+export type ReviewResult = z.infer<typeof ReviewResultSchema>;
+
+/**
+ * Every `error` code POST /api/bridge/copy and /review answer with, besides
+ * the Bridge's usual `bridge-disabled`, `unauthenticated`, `invalid_request`,
+ * `task_not_found`, `not_claimed` and `body_too_large`. `github_failed` carries
+ * `status`, GitHub's HTTP status; `rate_limited` carries `Retry-After`;
+ * `tests_modified` and `protected_paths` carry `paths` (at most 10 repository
+ * paths, plain text); `head_taken` carries `prNumber`, an open pull request
+ * another account opened from the holder's branch. Review checks the diff
+ * before it opens anything: `too_large` (409), `tests_modified` (409),
+ * `protected_paths` (409), `checks_unavailable` (503), `head_taken` (409).
+ */
+export const REPO_ACTION_ERRORS = [
+  'not_holder',
+  'already_shipped',
+  'rate_limited',
+  'wrong_account',
+  'copy_not_ready',
+  'copy_mismatch',
+  'no_copy',
+  'branch_missing',
+  'no_changes',
+  'too_large',
+  'tests_modified',
+  'protected_paths',
+  'checks_unavailable',
+  'head_taken',
+  'github_failed',
+] as const;
+export type RepoActionError = (typeof REPO_ACTION_ERRORS)[number];
 
 // ---------------------------------------------------------------------------
 // Dispatch (POST /api/bridge/dispatch)
@@ -288,6 +389,10 @@ export const BRIDGE_EVENT_KINDS = [
   'submitted',
   'released',
   'relayed',
+  // Phase 7: FORGE set up the holder's copy and the task's branch in it, and
+  // FORGE opened the pull request as them ("Send for review"). Both FORGE's own.
+  'copy_ready',
+  'review_sent',
 ] as const;
 export const BridgeEventKindSchema = z.enum(BRIDGE_EVENT_KINDS);
 export type BridgeEventKind = z.infer<typeof BridgeEventKindSchema>;

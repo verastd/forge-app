@@ -57,6 +57,35 @@ export function formatUpx(amount: number): string {
   return `${UPX_FORMAT.format(amount)} UPX`;
 }
 
+/**
+ * How long ago `iso` was, in words: "just now" (under a minute, or a clock a
+ * little ahead), "5 minutes ago", "3 hours ago", "yesterday", "4 days ago",
+ * then the date itself past a fortnight. Something that isn't a time reads
+ * as "at some point", never as the raw text.
+ */
+export function timeAgo(iso: string, nowMs = Date.now()): string {
+  const then = Date.parse(iso);
+  if (Number.isNaN(then)) {
+    return 'at some point';
+  }
+  const minutes = Math.floor((nowMs - then) / 60_000);
+  if (minutes < 1) {
+    return 'just now';
+  }
+  if (minutes < 60) {
+    return minutes === 1 ? '1 minute ago' : `${minutes} minutes ago`;
+  }
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) {
+    return hours === 1 ? '1 hour ago' : `${hours} hours ago`;
+  }
+  const days = Math.floor(hours / 24);
+  if (days === 1) {
+    return 'yesterday';
+  }
+  return days < 14 ? `${days} days ago` : `on ${formatDate(iso)}`;
+}
+
 /** Days left, rounded up so a part-day still reads as a day. Never negative. */
 export function daysUntil(iso: string, nowMs = Date.now()): number {
   const target = Date.parse(iso);

@@ -1,15 +1,20 @@
 'use client';
 
 /**
- * One task, end to end (PRD I.2, Phase 4): read it, claim it, get your agent
- * on it, watch it, iterate, release.
+ * One task, end to end (PRD I.2, Phase 4; Phase 7's three steps): read it,
+ * claim it, get your copy, get your agent on it, send it for review, watch
+ * it, iterate, release.
  *
  * This is Maya's screen, and Maya may never have used git. She signs in,
- * taps Claim, then either lets FORGE start her agent ("Start it for me") or
- * taps her agent and it opens with the task typed in ("Open my agent"). There
- * is nothing to copy: the brief only appears in a closed "Using another
- * agent?" fallback. Afterwards the same screen shows where it is, from the
- * API's status, polled every 15 seconds while the tab is visible.
+ * taps Claim, then three plain steps: 1. "Your copy" (Get started: FORGE
+ * makes her own copy of FORGE's code on GitHub, with her one-time approval),
+ * 2. "Your agent" (FORGE starts her agent, "Start it for me", or her agent
+ * opens with the task typed in, "Open my agent"), 3. "Send for review"
+ * (once the agent has pushed its work, FORGE opens the pull request in her
+ * name). She never needs to know what a fork is. There is nothing to copy:
+ * the brief only appears in a closed "Using another agent?" fallback.
+ * Afterwards the same screen shows where it is, from the API's status,
+ * polled every 15 seconds while the tab is visible.
  *
  * The links and the fallback carry the API's own brief (`TaskDetail.brief`,
  * personalized for the signed-in contributor), so every rail hands over the
@@ -22,7 +27,7 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { BridgeStage, BridgeStatus, CheckResults, RailList, TaskDetail } from '@forge/shared';
+import type { BridgeStage, BridgeStatus, CheckResults, RailList, RepoCopy, TaskDetail } from '@forge/shared';
 
 import { Chip } from '../Chip';
 import { LeaseCountdown } from '../LeaseCountdown';
@@ -31,6 +36,7 @@ import { useSession } from '../SessionProvider';
 import { useToast } from '../Toast';
 import { AgentHandoff, CallbackOutcome } from './AgentHandoff';
 import { useContributeFlags } from './ContributeFlags';
+import { CopyStep, RepoOutcomeNote, ReviewStep } from './RepoSteps';
 import { TaskProgress } from './TaskProgress';
 import {
   ConflictError,
@@ -46,8 +52,15 @@ import {
 } from '../../lib/api';
 import { DEMO_IDENTITY, LEASE_HOURS_BY_SIZE } from '../../lib/fixtures';
 import { rewardLabel, tierFloorLabel } from '../../lib/format';
-import { describeClaimError, describeTaskError, startedSince } from '../../lib/handoff';
-import type { StartOutcome } from '../../lib/handoff';
+import {
+  describeClaimError,
+  describeTaskError,
+  reviewSentBy,
+  reviewState,
+  startedSince,
+  upstreamPullRequest,
+} from '../../lib/handoff';
+import type { RepoOutcome, StartOutcome } from '../../lib/handoff';
 import { isDemoMode } from '../../lib/mode';
 
 /** How often the status is read while the tab is visible. */
@@ -61,6 +74,14 @@ const AFTER_OPEN_MS = 1500;
  * status shows FORGE started Copilot on this task this recently.
  */
 const STARTED_WINDOW_MS = 10 * 60_000;
+/**
+ * Coming back to the tab reads the task again (its copy, and whether the agent
+ * has pushed anything to send for review) at most this often: the API caches
+ * that answer for a minute anyway.
+ */
+const DETAIL_RECHECK_MS = 60_000;
+/** The query parameters the repo callback sends back (`/auth/github/repo/callback`). */
+const REPO_OUTCOME_PARAMS = ['copy', 'synced', 'latest', 'review', 'pr', 'repo_error', 'status', 'files'] as const;
 /** Claim refusals that are FORGE's rules working, not something going wrong. */
 const RULES: ReadonlySet<string> = new Set(['tier_too_low', 'claim_rate_limit']);
 
@@ -78,6 +99,8 @@ export function TaskView({
   taskId,
   appSlug,
   outcome,
+  repoSetup,
+  repoOutcome,
 }: {
   /** NaN when the URL's id is not a task number. */
   taskId: number;
@@ -85,6 +108,10 @@ export function TaskView({
   appSlug: string | null;
   /** What the Copilot callback sent back in the query string, once. */
   outcome: StartOutcome | null;
+  /** FORGE's OAuth App is set up here, so "Get started" and "Send for review" can work (`repoApp()`). */
+  repoSetup: boolean;
+  /** What the repo callback sent back in the query string, once. */
+  repoOutcome: RepoOutcome | null;
 }) {
   const { session } = useSession();
   const flags = useContributeFlags();
@@ -113,8 +140,13 @@ export function TaskView({
   const [refresh, setRefresh] = useState(0);
   /** The status said the task isn't yours any more (released elsewhere, or its time ran out). */
   const [lost, setLost] = useState(false);
-  /** A claim just landed: keyboard focus goes to the hand-off it opened. */
+  /** A claim just landed: keyboard focus goes to the steps it opened. */
   const focusHandoff = useRef(false);
+  /** Bumped to read the task again quietly, without the loading screen (`detailCheck` below). */
+  const [detailCheck, setDetailCheck] = useState(0);
+  const [checking, setChecking] = useState(false);
+  /** The last stage the status reported: a new one is worth reading the task again for. */
+  const lastStage = useRef<BridgeStage | null>(null);
 
   const holding = lease !== null;
 
@@ -135,6 +167,18 @@ export function TaskView({
     }
     window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
   }, [outcome]);
+
+  // So is the repo callback's ("Get started", "Refresh your copy", "Send for review").
+  useEffect(() => {
+    if (repoOutcome === null) {
+      return;
+    }
+    const url = new URL(window.location.href);
+    for (const key of REPO_OUTCOME_PARAMS) {
+      url.searchParams.delete(key);
+    }
+    window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
+  }, [repoOutcome]);
 
   // The task, its criteria, and who holds it.
   useEffect(() => {
@@ -184,6 +228,51 @@ export function TaskView({
       cancelled = true;
     };
   }, [taskId, validTask, identified, isMine, attempt]);
+
+  // The task read again quietly, keeping the page as it is: the copy, and
+  // whether there is anything to send for review yet.
+  useEffect(() => {
+    if (detailCheck === 0 || !validTask) {
+      return;
+    }
+    let cancelled = false;
+    setChecking(true);
+    void fetchTaskDetail(taskId, identified)
+      .then((result) => {
+        if (!cancelled) {
+          setDetail(result.data);
+        }
+      })
+      .catch(() => {
+        // The last answer stays on screen; the next check may do better.
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setChecking(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [detailCheck, taskId, identified, validTask]);
+
+  // Back on the tab after a while: the agent may have pushed in the meantime.
+  useEffect(() => {
+    if (!holding) {
+      return;
+    }
+    let lastRead = Date.now();
+    const onVisibility = (): void => {
+      if (document.visibilityState === 'visible' && Date.now() - lastRead >= DETAIL_RECHECK_MS) {
+        lastRead = Date.now();
+        setDetailCheck((current) => current + 1);
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [holding]);
 
   // Which agents FORGE can start for you, once it's yours.
   useEffect(() => {
@@ -246,6 +335,12 @@ export function TaskView({
           setStatus(result.data);
           setStatusFailed(false);
           delay = POLL_MS;
+          // A new stage (the agent pushed, a pull request turned up): the task's
+          // own answer (its copy, anything to send for review) may have moved too.
+          if (lastStage.current !== null && lastStage.current !== result.data.stage) {
+            setDetailCheck((current) => current + 1);
+          }
+          lastStage.current = result.data.stage;
         })
         .catch(() => {
           // Live: the last stage we were told about stays on screen, and it
@@ -303,11 +398,11 @@ export function TaskView({
     };
   }, [holding, wantsChecks, taskId, identified, status]);
 
-  // After a claim, keyboard and screen-reader users land on what it opened.
+  // After a claim, keyboard and screen-reader users land on what it opened: step 1.
   useEffect(() => {
     if (lease !== null && focusHandoff.current) {
       focusHandoff.current = false;
-      document.getElementById('handoff-title')?.focus();
+      document.getElementById('copy-title')?.focus();
     }
   }, [lease]);
 
@@ -386,6 +481,21 @@ export function TaskView({
     setAttempt((current) => current + 1);
   }, []);
 
+  /** "Check again" in step 3: the task and its status, read now. */
+  const checkAgain = useCallback(() => {
+    setDetailCheck((current) => current + 1);
+    readStatusNow();
+  }, [readStatusNow]);
+
+  /** The practice app made (or refreshed) its pretend copy. */
+  const onPracticeCopy = useCallback(
+    (copy: RepoCopy) => {
+      setDetail((current) => (current === null ? current : { ...current, copy }));
+      readStatusNow();
+    },
+    [readStatusNow],
+  );
+
   if (loading) {
     return (
       <main className="page">
@@ -438,7 +548,7 @@ export function TaskView({
     );
   }
 
-  const { task, acceptanceCriteria, brief } = detail;
+  const { task, acceptanceCriteria, brief, copy } = detail;
   const reward = rewardLabel(task.rewardClass);
   const signInHref = `/signin?${new URLSearchParams({ next: `/contribute/task/${task.id}` }).toString()}`;
   const startRails = (rails?.rails ?? []).filter((rail) => rail.mode === 'start' && rail.enabled);
@@ -450,6 +560,20 @@ export function TaskView({
       : status !== null && startedSince(status, outcome.rail, Date.now() - STARTED_WINDOW_MS)
         ? outcome
         : null;
+  // The same goes for `?copy=ready` (the task shows the copy) and `?review=sent` (the status shows the pull request).
+  const shownRepoOutcome =
+    repoOutcome === null || repoOutcome.kind === 'error'
+      ? repoOutcome
+      : repoOutcome.kind === 'copied'
+        ? copy !== undefined
+          ? repoOutcome
+          : null
+        : reviewSentBy(status, repoOutcome.pr)
+          ? repoOutcome
+          : null;
+  const practiceRun = practice || (lease?.practice ?? false);
+  /** The steps around the agent can do something here: live with the OAuth App set up, or practising. */
+  const repoUsable = practiceRun || repoSetup;
 
   return (
     <main className="page stack-lg">
@@ -492,10 +616,11 @@ export function TaskView({
         <section className="card stack" aria-labelledby="take-title">
           <h2 id="take-title">Take it on</h2>
           {shownOutcome !== null && <CallbackOutcome outcome={shownOutcome} appSlug={appSlug} />}
+          {shownRepoOutcome !== null && <RepoOutcomeNote outcome={shownRepoOutcome} />}
           {lost && (
             <p className="muted" role="status">
               This task isn&apos;t yours any more: it was released, or its time ran out. Anything your
-              agent pushed is still in your fork.
+              agent pushed is still in your copy.
             </p>
           )}
           {takenBy !== null ? (
@@ -540,23 +665,48 @@ export function TaskView({
           )}
         </section>
       ) : (
-        <AgentHandoff
-          taskId={task.id}
-          brief={brief}
-          login={login}
-          appSlug={appSlug}
-          practice={practice || lease.practice}
-          agentStart={agentStart}
-          connector={flags?.mcp_connector === true}
-          startRails={startRails}
-          vault={rails?.vault ?? false}
-          railsLoaded={rails !== null}
-          railsFailed={railsFailed}
-          outcome={shownOutcome}
-          onStarted={readStatusNow}
-          onCheck={readStatusNow}
-          onOpened={onOpened}
-        />
+        <>
+          {shownRepoOutcome !== null && <RepoOutcomeNote outcome={shownRepoOutcome} />}
+          <CopyStep
+            taskId={task.id}
+            practice={practiceRun}
+            available={repoSetup}
+            copy={copy}
+            onPracticeCopy={onPracticeCopy}
+          />
+          <AgentHandoff
+            taskId={task.id}
+            brief={brief}
+            login={login}
+            // The practice copy is pretend: no link may name it.
+            copy={practiceRun ? null : (copy?.fullName ?? null)}
+            copyStep={repoUsable ? (copy === undefined ? 'get-started' : 'refresh') : 'none'}
+            appSlug={appSlug}
+            practice={practiceRun}
+            agentStart={agentStart}
+            connector={flags?.mcp_connector === true}
+            startRails={startRails}
+            vault={rails?.vault ?? false}
+            railsLoaded={rails !== null}
+            railsFailed={railsFailed}
+            outcome={shownOutcome}
+            onStarted={readStatusNow}
+            onCheck={readStatusNow}
+            onOpened={onOpened}
+          />
+          {repoUsable && (
+            <ReviewStep
+              taskId={task.id}
+              practice={practiceRun}
+              hasCopy={copy !== undefined}
+              state={reviewState(detail, status, practiceRun)}
+              pullRequest={upstreamPullRequest(status)}
+              checking={checking}
+              onPracticeSent={readStatusNow}
+              onCheckAgain={checkAgain}
+            />
+          )}
+        </>
       )}
 
       {lease !== null && (
@@ -565,7 +715,8 @@ export function TaskView({
           status={status}
           statusFailed={statusFailed}
           checks={checks}
-          practice={practice || lease.practice}
+          practice={practiceRun}
+          sendsForReview={repoUsable && copy !== undefined}
           onRelease={onRelease}
           onChange={readStatusNow}
         />

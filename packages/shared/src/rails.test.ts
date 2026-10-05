@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 import { OPEN_RAILS, RAILS, RailMetaSchema, START_RAILS } from './index.js';
-import { RAIL_REGISTRY, ROUTINE_PROMPT, isStartRail, railMeta } from './rails.js';
+import { COPY_STEP, RAIL_REGISTRY, ROUTINE_PROMPT, isStartRail, railMeta } from './rails.js';
 
 const golden = JSON.parse(
   readFileSync(new URL('../../../tests/fixtures/rails-golden.json', import.meta.url), 'utf8'),
@@ -62,6 +62,19 @@ describe('RAIL_REGISTRY', () => {
   });
 });
 
+describe('the words a contributor reads', () => {
+  it('never say fork: every rail starts from the copy FORGE makes (COPY_STEP)', () => {
+    for (const meta of RAIL_REGISTRY) {
+      expect(meta.setup[0], meta.id).toBe(COPY_STEP);
+      for (const text of [meta.blurb, ...meta.setup]) {
+        expect(text.toLowerCase(), meta.id).not.toContain('fork');
+      }
+    }
+    // The routine prompt is the agent's: it names the fork once, so the agent knows.
+    expect(ROUTINE_PROMPT.toLowerCase().split('fork').length - 1).toBe(1);
+  });
+});
+
 describe('railMeta / isStartRail', () => {
   it('finds each rail by id', () => {
     for (const meta of RAIL_REGISTRY) {
@@ -81,7 +94,7 @@ describe('ROUTINE_PROMPT', () => {
     expect(ROUTINE_PROMPT).toBe(golden.routinePrompt);
   });
 
-  it('opts in to the fired brief, only a FORGE brief, only in the fork', () => {
+  it('opts in to the fired brief, only a FORGE brief, only in the copy', () => {
     expect(ROUTINE_PROMPT).toContain('routine-fire-payload');
     expect(ROUTINE_PROMPT).toContain('starts with "FORGE task #"');
     expect(ROUTINE_PROMPT).toContain('the branch the brief names');

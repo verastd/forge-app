@@ -49,16 +49,21 @@ session are a priority target for review, precisely because a flaw there
 can impersonate any visitor rather than misbehave for one. This is the
 hand-written code ADR-003 describes (`docs/adr/ADR-003-github-app-signin.md`),
 plus the agent hand-off and the FORGE connector that ADR-005 adds
-(`docs/adr/ADR-005-agent-handoff.md`):
+(`docs/adr/ADR-005-agent-handoff.md`), and the contributor's copy and Send
+for review that ADR-008 adds (`docs/adr/ADR-008-copy-and-review.md`):
 
-- `packages/auth/` — PKCE, session/transaction sealing and opening, the
-  API assertion, and revoking Copilot's one-time GitHub token.
+- `packages/auth/` — PKCE, session/transaction sealing and opening (a
+  sign-in, agent or repo attempt), the API assertion, the authorize URL of
+  FORGE's OAuth App (fixed to the `public_repo` scope), and revoking the
+  one-time GitHub tokens.
 - `apps/web/src/app/auth/` — the `/auth/signin`, `/auth/callback`,
-  `/auth/signout` and `/auth/demo` routes, and `/auth/github/agent`, the
+  `/auth/signout` and `/auth/demo` routes; `/auth/github/agent`, the
   one-time GitHub authorization that starts Copilot on a contributor's
-  fork (spent on that one start, never stored, then revoked). After a
-  GitHub sign-in the callback also records the new member with the API
-  (`members-hello.ts`).
+  fork; and `/auth/github/repo` with its callback, the one-time
+  authorization of FORGE's OAuth App behind Get started, Refresh your copy
+  and Send for review. Each token is spent on its one action, never
+  stored, then revoked (`one-time-token.ts`). After a GitHub sign-in the
+  callback also records the new member with the API (`members-hello.ts`).
 - `apps/web/src/app/bff/` (with `apps/web/src/lib/bff-forward.ts`, which
   does the minting) — the same-origin proxy that mints the API assertion
   for `/apps/data`'s data, the Contribute page's Bridge calls, the
@@ -103,9 +108,10 @@ plus the agent hand-off and the FORGE connector that ADR-005 adds
   `apps/web/src/lib/handoff.ts`, `apps/web/src/components/contribute/`,
   `apps/api/src/forge_api/services/bridge.py`, `routers/bridge.py`,
   `models.py` and `main.py` — every place a pasted or saved agent key, or
-  the Copilot token, passes through on its way to the vault or a vendor
-  (the form, the browser's request, the BFF, the API's dispatch and relay),
-  and the checks on the session and key links shown back.
+  a one-time GitHub token, passes through on its way to the vault, a
+  vendor or GitHub (the form, the browser's request, the BFF, the API's
+  dispatch and relay, the copy and the review), and the checks on the
+  session and key links shown back.
 - `apps/web/src/app/connect/`, `apps/web/src/lib/launch.ts`, the brief
   (`packages/shared/src/brief.ts`, `services/brief.py`), the rail registry
   (`packages/shared/src/rails.ts`, `services/rails.py`), the connector's
@@ -208,6 +214,91 @@ house writes (the admin, who reads every line before publishing, is the
 control); and what it sends to Anthropic (the proposal, its comments with their authors'
 logins, and files from this public repository) is public already.
 
+### Your copy and Send for review are in scope too
+
+Since Phase 7 FORGE acts on GitHub as the contributor: it makes their copy
+of `verastd/forge-app` (a fork), keeps it up to date, makes the task's
+branch in it, and opens their pull request when they press Send for review
+([ADR-008](docs/adr/ADR-008-copy-and-review.md)).
+
+- **The token: one per press, scope `public_repo`.** Each press of Get
+  started, Refresh your copy or Send for review gets one token from
+  FORGE's own OAuth App (not the sign-in App), with `public_repo`: read and
+  write access to every public repository the person can write to, which
+  is far more than FORGE uses. So the code holds it to one action: the
+  token is never stored or logged, never put in a URL or a cookie, never
+  sent to the browser, and goes only to GitHub and FORGE's API; it is used
+  for that one action and revoked straight after
+  (`DELETE /applications/{client_id}/token`, with the OAuth App's own
+  credentials), on every path that got one, success or not. The web
+  server's log says "repo authorization: one-time GitHub token revoked" for
+  each, or warns that GitHub didn't confirm it.
+- **Its lifetime.** An OAuth App's token doesn't expire by itself, so one
+  whose revocation failed (GitHub down, the server stopped first) stays
+  good until the person removes FORGE's OAuth App under GitHub's Settings →
+  Applications → Authorized OAuth Apps, GitHub drops it once the same
+  person, app and scope have more than ten, or it goes a year unused.
+  Nobody holds such a token, since it was never stored or logged. GitHub
+  keeps the person's approval after each revocation, which is why later
+  presses don't show GitHub's page again.
+- **What the API may do with it.** Only after `GET /user` shows the token
+  is the caller's own account, and only for the person holding the task,
+  at most 10 copies and 10 reviews an hour. Only these calls, only to
+  `https://api.github.com`, following no redirect and keeping no cookie:
+  fork `verastd/forge-app` into the caller's own account (no organization,
+  no new name), read that fork until GitHub has made it, sync its default
+  branch, read upstream main's commit and the task's branch, create the
+  task's branch when it is missing (never overwrite or delete one), compare
+  that branch with upstream main, list the open pull requests from it, and
+  open one pull request from it to `verastd/forge-app` `main`. Before any
+  write, the fork must be the caller's and a fork of `verastd/forge-app`
+  itself. No other repository, method or endpoint.
+- **What FORGE says in the person's name.** The pull request's description
+  carries the template's test attestation and the AI-assistance disclosure,
+  both checked. FORGE writes the attestation only after checking the diff
+  against upstream main's `.github/forge-protocol.json`: no existing test
+  modified, removed or moved, no protected path touched, and small enough
+  for GitHub and Foreman to see whole. It names the commit it checked. The
+  rest of the description comes from the task alone, never from an agent
+  or a member, with its text neutralised so it can't add a mention, an
+  issue reference, a checkbox, a link or a hidden comment. The page says,
+  beside the button, what the pull request will say for them.
+- **Who can start it.** Only from a page on FORGE's origin, signed in with
+  GitHub (never the practice account). Each press is a fresh OAuth round
+  trip with its own state and PKCE verifier in a single-use cookie. After
+  the first approval GitHub doesn't ask again, so FORGE's same-origin check
+  is what stands between a script running on FORGE's origin and a pull
+  request in someone's name.
+
+Its code is protected. New in Phase 7, cold-account-owned in `CODEOWNERS`
+and listed in `.github/forge-protocol.json`'s `protectedPaths`:
+`apps/api/src/forge_api/services/copies.py` (every call FORGE makes as a
+contributor, the pre-check and the description it writes) and
+`apps/api/src/forge_api/services/github_reads.py` (the reads behind them,
+including how the protocol rules are read). So are the `Makefile` and the
+gate files in `tools/forge/` (`check-lockfile-diff.sh`, `coverage-gate.sh`,
+`changed_line_coverage.py`, `test-mod-detector.sh`; not the `forge` CLI),
+which the Gauntlet runs from the pull request's own checkout: unprotected, a pull request could rewrite the checks run on it,
+and FORGE's attestation would vouch for it. The routes
+(`apps/web/src/app/auth/`), the OAuth App's settings
+(`apps/web/src/lib/auth/`), the task page's steps
+(`apps/web/src/components/contribute/`) and `packages/auth/` were
+protected already.
+
+A way to make FORGE use a token for anything but the one action it was
+pressed for, reach another repository or account, open a pull request for
+someone who didn't press the button, attest a diff that changes an
+existing test or a protected path, keep or leak a token, skip its
+revocation, or run script on FORGE's origin is worth a report.
+
+Known and accepted, so not worth a report: `public_repo` is broader than
+what FORGE does with it (GitHub's classic scopes have nothing narrower
+that can fork and open a pull request, and a GitHub App can fork only when
+installed on all of a person's repositories; ADR-008 has the trade); a
+token whose revocation failed lives on as above; and the pre-check is only
+as complete as the manifest (a new test runner config added as a new file
+is an addition, which it doesn't count as a changed test).
+
 ## What is actually enforced today
 
 So a reporter does not spend time on a control we already know is
@@ -215,7 +306,8 @@ missing, the headlines:
 
 - **Sensitive-path review is cold-account approval, not two-person
   control.** `CODEOWNERS` lists `@verastd` and `@forge-cold` on `.github/`,
-  `CODEOWNERS` itself, `contracts/`, `packages/contracts-client/`, the
+  `CODEOWNERS` itself, the `Makefile`, the `tools/forge/` gate files, `contracts/`,
+  `packages/contracts-client/`, the
   `auth*`/`pay*` routers, and every path listed above, but GitHub accepts an
   approval from any one listed owner and
   both accounts belong to the same person. What it buys is a forced

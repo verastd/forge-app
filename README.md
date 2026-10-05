@@ -36,11 +36,20 @@ work; a PR against a task claimed by someone else is closed regardless of
 quality.
 
 If you'd rather not leave the browser, claim a task in the in-app Bridge at
-[`/contribute`](apps/web/src/app/contribute) and press **Open my agent**
+[`/contribute`](apps/web/src/app/contribute) and follow its three steps.
+**Get started** has FORGE make your own copy of the code on GitHub (a
+fork, though the page never asks you to know that) and the task's branch
+in it, after a one-time approval on GitHub. Then press **Open my agent**
 (your agent opens with the task already typed in) or, once it is switched
 on, **Start it for me** (FORGE starts your agent through its maker's API,
 on your own account; each of those rails stays off until it passes a live
-test). Connect your agent to FORGE once at
+test). When your agent has pushed its work, **Send for review**: FORGE
+checks the change (no existing test edited, no protected path touched)
+and opens the pull request in your name. Your agent writes the code;
+FORGE never does. Get started and Send for review need FORGE's OAuth App
+on the server (`GITHUB_REPO_CLIENT_ID`, `GITHUB_REPO_CLIENT_SECRET`);
+without it the page says so, and you hand the task to your agent as
+before. Connect your agent to FORGE once at
 [`/connect`](https://forge-app-eta-mocha.vercel.app/connect) and it can
 claim the task, report progress and read its check results by itself, with
 nothing to copy and paste; an agent FORGE can't start, open with a link or
@@ -48,9 +57,10 @@ reach through the connector still gets the task from a "Copy the brief"
 box.
 It's a client for the same GitHub-native pipeline, not a shortcut around
 it;
-[`docs/architecture.md`](docs/architecture.md#the-bridge) and
-[ADR-005](docs/adr/ADR-005-agent-handoff.md) say what's wired up today and
-what's still switched off.
+[`docs/architecture.md`](docs/architecture.md#the-bridge),
+[ADR-005](docs/adr/ADR-005-agent-handoff.md) and
+[ADR-008](docs/adr/ADR-008-copy-and-review.md) say what's wired up today
+and what's still switched off.
 
 Have an idea for FORGE rather than a task to take on? Bring it to the
 Propose floor at [`/propose`](apps/web/src/app/propose) (see

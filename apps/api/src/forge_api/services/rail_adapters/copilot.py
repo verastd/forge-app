@@ -30,7 +30,6 @@ opens.
 from urllib.parse import quote
 
 from forge_api.services.rail_adapters.base import (
-    FORK_REPO_NAME,
     AdapterRequest,
     AdapterResult,
     CheckResult,
@@ -58,15 +57,18 @@ def _headers(credential: RailCredential) -> dict[str, str]:
     }
 
 
-def _tasks_url(login: str) -> str:
-    return f"{API_URL}/agents/repos/{quote(login, safe='')}/{FORK_REPO_NAME}/tasks"
+def _tasks_url(fork: str) -> str:
+    """The fork's task list: `fork` is `owner/name` (the contributor's copy, or
+    `<login>/forge-app`)."""
+    owner, _, name = fork.partition("/")
+    return f"{API_URL}/agents/repos/{quote(owner, safe='')}/{quote(name, safe='')}/tasks"
 
 
 def _setup_sentence(fork: str) -> str:
     return (
         f"GitHub didn't let FORGE start Copilot on {fork}. You need a Copilot plan with the "
-        "cloud agent (Pro, Pro+, Max, Business or Enterprise), a fork of forge-app, and "
-        "FORGE's GitHub app installed on that fork."
+        "cloud agent (Pro, Pro+, Max, Business or Enterprise), your copy of FORGE's code "
+        "(Get started on the task page makes it), and FORGE's GitHub app installed on it."
     )
 
 
@@ -77,7 +79,7 @@ class CopilotAdapter(RailAdapter):
     def _task_call(self, request: AdapterRequest) -> OutboundCall:
         return OutboundCall(
             method="POST",
-            url=_tasks_url(request.login),
+            url=_tasks_url(request.fork),
             headers=_headers(request.credential),
             body={
                 "prompt": request.brief,
@@ -116,7 +118,7 @@ class CopilotAdapter(RailAdapter):
         self.call(
             OutboundCall(
                 method="GET",
-                url=_tasks_url(request.login),
+                url=_tasks_url(request.fork),
                 headers=_headers(request.credential),
                 params={"per_page": "1"},
                 secret_headers=frozenset({"Authorization"}),

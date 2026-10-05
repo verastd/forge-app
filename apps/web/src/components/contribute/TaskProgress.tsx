@@ -10,7 +10,9 @@
  *   they are shown as text only, cleaned of control characters and cut short;
  * - "Watch it work" (the agent's session, on its vendor's own site) and, once
  *   the task has gone to an agent, the compare page to open the pull request
- *   from, until a pull request exists; then the pull request and its checks;
+ *   from, until a pull request exists; then the pull request and its checks.
+ *   Once FORGE has set up the contributor's copy, "Send for review" (step 3)
+ *   takes the compare page's place, and "ready to submit" points there;
  * - a closed "Opened a pull request FORGE can't see?" to hand one in by its
  *   link, for an agent that used another branch;
  * - when checks fail, the notes: sent to the agent FORGE started when the
@@ -47,6 +49,9 @@ import { PRACTICE_NOTE } from '../../lib/offline';
 import styles from './contribute.module.css';
 
 const GITHUB = ['github.com'] as const;
+/** "Ready to submit", once the person sends the work for review from the page rather than opening the pull request. */
+export const READY_TO_SEND_DETAIL =
+  'Your agent says the work is ready. Send it for review above: FORGE opens the pull request in your name.';
 /** The timeline is short on purpose: the newest few lines. */
 const TIMELINE_LENGTH = 8;
 /** As for a start (StartRails): a relay the status shows from this long before the click counts. */
@@ -321,6 +326,7 @@ export function TaskProgress({
   statusFailed,
   checks,
   practice,
+  sendsForReview,
   onRelease,
   onChange,
 }: {
@@ -329,6 +335,8 @@ export function TaskProgress({
   statusFailed: boolean;
   checks: CheckResults | null;
   practice: boolean;
+  /** "Send for review" (step 3) is how the pull request gets opened: FORGE has the copy, and can send it. */
+  sendsForReview: boolean;
   /** Resolves true when the task was released. */
   onRelease: () => Promise<boolean>;
   /** Something here changed the task (notes sent, a pull request handed in): read the status again. */
@@ -348,9 +356,14 @@ export function TaskProgress({
 
   const sessionUrl = status === null ? null : sessionLink(status.sessionUrl, lastStartRail(status));
   const prUrl = safeHttpsUrl(status?.prUrl, GITHUB);
-  // Before the task has gone to an agent there is no branch, so nothing to compare yet.
+  // Before the task has gone to an agent there is no branch, so nothing to compare yet; and
+  // with the copy, "Send for review" opens the pull request, not the person on GitHub.
   const compareUrl =
-    prUrl === null && status !== null && showsCompareLink(status) ? safeHttpsUrl(status.compareUrl, GITHUB) : null;
+    prUrl === null && status !== null && !sendsForReview && showsCompareLink(status)
+      ? safeHttpsUrl(status.compareUrl, GITHUB)
+      : null;
+  const shown =
+    status !== null && sendsForReview && status.stage === 'ready_to_submit' ? { ...status, detail: READY_TO_SEND_DETAIL } : status;
   const events = (status?.events ?? []).slice(-TIMELINE_LENGTH);
 
   return (
@@ -373,7 +386,7 @@ export function TaskProgress({
           )
         ) : (
           <>
-            <StatusStepper status={status} />
+            <StatusStepper status={shown ?? status} />
             {statusFailed && (
               <p className="faint" role="alert">
                 This is the last thing we heard. We can&apos;t check for anything newer just now.
@@ -431,7 +444,7 @@ export function TaskProgress({
         <div className={styles.confirm} role="group" aria-labelledby="release-question">
           <p id="release-question">
             Release this task? It goes back on the board for someone else. Anything your agent already
-            pushed stays in your fork.
+            pushed stays in your copy.
           </p>
           <div className="row">
             <button

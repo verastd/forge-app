@@ -3,14 +3,16 @@ import type { Locator, Page } from '@playwright/test';
 
 import apiTasks from '../../apps/api/src/forge_api/fixtures/tasks.json';
 import { TASK_FIXTURES } from '../../apps/web/src/lib/fixtures';
+import { COPY_STEP } from '../../packages/shared/dist/index.js';
 import golden from '../fixtures/brief-golden.json';
 import { demoSignIn } from './helpers/session';
 
 /**
  * The Contribute flow on the practice app (project `chromium-demo`, API
- * deliberately down): browse, claim, then "Get your agent on it" with both of
- * its parts, the closed copy fallback, a practice start, release, and the
- * two agent sections on /me.
+ * deliberately down): browse, claim, then the three steps ("Your copy",
+ * "Your agent" with both of its parts, "Send for review"), the closed copy
+ * fallback, a practice start, release, and the two agent sections on /me.
+ * The practice run of the three steps themselves is repo-practice.spec.ts.
  *
  * Signed in, it's the practice account, which is nobody on GitHub: every
  * identity call is simulated in the tab (lib/offline.ts), never sent to the
@@ -52,7 +54,7 @@ async function claimTaskOne(page: Page): Promise<void> {
   await expect(page).toHaveURL(/\/contribute\/task\/1$/);
   await page.getByRole('button', { name: 'Claim this' }).click();
   await expect(page.getByText(/yours for 48h/)).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Get your agent on it' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Your agent', exact: true })).toBeVisible();
 }
 
 function startPart(page: Page): Locator {
@@ -197,7 +199,7 @@ test.describe('browsing the Bridge', () => {
     );
     await expect(page.getByRole('button', { name: 'Claim this' })).toHaveCount(0);
     // Nothing to hand to an agent before the task is yours.
-    await expect(page.getByRole('heading', { name: 'Get your agent on it' })).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: 'Your agent', exact: true })).toHaveCount(0);
   });
 });
 
@@ -211,7 +213,7 @@ test.describe('claiming with the practice account', () => {
     await expect(page.getByText(/Practice account: a start here is pretend/)).toBeVisible();
 
     const start = startPart(page);
-    await expect(start.getByText('FORGE starts your agent for you. It works in your fork and opens a pull request.')).toBeVisible();
+    await expect(start.getByText('FORGE starts your agent for you. It works in your copy and opens a pull request.')).toBeVisible();
     const startButtons = start.getByRole('button');
     await expect(startButtons).toHaveCount(START_RAILS.length);
     for (const [index, label] of START_RAILS.entries()) {
@@ -259,8 +261,9 @@ test.describe('claiming with the practice account', () => {
     await expect(antigravity).toHaveAttribute('aria-expanded', 'false');
     await antigravity.click();
     await expect(antigravity).toHaveAttribute('aria-expanded', 'true');
-    // An older fork has no connector settings, and the connector wants a sign-in (review-web M6).
-    await expect(open.getByText(/press Sync fork on GitHub first so it has FORGE's connector settings/)).toBeVisible();
+    // A copy needs FORGE's connector settings (step 1 sets one up with them), and the connector wants a sign-in (review-web M6).
+    await expect(open.getByText("Press Get started on this page first, so your copy has FORGE's connector settings.")).toBeVisible();
+    await expect(open.getByText('Open your copy in Antigravity. The FORGE connector is already set up in it.')).toBeVisible();
     await expect(open.getByText(/Settings → Customizations, press Authenticate next to forge, then paste the code/)).toBeVisible();
     await expect(open.getByText('Ask it: Start FORGE task #1')).toBeVisible();
   });
@@ -283,11 +286,8 @@ test.describe('claiming with the practice account', () => {
 
     const panel = page.getByRole('region', { name: 'Start Google Jules' });
     await expect(panel).toBeVisible();
-    // The one-time setup links to real places.
-    await expect(panel.getByRole('link', { name: 'Fork forge-app on GitHub.' })).toHaveAttribute(
-      'href',
-      'https://github.com/verastd/forge-app/fork',
-    );
+    // The one-time setup links to real places: the copy step to step 1 on this page, where Get started is.
+    await expect(panel.getByRole('link', { name: COPY_STEP })).toHaveAttribute('href', '#copy-title');
     await expect(panel.getByRole('link', { name: 'Create an API key in Jules settings.' })).toHaveAttribute(
       'href',
       'https://jules.google.com/settings',
@@ -332,19 +332,19 @@ test.describe('claiming with the practice account', () => {
     await page.getByRole('button', { name: 'Release this task' }).click();
     await expect(page.getByText(/Release this task\? It goes back on the board/)).toBeVisible();
     await page.getByRole('button', { name: 'Keep it' }).click();
-    await expect(page.getByRole('heading', { name: 'Get your agent on it' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Your agent', exact: true })).toBeVisible();
 
     await page.getByRole('button', { name: 'Release this task' }).click();
     await page.getByRole('button', { name: 'Yes, release it' }).click();
 
     await expect(page.getByRole('status')).toContainText('Practice: released.');
     await expect(page.getByRole('button', { name: 'Claim this' })).toBeEnabled();
-    await expect(page.getByRole('heading', { name: 'Get your agent on it' })).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: 'Your agent', exact: true })).toHaveCount(0);
     await expect(page.getByText(/yours for 48h/)).toHaveCount(0);
   });
 
   test('after Claim, keyboard focus is on what it opened (review-web L4)', async ({ page }) => {
-    await expect(page.getByRole('heading', { name: 'Get your agent on it' })).toBeFocused();
+    await expect(page.getByRole('heading', { name: 'Your copy', exact: true })).toBeFocused();
   });
 
   test('"Opened a pull request FORGE can\'t see?" is there, closed, and says practice can\'t hand one in (review-web M5)', async ({
@@ -368,7 +368,7 @@ test.describe('a task above the practice account’s tier', () => {
     await demoSignIn(page);
     await page.getByRole('button', { name: 'Claim this' }).click();
     await expect(page.getByText('This task needs a contributor tier above T0; it opens up as you ship work.')).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'Get your agent on it' })).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: 'Your agent', exact: true })).toHaveCount(0);
   });
 });
 
@@ -433,7 +433,7 @@ test.describe('the practice account is nobody on GitHub', () => {
     await page.goto('/contribute/task/1');
     await expect(page.getByText('you is on this one right now.')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Claim this' })).toBeDisabled();
-    await expect(page.getByRole('heading', { name: 'Get your agent on it' })).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: 'Your agent', exact: true })).toHaveCount(0);
   });
 });
 
@@ -452,7 +452,7 @@ test.describe('with agent_start switched off', () => {
     await demoSignIn(page);
     await page.getByRole('button', { name: 'Claim this' }).click();
 
-    await expect(page.getByRole('heading', { name: 'Get your agent on it' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Your agent', exact: true })).toBeVisible();
     await expect(openPart(page).getByRole('link', { name: 'Open Claude Code on the web' })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Start it for me' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: /^Google Jules/ })).toHaveCount(0);

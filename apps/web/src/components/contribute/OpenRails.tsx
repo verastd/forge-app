@@ -22,6 +22,7 @@ import { SetupSteps } from './StartRails';
 import { apiBase, recordOpen } from '../../lib/api';
 import { CONNECT_PATH } from '../../lib/handoff';
 import { launchLinks } from '../../lib/launch';
+import type { CopyStep } from '../../lib/launch';
 import styles from './contribute.module.css';
 
 /** Open rails that can only work through the FORGE connector. */
@@ -31,6 +32,8 @@ export function OpenRails({
   taskId,
   brief,
   login,
+  copy,
+  copyStep,
   appSlug,
   connector,
   onOpened,
@@ -39,6 +42,10 @@ export function OpenRails({
   brief: string;
   /** The signed-in GitHub login; null for the practice account. */
   login: string | null;
+  /** The copy's full name (`owner/name`), once FORGE has set it up: the links open the agent in it. */
+  copy: string | null;
+  /** What the page's step 1 offers, for the steps that bring a copy up to date. */
+  copyStep: CopyStep;
   appSlug: string | null;
   /** The `mcp_connector` flag: the FORGE connector is on. */
   connector: boolean;
@@ -46,8 +53,10 @@ export function OpenRails({
 }) {
   const launches = useMemo(
     () =>
-      launchLinks({ taskId, brief, login, apiBase }).filter((launch) => connector || !CONNECTOR_ONLY.has(launch.rail)),
-    [taskId, brief, login, connector],
+      launchLinks({ taskId, brief, login, apiBase, copy, copyStep }).filter(
+        (launch) => connector || !CONNECTOR_ONLY.has(launch.rail),
+      ),
+    [taskId, brief, login, copy, copyStep, connector],
   );
   const [stepsOpen, setStepsOpen] = useState<OpenRail | null>(null);
 

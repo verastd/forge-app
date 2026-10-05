@@ -21,11 +21,8 @@
  *   10,000 characters).
  * - Google Antigravity has no link or URL scheme, so it gets steps instead.
  */
-import { isValidLogin, OPEN_RAILS, UPSTREAM_REPO } from '@forge/shared';
+import { isValidCopy, isValidLogin, OPEN_RAILS, workRepo } from '@forge/shared';
 import type { OpenRail } from '@forge/shared';
-
-/** Forks keep the upstream's name: <login>/forge-app. */
-const FORK_NAME = UPSTREAM_REPO.slice(UPSTREAM_REPO.indexOf('/') + 1);
 
 /** Claude Code on the web: past this, the URL carries `prompt_url` instead of the brief. */
 export const CLAUDE_CODE_URL_CAP = 7000;
@@ -37,6 +34,13 @@ export const CURSOR_URL_CAP = 10_000;
 /** A lone UTF-16 surrogate, which `encodeURIComponent` refuses with a URIError. */
 const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
 
+/**
+ * What the task page's step 1 offers right now: nothing (no OAuth App here),
+ * "Get started" (no copy yet) or "Refresh your copy". The Antigravity steps
+ * point at it, so nobody is sent to GitHub to bring a copy up to date.
+ */
+export type CopyStep = 'none' | 'get-started' | 'refresh';
+
 export interface LaunchInput {
   taskId: number;
   /** The brief from `compileBrief`, personalized with `login` when there is one. */
@@ -45,6 +49,14 @@ export interface LaunchInput {
   login: string | null | undefined;
   /** The public API origin (`NEXT_PUBLIC_API_URL`) that serves `/api/bridge/tasks/<id>/brief`. */
   apiBase: string;
+  /**
+   * The contributor's copy of forge-app (`TaskDetail.copy.fullName`, `owner/name`),
+   * once FORGE has set it up. The links name it in place of `<login>/forge-app`;
+   * anything that isn't a repository's full name means "no copy".
+   */
+  copy?: string | null;
+  /** What the page's step 1 offers (`none` when left out). */
+  copyStep?: CopyStep;
 }
 
 export interface Launch {
@@ -71,13 +83,29 @@ function encode(text: string): string {
   return encodeURIComponent(text.replace(LONE_SURROGATE, '\uFFFD'));
 }
 
-/** `owner/forge-app` for a valid login, else null: anything that isn't a login is no login at all. */
-function forkSlug(login: string | null | undefined): string | null {
-  return isValidLogin(login) ? `${login}/${FORK_NAME}` : null;
+/**
+ * The repository the agent works in, `owner/name`: the copy when there is a
+ * valid one, else `<login>/forge-app` for a valid login, else null
+ * (`workRepo`). Letters, digits, `.`, `_`, `-` and one slash, so it goes into
+ * a link as it is.
+ */
+function repoSlug({ login, copy }: Pick<LaunchInput, 'login' | 'copy'>): string | null {
+  return workRepo(login, copy);
 }
 
-function claudeCode({ taskId, brief, login, apiBase }: LaunchInput): Launch {
-  const slug = forkSlug(login);
+/**
+ * The query for the API's copy of the brief (`/api/bridge/tasks/<id>/brief`):
+ * `login`, plus `copy` when it is the login's own (the API ignores any other).
+ */
+function briefQuery({ login, copy }: Pick<LaunchInput, 'login' | 'copy'>): string {
+  if (!isValidLogin(login)) return '';
+  const own = isValidCopy(copy) && copy.slice(0, copy.indexOf('/')).toLowerCase() === login.toLowerCase();
+  return own ? `?login=${login}&copy=${encode(copy)}` : `?login=${login}`;
+}
+
+function claudeCode(input: LaunchInput): Launch {
+  const { taskId, brief, apiBase } = input;
+  const slug = repoSlug(input);
   // `owner/repo` is letters, digits, dashes and one slash: written as the docs write it.
   const repositories = slug === null ? '' : `&repositories=${slug}`;
   const full = `https://claude.ai/code?prompt=${encode(brief)}${repositories}`;
@@ -86,7 +114,7 @@ function claudeCode({ taskId, brief, login, apiBase }: LaunchInput): Launch {
   }
   const base = apiBase.replace(/\/+$/, '');
   if (!/^https?:\/\/[^/?#]+/i.test(base)) {
-    // No public API to fetch the brief from: open Claude Code with the fork
+    // No public API to fetch the brief from: open Claude Code with the copy
     // selected, and let the connector fetch the task.
     return {
       rail: 'claude-code',
@@ -96,7 +124,7 @@ function claudeCode({ taskId, brief, login, apiBase }: LaunchInput): Launch {
       note: 'This task is too long for a link, so it opens with a short request. Claude needs the FORGE connector to read the rest.',
     };
   }
-  const promptUrl = `${base}/api/bridge/tasks/${taskId}/brief${slug === null ? '' : `?login=${login}`}`;
+  const promptUrl = `${base}/api/bridge/tasks/${taskId}/brief${briefQuery(input)}`;
   return {
     rail: 'claude-code',
     href: `https://claude.ai/code?prompt_url=${encode(promptUrl)}${repositories}`,
@@ -105,8 +133,9 @@ function claudeCode({ taskId, brief, login, apiBase }: LaunchInput): Launch {
   };
 }
 
-function claudeCli({ taskId, brief, login }: LaunchInput): Launch {
-  const slug = forkSlug(login);
+function claudeCli(input: LaunchInput): Launch {
+  const { taskId, brief } = input;
+  const slug = repoSlug(input);
   const params: string[] = [];
   if (slug !== null) params.push(`repo=${slug}`);
   const fits = brief.length <= CLAUDE_CLI_PROMPT_CAP;
@@ -120,8 +149,9 @@ function claudeCli({ taskId, brief, login }: LaunchInput): Launch {
   };
 }
 
-function codex({ brief, login }: LaunchInput): Launch {
-  const slug = forkSlug(login);
+function codex(input: LaunchInput): Launch {
+  const { brief } = input;
+  const slug = repoSlug(input);
   const origin = slug === null ? '' : `&originUrl=${encode(`https://github.com/${slug}.git`)}`;
   return { rail: 'codex', href: `codex://new?prompt=${encode(brief)}${origin}`, kind: 'app', shortened: false };
 }
@@ -145,20 +175,35 @@ function cursorApp({ taskId, brief }: LaunchInput): Launch {
   };
 }
 
+/** The first Antigravity step: getting the copy in step with forge-app, the way this page can. */
+function upToDateStep(copyStep: CopyStep | undefined): string {
+  switch (copyStep) {
+    case 'refresh':
+      return "If your copy is older than October 2026, press Refresh your copy on this page first so it has FORGE's connector settings.";
+    case 'get-started':
+      return "Press Get started on this page first, so your copy has FORGE's connector settings.";
+    default:
+      return "If your copy is older than October 2026, bring it up to date on GitHub first so it has FORGE's connector settings.";
+  }
+}
+
 /**
- * Antigravity reads the task through the FORGE connector, which a fork has
- * in `.agents/mcp_config.json` only once it is in step with forge-app
- * (October 2026 on), and which asks for a one-time sign-in (/connect).
+ * Antigravity reads the task through the FORGE connector, which the
+ * contributor's copy has in `.agents/mcp_config.json` only once it is in step
+ * with forge-app (October 2026 on), and which asks for a one-time sign-in
+ * (/connect). The copy is named once FORGE knows it.
  */
-function antigravity({ taskId }: LaunchInput): Launch {
+function antigravity({ taskId, copy, copyStep }: LaunchInput): Launch {
   return {
     rail: 'antigravity',
     href: null,
     kind: 'steps',
     shortened: false,
     steps: [
-      "If your fork is older than October 2026, press Sync fork on GitHub first so it has FORGE's connector settings.",
-      'Open your fork in Antigravity. The FORGE connector is already set up in the repo.',
+      upToDateStep(copyStep),
+      isValidCopy(copy)
+        ? `Open your copy, ${copy}, in Antigravity. The FORGE connector is already set up in it.`
+        : 'Open your copy in Antigravity. The FORGE connector is already set up in it.',
       'The first time, sign in to FORGE: in Settings → Customizations, press Authenticate next to forge, then paste the code your browser shows and press Submit.',
       `Ask it: ${startTaskAsk(taskId)}`,
     ],
