@@ -58,6 +58,7 @@ read here but only written by services/proposals.py.
 
 import asyncio
 import codecs
+import contextvars
 import fnmatch
 import json
 import logging
@@ -2283,21 +2284,59 @@ def _beat(
     return work(db_fn(), now_fn, claimed)
 
 
+async def _in_daemon_thread(
+    db_fn: Callable[[], StateDB],
+    now_fn: Callable[[], datetime],
+    claimed: Callable[[_Job], None],
+) -> Outcome | None:
+    """One beat (`_beat`) in a daemon thread of its own, not `asyncio.to_thread`'s: at exit
+    the interpreter waits for the default executor's threads, so a stop during a model
+    call would wait for the call to end before the API could start again. A daemon
+    thread is dropped at exit, and its call with it."""
+    loop = asyncio.get_running_loop()
+    done: asyncio.Future[Outcome | None] = loop.create_future()
+    context = contextvars.copy_context()
+
+    def settle(result: Outcome | None, error: BaseException | None) -> None:
+        if done.done():  # the worker was cancelled meanwhile
+            return
+        if error is None:
+            done.set_result(result)
+        else:
+            done.set_exception(error)
+
+    def run() -> None:
+        result: Outcome | None = None
+        error: BaseException | None = None
+        try:
+            result = context.run(_beat, db_fn, now_fn, claimed)
+        except BaseException as exc:  # handed to the waiting task, as to_thread does
+            error = exc
+        try:
+            loop.call_soon_threadsafe(settle, result, error)
+        except RuntimeError:  # the loop closed while the thread worked: nobody's waiting
+            pass
+
+    threading.Thread(target=run, name="forge-house-beat", daemon=True).start()
+    return await done
+
+
 async def run_worker(
     interval: float = WAKE_SECONDS,
     *,
     db_fn: Callable[[], StateDB] = get_state_db,
     now_fn: Callable[[], datetime] = current_time,
 ) -> None:
-    """Every `interval` seconds, one beat (`work`) in a worker thread: the model and the
+    """Every `interval` seconds, one beat (`work`) in a daemon thread: the model and the
     database both block. A failing beat is logged and the next one tries again. Cancelling
     the task stops it, and hands back the job its beat was running (`give_back`): the
-    thread can't be stopped, but whatever it finishes afterwards is dropped."""
+    thread can't be stopped, but the stop doesn't wait for it, and whatever it finishes
+    afterwards is dropped."""
     while True:
         await asyncio.sleep(interval)
         claimed: list[_Job] = []
         try:
-            await asyncio.to_thread(_beat, db_fn, now_fn, claimed.append)
+            await _in_daemon_thread(db_fn, now_fn, claimed.append)
         except asyncio.CancelledError:
             if claimed:
                 give_back(db_fn(), claimed[-1], now_fn())

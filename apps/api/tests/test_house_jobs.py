@@ -10,6 +10,7 @@ import json
 import logging
 import sqlite3
 import threading
+import time
 from collections.abc import Callable
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -784,6 +785,9 @@ def test_stopping_the_api_mid_call_hands_the_job_back(
         await asyncio.gather(task, return_exceptions=True)
         seen.update(job(floor, proposal_id))
         release.set()
+        while any(thread.name == "forge-house-beat" for thread in threading.enumerate()):
+            await asyncio.sleep(0.005)
+        await asyncio.sleep(0)  # the thread's late answer reaches the loop, and is dropped
 
     with caplog.at_level(logging.INFO, logger="forge_api.services.house"):
         asyncio.run(asyncio.wait_for(run(), timeout=10))
@@ -795,6 +799,45 @@ def test_stopping_the_api_mid_call_hands_the_job_back(
     fake.add(*drafted())
     assert work(floor) == "done"
     assert len(runs(floor)) == 1  # still one job's run: the caps count it once
+
+
+def test_a_stop_mid_call_does_not_wait_for_the_call(
+    floor: Floor, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Codex review on #24: the beat runs in a daemon thread, so the API stops at once
+    during a model call. In `asyncio.to_thread`'s executor thread, `asyncio.run` waited
+    for the call to end before it returned, and a restart with it."""
+    passed(floor)
+    calling = threading.Event()
+    release = threading.Event()
+    daemon: list[bool] = []
+
+    def slow(request: dict[str, Any]) -> Any:
+        daemon.append(threading.current_thread().daemon)
+        calling.set()
+        release.wait(3)
+        return message(PICK)
+
+    install(monkeypatch, slow, message(WRITTEN))
+
+    async def run() -> None:
+        task = asyncio.create_task(house.run_worker(0.001, db_fn=get_state_db, now_fn=floor.clock))
+        while not calling.is_set():
+            await asyncio.sleep(0.005)
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+    started = time.monotonic()
+    try:
+        asyncio.run(asyncio.wait_for(run(), timeout=10))
+        stopped_in = time.monotonic() - started
+    finally:
+        release.set()
+        for thread in threading.enumerate():
+            if thread.name == "forge-house-beat":
+                thread.join(10)
+    assert daemon == [True]
+    assert stopped_in < 1.5
 
 
 @pytest.mark.parametrize("reason", ["moved_on", "off"])

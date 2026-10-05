@@ -341,8 +341,10 @@ these change the contract:
   they print whole requests, prompts included, so `ANTHROPIC_LOG` is never
   set on the box. An unexpected error logs only its kind.
 - **A graceful stop hands the running job back**, with no failed run
-  counted, and a result that can't be stored is logged as lost and counts
-  a failed run.
+  counted, and doesn't wait for the model call: the call runs in a daemon
+  thread, which the process drops at exit, so a restart is never held up
+  by it (Codex review on #24). A result that can't be stored is logged as
+  lost and counts a failed run.
 - **The two `429`s say which cap they are** (`scope`: `proposal` or
   `daily`), beside `retryAfter` and `limit`.
 - **A timeline event of a kind the code doesn't know is left out**, logged
