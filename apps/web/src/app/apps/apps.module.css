@@ -2,9 +2,11 @@
  * /apps is SiteChrome's "lobby" chrome mode (see SiteChrome.tsx): no footer,
  * and the page is full-bleed. The 3D lobby (components/lobby) fills the
  * viewport; while it is the page, this page's heading and directory are out
- * of sight, and the directory, when a keyboard user brings it back, takes
- * the pointer only inside its own box so every drag around it reaches the
- * cave. Without the 3D view they are the page, under the site nav.
+ * of sight, and the directory, when a keyboard user brings it back, is a
+ * compact panel that takes the pointer only inside its own box, so every
+ * drag around it reaches the cave. Without the 3D view they are the page,
+ * under the site nav: the heading over a grid of tiles, one per lit app and
+ * one to propose the next.
  */
 
 .lobby {
@@ -14,50 +16,207 @@
 
 .heading {
   pointer-events: none;
-  text-shadow: 0 1px 14px rgba(0, 0, 0, 0.85);
 }
 
 .directory {
   pointer-events: auto;
   max-width: 100%;
+  font-family: var(--font);
+}
+
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tiles > li {
+  display: flex;
+}
+
+/* A lit app: its slot, its poster, its name and what it is. */
+.app,
+.propose {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  padding: 20px;
+  border-radius: var(--radius);
+  color: var(--text);
+  text-decoration: none;
+  transition:
+    border-color 140ms var(--ease),
+    background-color 140ms var(--ease),
+    box-shadow 140ms var(--ease),
+    transform 140ms var(--ease);
+}
+
+.app {
+  border: 1px solid var(--border);
+  background-color: var(--bg-elev);
+  /* Corner ticks, top right and bottom left, as the site's cards. */
+  background-image:
+    linear-gradient(var(--border-strong), var(--border-strong)),
+    linear-gradient(var(--border-strong), var(--border-strong)),
+    linear-gradient(var(--border-strong), var(--border-strong)),
+    linear-gradient(var(--border-strong), var(--border-strong)),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.018), transparent 40%);
+  background-repeat: no-repeat;
+  background-size:
+    12px 2px,
+    2px 12px,
+    12px 2px,
+    2px 12px,
+    100% 100%;
+  background-position:
+    right 10px top 10px,
+    right 10px top 10px,
+    left 10px bottom 10px,
+    left 10px bottom 10px,
+    0 0;
+}
+
+.app:hover {
+  color: var(--text);
+  border-color: var(--accent-line);
+  box-shadow:
+    0 0 0 1px var(--accent-line),
+    0 10px 36px rgba(255, 194, 61, 0.14);
+  transform: translateY(-3px);
+}
+
+.app:focus-visible,
+.propose:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.slot {
+  margin-bottom: 14px;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.poster {
+  aspect-ratio: 16 / 9;
+  margin-bottom: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background-color: var(--bg-inset);
+  background-image:
+    linear-gradient(rgba(120, 150, 210, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(120, 150, 210, 0.08) 1px, transparent 1px);
+  background-size: 28px 28px;
+  background-position: center;
+}
+
+.title {
+  font-size: 1.05rem;
+  font-weight: 750;
+}
+
+.description {
+  margin-top: 8px;
+  color: var(--text-muted);
+}
+
+.go {
+  margin-top: auto;
+  padding-top: 18px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+/* The empty slots: the way to fill one. */
+.propose {
+  justify-content: center;
+  gap: 8px;
+  border: 1px dashed var(--accent-line);
+  background: rgba(255, 194, 61, 0.04);
+}
+
+.propose:hover {
+  color: var(--text);
+  background: rgba(255, 194, 61, 0.08);
+}
+
+.propose .slot {
+  margin-bottom: 0;
+  color: var(--text-muted);
+}
+
+.propose .description {
+  margin-top: 0;
+}
+
+.propose .go {
+  margin-top: 10px;
+  padding-top: 0;
+  color: var(--accent);
+}
+
+/* Brought back by the keyboard over the cave: a compact panel, no posters. */
+:global([data-directory='aside']) .directory {
   padding: 12px 14px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: rgba(6, 10, 18, 0.72);
   -webkit-backdrop-filter: blur(8px);
   backdrop-filter: blur(8px);
-  font-family: var(--font);
 }
 
-.apps {
+:global([data-directory='aside']) .tiles {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  list-style: none;
 }
 
-.app {
-  font-weight: 700;
-  color: var(--text);
-  transition: color 140ms var(--ease);
+:global([data-directory='aside']) .app,
+:global([data-directory='aside']) .propose {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  transform: none;
 }
 
-.app:hover {
+:global([data-directory='aside']) .slot,
+:global([data-directory='aside']) .poster,
+:global([data-directory='aside']) .go,
+:global([data-directory='aside']) .propose .description {
+  display: none;
+}
+
+:global([data-directory='aside']) .title {
+  font-size: 0.95rem;
+}
+
+:global([data-directory='aside']) .propose .title {
   color: var(--accent);
 }
 
-.empty {
-  margin-top: 8px;
-  font-size: 0.82rem;
-  color: var(--text-muted);
+@media (max-width: 640px) {
+  .tiles {
+    grid-template-columns: 1fr;
+  }
 }
 
-@media (max-width: 640px) {
-  .directory {
-    padding: 10px 12px;
+@media (prefers-reduced-motion: reduce) {
+  .app,
+  .propose {
+    transition: none;
   }
 
-  .empty {
-    font-size: 0.78rem;
+  .app:hover {
+    transform: none;
   }
 }

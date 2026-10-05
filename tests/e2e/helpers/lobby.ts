@@ -6,12 +6,14 @@
  * GL, SwiftShader (`playwright.config.ts` pins it), so nothing here reads
  * pixels. The page reports on itself through its root element instead,
  * `<div data-lobby>` (apps/web/src/components/lobby/Lobby.tsx):
- * `data-lobby-state`, the camera as `data-x/y/z/yaw/pitch` (written by the frame
+ * `data-lobby-state`, the Enter gate as `data-gate` (open, entering, gone),
+ * the camera as `data-x/y/z/yaw/pitch` (written by the frame
  * loop, so absent until the first frame), what the crosshair is on as
  * `data-focus`, and the presence feed as `data-feed`, `data-peers`,
  * `data-voice`, `data-sound`, `data-room-sound` and `data-deafened`. The
- * people panel ("People nearby") lists everyone else in the room, one row
- * per person, each marked `data-person-id`.
+ * HUD ("People nearby") holds the dock (Mic, Deafen, the people count),
+ * its notice, and the people drawer, which lists everyone else in the room,
+ * one row per person, each marked `data-person-id`, once the count opens it.
  *
  * SwiftShader renders this scene at about one frame a second, and the scene
  * only moves on frames: every wait below polls the attributes rather than
@@ -159,11 +161,29 @@ export async function gotoLobby(page: Page, path = '/apps'): Promise<void> {
   await expect(page).toHaveURL(urlEndingWith(path));
 }
 
-/** Opens `path` (default `/apps`) signed in (see `gotoLobby`) and waits for the 3D view to be up. */
+/**
+ * Presses the Enter gate's button and waits for the gate to go, which it
+ * does once the view is up. Pressed again only while the gate is still
+ * open: a press can land before Next has hydrated the page.
+ */
+export async function enterLobby(page: Page, timeout = READY_TIMEOUT): Promise<void> {
+  const root = lobbyRoot(page);
+  await expect(root).toHaveAttribute('data-gate', /^(open|entering|gone)$/, { timeout });
+  await expect(async () => {
+    if ((await root.getAttribute('data-gate')) === 'open') {
+      await page.getByRole('button', { name: 'Enter', exact: true }).click({ timeout: 5_000 });
+    }
+    await expect(root).not.toHaveAttribute('data-gate', 'open', { timeout: 5_000 });
+  }).toPass({ timeout: 30_000 });
+  await expectReady(page, timeout);
+  await expect(root).toHaveAttribute('data-gate', 'gone');
+}
+
+/** Opens `path` (default `/apps`) signed in (see `gotoLobby`), presses Enter, and waits for the 3D view to be up. */
 export async function openLobby(page: Page, path = '/apps'): Promise<void> {
   await expectWebGL2(page);
   await gotoLobby(page, path);
-  await expectReady(page);
+  await enterLobby(page);
 }
 
 export type FlagName =
@@ -429,9 +449,26 @@ export async function savedCamera(page: Page): Promise<CameraState | null> {
   return raw === null ? null : (JSON.parse(raw) as CameraState);
 }
 
-/** The people panel: the lobby's "People nearby" aside. */
+/** The HUD: the lobby's "People nearby" aside (the dock, its notice and the people drawer). */
 export function peoplePanel(page: Page): Locator {
   return page.getByRole('complementary', { name: 'People nearby' });
+}
+
+/** The dock's people count, which opens and closes the drawer. */
+export function peopleCount(page: Page): Locator {
+  return peoplePanel(page).locator('button[data-hud="count"]');
+}
+
+/** The people drawer, open: the count pressed if it wasn't already. */
+export async function openPeople(page: Page): Promise<Locator> {
+  const count = peopleCount(page);
+  if ((await count.getAttribute('aria-expanded')) !== 'true') {
+    await count.click();
+  }
+  await expect(count).toHaveAttribute('aria-expanded', 'true');
+  const drawer = peoplePanel(page).getByRole('region', { name: 'People in the lobby' });
+  await expect(drawer).toBeVisible();
+  return drawer;
 }
 
 /** Someone's row in the people panel, by their feed id. */
@@ -440,12 +477,13 @@ export function personRow(page: Page, id: string): Locator {
 }
 
 /**
- * One of the people panel's live regions (VoicePanel.tsx), which are always in
- * the page with their text set and cleared: `status` (whether voice is on, and
- * why not), `problem` (why the mic didn't start), `elsewhere` (another tab or
- * device took the seat) and `room-sound` (the cave sound failed).
+ * One of the HUD's live regions (VoicePanel.tsx), which are always in the
+ * page with their text set and cleared, the most pressing one also the
+ * notice on screen: `status` (whether voice is on, and why not), `problem`
+ * (why the mic didn't start) and `elsewhere` (another tab or device took the
+ * seat).
  */
-export function voiceLine(page: Page, which: 'status' | 'problem' | 'elsewhere' | 'room-sound' = 'status'): Locator {
+export function voiceLine(page: Page, which: 'status' | 'problem' | 'elsewhere' = 'status'): Locator {
   return peoplePanel(page).locator(`[role="status"][data-live="${which}"]`);
 }
 

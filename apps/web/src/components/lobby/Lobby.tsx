@@ -17,10 +17,15 @@
  *   (switched off, no WebGL2, or a view that broke) they are the page.
  * - Presence: one feed per visit, connected on mount and closed on unmount.
  *   The scene publishes to it and draws its peers every frame; the people
- *   panel (VoicePanel) shows its voice snapshot and is the only other thing
+ *   HUD (VoicePanel) shows its voice snapshot and is the only other thing
  *   that talks to it: the mic, deafen, per-person mute, "Turn on sound",
  *   "Try again" after a join that failed in this browser, and "Rejoin here"
  *   after the lobby was opened in another tab or device.
+ * - The Enter gate, over the view while it builds: who's here and one Enter
+ *   button. That press is the browser's gesture for sound, so the room is
+ *   heard from the first step, and it asks for the mic. Pressed before the
+ *   view is up, it says it is entering until it is. Once per page load:
+ *   coming back from an app goes straight in.
  * - The cave is its own experience: a tap on a lit panel saves the camera and
  *   opens the app; a tap on an empty slot stays in the cave and only says so
  *   (the toast). Exit, top left whenever the wall is the page, is the other
@@ -31,14 +36,14 @@
  *   (`?from=<slug>`) to the page without its wall puts keyboard focus on
  *   that app's directory link; with the wall, SiteChrome's arrival focus on
  *   the page's h1 stands (see ArrivalFocus).
- * - The veil, the hint, the toast, the touch stick and the lift buttons,
- *   as in the prototype, and Exit. The hint says how far a voice carries,
- *   except on the practice build, which has none.
+ * - The toast, the touch stick and the lift buttons, as in the prototype,
+ *   and Exit. No hint line: the cave is left clear.
  * - A join that failed in this browser tries once more by itself, once the
  *   scene is up (a slow phone may simply have been busy building it).
  *
  * The root carries `data-lobby` and the state attributes e2e reads:
- * `data-lobby-state`, `data-focus`, `data-motion`, `data-peers`,
+ * `data-lobby-state`, `data-gate` (open, entering or gone, while the view
+ * is the page), `data-focus`, `data-motion`, `data-peers`,
  * `data-voice` (unavailable, off or on), `data-feed`, `data-sound`
  * (blocked, on, or none without voice), `data-room-sound` and
  * `data-deafened` here, and `data-x/y/z/yaw/pitch`, which the scene writes
@@ -72,7 +77,8 @@ import type { LobbyState } from './lobbyState';
 import { createPresenceFeed } from './presence/types';
 import type { PresenceFeed } from './presence/types';
 import type { Hit } from './scene/controls';
-import { VOICE_RANGE_HINT, VoicePanel, useFeedSummary } from './VoicePanel';
+import { PeopleIcon, Spinner } from './icons';
+import { VoicePanel, roomCount, useFeedState, useFeedSummary, wantMicOnEntry } from './VoicePanel';
 
 const LobbyScene = dynamic(() => import('./LobbyScene'), { ssr: false });
 
@@ -236,6 +242,73 @@ function ArrivalFocus({ root, fallback }: { root: RefObject<HTMLDivElement | nul
   return null;
 }
 
+// ---------- the Enter gate ----------
+
+/** Entered once in this page load: the browser has had its gesture, so the gate doesn't come back. */
+let enteredThisLoad = false;
+
+type GatePhase = 'open' | 'entering' | 'gone';
+
+/**
+ * Over the view until you're in: the lobby's name, who's here, and Enter.
+ * Pressed before the view is up, the button says it is entering, and the
+ * gate fades once the view is there.
+ */
+function EnterGate({
+  feed,
+  phase,
+  practice,
+  onEnter,
+}: {
+  feed: PresenceFeed | null;
+  phase: GatePhase;
+  practice: boolean;
+  onEnter(): void;
+}) {
+  const room = roomCount(useFeedState(feed));
+  const entering = phase === 'entering';
+  return (
+    <div className={cx(styles.gate, phase === 'gone' && styles.gateOff)} data-enter-gate="">
+      <div className={styles.gateHead}>
+        <span className={styles.gateName}>Apps · the lobby</span>
+        <span className={cx(styles.gateWho, room.talking > 0 && styles.lit)}>
+          {room.sees ? (
+            <>
+              <PeopleIcon />
+              {`${room.here} here · ${room.talking} talking`}
+            </>
+          ) : (
+            room.finding && (
+              <>
+                <Spinner />
+                Finding who&apos;s here…
+              </>
+            )
+          )}
+        </span>
+      </div>
+      <button
+        type="button"
+        className={styles.enter}
+        aria-busy={entering || undefined}
+        aria-disabled={entering || undefined}
+        onClick={onEnter}
+      >
+        {entering ? (
+          <>
+            <Spinner />
+            Entering
+          </>
+        ) : (
+          'Enter'
+        )}
+      </button>
+      {/* The practice build has no voice: nothing to turn on. */}
+      {!practice && <p className={styles.gateNote}>Entering turns on sound and asks for your mic.</p>}
+    </div>
+  );
+}
+
 // ---------- the shell ----------
 
 export function Lobby({ heading, directory }: { heading: ReactNode; directory: ReactNode }) {
@@ -251,6 +324,7 @@ export function Lobby({ heading, directory }: { heading: ReactNode; directory: R
   const [peerCount, setPeerCount] = useState(0);
   const [feed, setFeed] = useState<PresenceFeed | null>(null);
   const [toast, setToast] = useState({ text: '', on: false, id: 0 });
+  const [entered, setEntered] = useState(() => enteredThisLoad);
 
   /** The same feed, for the scene, which reads it every frame. */
   const feedRef = useRef<PresenceFeed | null>(null);
@@ -363,8 +437,17 @@ export function Lobby({ heading, directory }: { heading: ReactNode; directory: R
    * Joins again: "Rejoin here" (the room keeps one seat per member, so this
    * takes it back from the other tab), "Rejoin" and "Try again".
    */
-  const rejoin = (): void => {
-    void feedRef.current?.connect();
+  const rejoin = (): Promise<void> | void => feedRef.current?.connect();
+
+  /** The gate's Enter: inside the press, let the browser play sound, and ask for the mic once voice is up. */
+  const enter = (): void => {
+    if (entered) {
+      return;
+    }
+    enteredThisLoad = true;
+    setEntered(true);
+    wantMicOnEntry();
+    void feedRef.current?.resumeAudio();
   };
 
   const state: LobbyState = loading
@@ -384,6 +467,24 @@ export function Lobby({ heading, directory }: { heading: ReactNode; directory: R
   const message = MESSAGES[state];
   /** No wall to show: the heading, the message and the directory are the page. */
   const fallback = isFallback(state);
+  const gate: GatePhase = !entered ? 'open' : ready ? 'gone' : 'entering';
+
+  // The gate going with focus on its button (a keyboard press of Enter):
+  // focus to the page's h1, as on any arrival, not left on something gone.
+  useEffect(() => {
+    const root = rootRef.current;
+    const active = document.activeElement;
+    if (gate !== 'gone' || root === null || !(active instanceof HTMLElement) || active.closest('[data-enter-gate]') === null) {
+      return;
+    }
+    const h1 = root.querySelector<HTMLElement>('h1');
+    if (h1 !== null) {
+      if (!h1.hasAttribute('tabindex')) {
+        h1.setAttribute('tabindex', '-1');
+      }
+      h1.focus({ preventScroll: true });
+    }
+  }, [gate]);
 
   return (
     <div
@@ -391,6 +492,7 @@ export function Lobby({ heading, directory }: { heading: ReactNode; directory: R
       className={styles.root}
       data-lobby=""
       data-lobby-state={state}
+      data-gate={live ? gate : undefined}
       data-focus={live ? focus : ''}
       data-motion={reducedMotion ? 'reduced' : 'full'}
       data-peers={String(live ? peerCount : 0)}
@@ -407,17 +509,13 @@ export function Lobby({ heading, directory }: { heading: ReactNode; directory: R
           </Suspense>
         </SceneBoundary>
       )}
-      {live && (
-        <div className={cx(styles.veil, ready && styles.veilOff)} aria-hidden="true">
-          <p>Entering</p>
-        </div>
-      )}
+      {live && <EnterGate feed={feed} phase={gate} practice={practice} onEnter={enter} />}
 
       <Suspense fallback={null}>
         <ArrivalFocus root={rootRef} fallback={fallback} />
       </Suspense>
 
-      <div className={styles.overlay}>
+      <div className={cx(styles.overlay, fallback && styles.page)}>
         <div className={styles.intro}>
           {/* The way out of the cave, while the wall is the page: home. Without the
               wall the page is a normal page, with the site nav, so it has none. */}
@@ -450,19 +548,11 @@ export function Lobby({ heading, directory }: { heading: ReactNode; directory: R
             <style>{NO_SCRIPT_SHOWS_THE_PAGE}</style>
           </noscript>
         </div>
-        {live && (
-          <VoicePanel feed={feed} micRef={micRef} reducedMotion={reducedMotion} practice={practice} onRejoin={rejoin} />
-        )}
+        {live && <VoicePanel feed={feed} micRef={micRef} practice={practice} onRejoin={rejoin} />}
       </div>
 
       {live && (
         <>
-          <div className={styles.hint}>
-            <span className={styles.desk}>Drag to look · WASD walk · Space/Shift rise, fall</span>
-            <span className={styles.mob}>Drag to look · stick to walk</span>
-            {/* The practice build carries no voice, so it has no range to tell. */}
-            <span>{practice ? 'Tap a panel to open' : `Tap a panel to open · ${VOICE_RANGE_HINT}`}</span>
-          </div>
           <div ref={stickRef} className={styles.stick} aria-hidden="true">
             <div ref={knobRef} />
           </div>
