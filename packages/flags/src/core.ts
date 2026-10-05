@@ -29,6 +29,7 @@ export const DEFAULT_FLAGS: FlagConfig = {
   agent_start: false,
   proposals: false,
   house_spec: false,
+  lobby_avatars: false,
 };
 
 /**

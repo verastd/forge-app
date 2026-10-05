@@ -200,6 +200,19 @@ timeline. An admin can ask for a new draft with **Draft it again**.
 [`docs/architecture.md`](docs/architecture.md#the-house-model) has the
 rules as built, and [ADR-007](docs/adr/ADR-007-house-model.md) why.
 
+### Robot avatars
+
+With the `lobby_avatars` flag on (it is in `config/flags.json`), everyone
+in the Apps lobby is a hovering robot instead of an orb: one shared body
+(`apps/web/public/lobby/robot.glb`), split into paint zones in code, that
+idles, flies, banks and blinks procedurally. An admin dresses each robot at
+**/apps/avatars**: four colours, a chestplate image (PNG, JPEG or WebP, up
+to 1 MB), and a head from a library of `.glb` files they upload, either a
+head that replaces the robot's own (eyes on its `EyeL`/`EyeR` empties) or
+a face accessory worn over it (a mask, a visor, a helmet), which can cover
+the eyes. Anyone not dressed wears a default picked from their GitHub id.
+Admins are `FORGE_ADMIN_IDS` on the API, as for proposals.
+
 ## Repo map
 
 | Path | What's there |

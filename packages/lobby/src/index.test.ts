@@ -2,6 +2,8 @@ import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import * as acoustics from './acoustics.js';
 import * as attenuation from './attenuation.js';
+import * as avatar from './avatar.js';
+import * as avatarMotion from './avatarMotion.js';
 import * as lobby from './index.js';
 import type {
   AppEntry,
@@ -29,10 +31,10 @@ import * as voice from './voice.js';
 // The free-roam lobby's API, which the scene and the shell (apps/web) code
 // against. The runtime names are pinned here, and the signatures below are
 // pinned by `tsc` (typecheck runs over this file), so neither can drift
-// silently. presence.ts (the multiplayer unit's module) and the voice modules
-// (Fable's attenuation and acoustics, and the cave's settings) are
-// re-exported whole, so their names are taken from the modules themselves
-// rather than listed twice.
+// silently. presence.ts (the multiplayer unit's module), the voice modules
+// (Fable's attenuation and acoustics, and the cave's settings) and the avatar
+// modules (avatar.ts, avatarMotion.ts) are re-exported whole, so their names
+// are taken from the modules themselves rather than listed twice.
 const OWN = [
   // layout.ts
   'WALL',
@@ -94,7 +96,7 @@ const RETIRED = [
 ];
 
 /** Everything the re-exported modules export, in one list. */
-const REEXPORTED = [presence, attenuation, acoustics, voice].flatMap((module) => Object.keys(module));
+const REEXPORTED = [presence, attenuation, acoustics, voice, avatar, avatarMotion].flatMap((module) => Object.keys(module));
 
 describe('@forge/lobby public API', () => {
   it('exports its own API plus everything presence.ts and the voice modules export, with no name taken twice', () => {

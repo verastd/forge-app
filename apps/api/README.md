@@ -61,6 +61,13 @@ src/forge_api/
                        listed before the ones published from proposals
 ```
 
+**Robot avatars** (`services/avatars.py`, behind `lobby_avatars`) keep each member's
+robot (four colours, a head from the library, a chestplate image) and the head library
+in the state database. Files are stored once by sha256 and served from
+`/api/avatars/assets/{sha256}`, cacheable forever; an image's type and size are read from
+its own bytes, and a head must be a self-contained binary glTF 2.0. Writes are admin-only
+(`FORGE_ADMIN_IDS`).
+
 **The house model** (`services/house.py`; `docs/architecture.md`, "The
 house model") drafts the task of every passed proposal with an Anthropic
 model, and an admin publishes it. It is on while the `house_spec` and

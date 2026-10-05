@@ -7,5 +7,6 @@
   "mcp_connector": true,
   "agent_start": false,
   "proposals": true,
-  "house_spec": true
+  "house_spec": true,
+  "lobby_avatars": true
 }

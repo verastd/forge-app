@@ -27,3 +27,5 @@ export * from './presence.js';
 export * from './attenuation.js';
 export * from './acoustics.js';
 export * from './voice.js';
+export * from './avatar.js';
+export * from './avatarMotion.js';

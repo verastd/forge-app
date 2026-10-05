@@ -96,6 +96,7 @@ describe('FlagConfigSchema', () => {
     agent_start: true,
     proposals: true,
     house_spec: true,
+    lobby_avatars: true,
   };
 
   /** ALL_ON without `name`: a config written before that flag existed. */
@@ -116,6 +117,7 @@ describe('FlagConfigSchema', () => {
       agent_start: false,
       proposals: true,
       house_spec: false,
+      lobby_avatars: false,
     });
     expect(result.success).toBe(true);
   });
@@ -125,7 +127,7 @@ describe('FlagConfigSchema', () => {
     expect(result.success).toBe(false);
   });
 
-  it.each(['github_signin', 'apps_lobby', 'mcp_connector', 'agent_start', 'proposals', 'house_spec'] as const)(
+  it.each(['github_signin', 'apps_lobby', 'mcp_connector', 'agent_start', 'proposals', 'house_spec', 'lobby_avatars'] as const)(
     'requires %s: a config written before the flag existed is incomplete',
     (name) => {
       expect(FlagConfigSchema.safeParse(ALL_ON).success).toBe(true);
@@ -144,11 +146,12 @@ describe('FlagConfigSchema', () => {
       agent_start: false,
       proposals: false,
       house_spec: false,
+      lobby_avatars: false,
     });
     expect(result.success).toBe(false);
   });
 
-  it.each(['apps_lobby', 'mcp_connector', 'agent_start', 'proposals', 'house_spec'] as const)(
+  it.each(['apps_lobby', 'mcp_connector', 'agent_start', 'proposals', 'house_spec', 'lobby_avatars'] as const)(
     'rejects a non-boolean %s',
     (name) => {
       expect(FlagConfigSchema.safeParse({ ...ALL_ON, [name]: 'true' }).success).toBe(false);
@@ -166,6 +169,7 @@ describe('FlagConfigSchema', () => {
       'agent_start',
       'proposals',
       'house_spec',
+      'lobby_avatars',
     ]);
     expect(Object.keys(FlagConfigSchema.shape)).toEqual([...FLAG_NAMES]);
   });

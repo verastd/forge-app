@@ -48,6 +48,7 @@ const ALL_ON: FlagConfig = {
   agent_start: true,
   proposals: true,
   house_spec: true,
+  lobby_avatars: true,
 };
 
 function json(body: unknown, status = 200): Response {

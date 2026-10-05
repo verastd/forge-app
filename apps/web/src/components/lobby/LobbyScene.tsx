@@ -42,6 +42,8 @@ export interface SceneEvents {
 export interface LobbySceneProps {
   initial: CameraState;
   reducedMotion: boolean;
+  /** Draw people as robot avatars (the `lobby_avatars` flag), not orbs. Read once at mount. */
+  avatars: boolean;
   feed: RefObject<PresenceFeed | null>;
   /** The shell's HUD elements, read once when the scene mounts. */
   hud(): Omit<CaveHud, 'people'> | null;
@@ -55,7 +57,7 @@ const PEER_CLASSES = {
   talking: cls('talking'),
 };
 
-export default function LobbyScene({ initial, reducedMotion, feed, hud, events }: LobbySceneProps) {
+export default function LobbyScene({ initial, reducedMotion, avatars, feed, hud, events }: LobbySceneProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const peopleRef = useRef<HTMLDivElement>(null);
   const caveRef = useRef<Cave | null>(null);
@@ -88,6 +90,7 @@ export default function LobbyScene({ initial, reducedMotion, feed, hud, events }
         apps: APPS,
         initial,
         reducedMotion: motionRef.current,
+        avatars,
         feed: () => feed.current,
         hud: { ...elements, people },
         classes: PEER_CLASSES,

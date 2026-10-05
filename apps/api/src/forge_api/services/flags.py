@@ -53,6 +53,7 @@ DEFAULT_FLAGS: dict[str, bool] = {
     "agent_start": False,
     "proposals": False,
     "house_spec": False,
+    "lobby_avatars": False,
 }
 
 logger = logging.getLogger(__name__)
