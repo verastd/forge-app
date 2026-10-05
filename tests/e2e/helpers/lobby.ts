@@ -6,10 +6,12 @@
  * GL, SwiftShader (`playwright.config.ts` pins it), so nothing here reads
  * pixels. The page reports on itself through its root element instead,
  * `<div data-lobby>` (apps/web/src/components/lobby/Lobby.tsx):
- * `data-lobby-state`, the camera as `data-x/y/z/yaw` (written by the frame
+ * `data-lobby-state`, the camera as `data-x/y/z/yaw/pitch` (written by the frame
  * loop, so absent until the first frame), what the crosshair is on as
- * `data-focus`, and the presence feed as `data-feed`, `data-peers` and
- * `data-voice`.
+ * `data-focus`, and the presence feed as `data-feed`, `data-peers`,
+ * `data-voice`, `data-sound`, `data-room-sound` and `data-deafened`. The
+ * people panel ("People nearby") lists everyone else in the room, one row
+ * per person, each marked `data-person-id`.
  *
  * SwiftShader renders this scene at about one frame a second, and the scene
  * only moves on frames: every wait below polls the attributes rather than
@@ -30,7 +32,10 @@ import type { Locator, Page } from '@playwright/test';
 import {
   CAMERA_STORAGE_ITEM,
   INITIAL_CAMERA,
+  appAt,
   appBySlug,
+  encodePosition,
+  slotFromIndex,
   slotIndex,
   slotPose,
 } from '../../../packages/lobby/dist/index.js';
@@ -51,8 +56,9 @@ const data = appBySlug('data');
 if (data === undefined) {
   throw new Error('the lobby registry has no Data app');
 }
+const dataSlot = data.slot;
 /** The Data app's slot on the wall: 0, the bottom panel straight ahead of the spawn point. */
-export const DATA_SLOT = slotIndex(data.slot);
+export const DATA_SLOT = slotIndex(dataSlot);
 
 /**
  * An empty slot in view from the spawn point on any screen, a phone held
@@ -249,10 +255,67 @@ export function radius(camera: Camera): number {
  */
 export async function slotOnScreen(page: Page, index: number, pitch = INITIAL_CAMERA.pitch): Promise<Point> {
   const camera = await readCamera(page);
+  const point = project(camera, await canvasBox(page), index, pitch);
+  if (point === null) {
+    throw new Error(`slot ${index} is not in view from ${JSON.stringify(camera)}`);
+  }
+  return point;
+}
+
+/**
+ * An empty slot that the 3D view itself shows here, the nearest to Data's
+ * first: its centre on screen with nothing over it. For a test that needs a
+ * tap on any empty slot (to bring the toast, say) while something large
+ * floats over the view, such as the people panel at its fullest, which
+ * covers most of a phone held upright. Spawn pitch, as `slotOnScreen`.
+ */
+export async function emptySlotInView(page: Page): Promise<Point> {
+  const camera = await readCamera(page);
+  const box = await canvasBox(page);
+  const points: Point[] = [];
+  for (let reach = 1; reach <= 4; reach += 1) {
+    for (let row = dataSlot.row - reach; row <= dataSlot.row + reach; row += 1) {
+      for (let col = dataSlot.col - reach; col <= dataSlot.col + reach; col += 1) {
+        // Only the ring at this reach: the ones inside it came before.
+        if (Math.max(Math.abs(row - dataSlot.row), Math.abs(col - dataSlot.col)) !== reach) {
+          continue;
+        }
+        let index: number;
+        try {
+          index = slotIndex({ col, row });
+        } catch {
+          continue; // off the wall
+        }
+        const point = appAt(slotFromIndex(index)) === undefined ? project(camera, box, index, INITIAL_CAMERA.pitch) : null;
+        if (point !== null) {
+          points.push(point);
+        }
+      }
+    }
+  }
+  const found = await page.evaluate(
+    (points) => points.findIndex(({ x, y }) => document.elementFromPoint(x, y)?.tagName === 'CANVAS'),
+    points,
+  );
+  const point = points[found];
+  if (point === undefined) {
+    throw new Error(`no empty slot near Data is in view with nothing over it, from ${JSON.stringify(camera)}`);
+  }
+  return point;
+}
+
+type Box = { x: number; y: number; width: number; height: number };
+
+async function canvasBox(page: Page): Promise<Box> {
   const box = await lobbyRoot(page).locator('canvas').boundingBox();
   if (box === null) {
     throw new Error('the lobby has no canvas on screen');
   }
+  return box;
+}
+
+/** Where slot `index`'s centre is on a canvas at `box`, seen from `camera` at `pitch`, or null when out of view. */
+function project(camera: Camera, box: Box, index: number, pitch: number): Point | null {
   const [px, py, pz] = slotPose(index).position;
   const dx = px - camera.x;
   const dy = py - camera.y;
@@ -265,7 +328,7 @@ export async function slotOnScreen(page: Page, index: number, pitch = INITIAL_CA
   const ndcX = ax / -vz / (f * (box.width / box.height));
   const ndcY = vy / -vz / f;
   if (vz >= 0 || Math.abs(ndcX) >= 1 || Math.abs(ndcY) >= 1) {
-    throw new Error(`slot ${index} is not in view from ${JSON.stringify(camera)}`);
+    return null;
   }
   return { x: box.x + ((ndcX + 1) / 2) * box.width, y: box.y + ((1 - ndcY) / 2) * box.height };
 }
@@ -366,4 +429,62 @@ export async function seedCamera(page: Page, camera: CameraState): Promise<void>
 export async function savedCamera(page: Page): Promise<CameraState | null> {
   const raw = await page.evaluate((item) => window.sessionStorage.getItem(item), CAMERA_STORAGE_ITEM);
   return raw === null ? null : (JSON.parse(raw) as CameraState);
+}
+
+/** The people panel: the lobby's "People nearby" aside. */
+export function peoplePanel(page: Page): Locator {
+  return page.getByRole('complementary', { name: 'People nearby' });
+}
+
+/** Someone's row in the people panel, by their feed id. */
+export function personRow(page: Page, id: string): Locator {
+  return peoplePanel(page).locator(`li[data-person-id="${id}"]`);
+}
+
+/**
+ * One of the people panel's live regions (VoicePanel.tsx), which are always in
+ * the page with their text set and cleared: `status` (whether voice is on, and
+ * why not), `problem` (why the mic didn't start), `elsewhere` (another tab or
+ * device took the seat) and `room-sound` (the cave sound failed).
+ */
+export function voiceLine(page: Page, which: 'status' | 'problem' | 'elsewhere' | 'room-sound' = 'status'): Locator {
+  return peoplePanel(page).locator(`[role="status"][data-live="${which}"]`);
+}
+
+/**
+ * Another practice tab, as the local feed hears one: hellos on the
+ * `forge.lobby` channel every half second (the feed drops a tab silent for
+ * 3 s), and, given `at`, its position in the lobby's own packet. Played from
+ * inside the page, so it needs no second scene. `id` must look like a
+ * practice tab's (`practice-` and six hex digits).
+ */
+export async function addGhost(page: Page, id: string, name: string, at?: { x: number; y: number; z: number }): Promise<void> {
+  const pos = at === undefined ? null : [...encodePosition({ ...at, yaw: 0 })];
+  await page.evaluate(
+    ({ id, name, pos }) => {
+      const host = window as unknown as { __ghosts?: Record<string, { channel: BroadcastChannel; timer: number }> };
+      host.__ghosts ??= {};
+      host.__ghosts[id]?.channel.close();
+      const channel = new BroadcastChannel('forge.lobby');
+      const hello = pos === null ? { type: 'hello', id, name } : { type: 'hello', id, name, pos: new Uint8Array(pos) };
+      channel.postMessage(hello);
+      host.__ghosts[id] = { channel, timer: window.setInterval(() => channel.postMessage(hello), 500) };
+    },
+    { id, name, pos },
+  );
+}
+
+/** A ghost from `addGhost` says goodbye, as a closing tab does. */
+export async function removeGhost(page: Page, id: string): Promise<void> {
+  await page.evaluate((id) => {
+    const host = window as unknown as { __ghosts?: Record<string, { channel: BroadcastChannel; timer: number }> };
+    const ghost = host.__ghosts?.[id];
+    if (ghost === undefined) {
+      return;
+    }
+    window.clearInterval(ghost.timer);
+    ghost.channel.postMessage({ type: 'bye', id });
+    ghost.channel.close();
+    delete host.__ghosts?.[id];
+  }, id);
 }

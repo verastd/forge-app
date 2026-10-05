@@ -121,6 +121,31 @@ test.describe('browsing the Bridge', () => {
     await expect(tip).toBeVisible();
   });
 
+  test('Escape hides the estimate while the chip is only hovered, with focus somewhere else (WCAG 1.4.13)', async ({
+    page,
+  }) => {
+    await page.goto('/contribute');
+    const summary = 'Let people download the Upland data they are looking at as a spreadsheet file.';
+    const card = page.getByRole('region', { name: 'Tasks' }).getByRole('article').filter({ has: page.getByRole('link', { name: summary, exact: true }) });
+    const chip = card.getByText('Agent runs ~1 hour');
+    const tip = card.getByRole('tooltip', { includeHidden: true });
+
+    await chip.hover();
+    await expect(tip).toBeVisible();
+    await expect(chip).not.toBeFocused();
+    // The pointer stays put; Escape reaches the page, not the chip, and still hides it.
+    await page.keyboard.press('Escape');
+    await expect(tip).toBeHidden();
+    await page.waitForTimeout(300);
+    await expect(tip).toBeHidden();
+    // Leaving and coming back shows it again.
+    await page.mouse.move(0, 0);
+    await chip.hover();
+    await expect(tip).toBeVisible();
+    await page.mouse.move(0, 0);
+    await expect(tip).toBeHidden();
+  });
+
   test('each card is a link named by its summary, and opens from anywhere on the card (review-pages, Phase 4 carry-over)', async ({
     page,
   }) => {

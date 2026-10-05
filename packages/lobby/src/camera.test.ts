@@ -1,11 +1,24 @@
 import { describe, expect, it } from 'vitest';
 
-import { CAMERA_LIMITS, INITIAL_CAMERA, clampCamera, facing, normalizeYaw } from './camera.js';
+import { CAMERA_LIMITS, CAMERA_SPEED, INITIAL_CAMERA, clampCamera, facing, normalizeYaw } from './camera.js';
 import type { CameraState } from './camera.js';
 import { WALL, slotPose } from './layout.js';
 
 const PI = Math.PI;
 const state = (overrides: Partial<CameraState> = {}): CameraState => ({ ...INITIAL_CAMERA, ...overrides });
+
+describe('CAMERA_SPEED', () => {
+  it('is the fastest the camera walks and rises, frozen', () => {
+    expect(CAMERA_SPEED).toEqual({ walk: 16, rise: 24 });
+    expect(Object.isFrozen(CAMERA_SPEED)).toBe(true);
+    // The scene's walk (scene/controls.ts: acceleration 22 m/s² against drag to
+    // 2% a second) tops out at 22 / ln 50 a second for each push, and the keys
+    // and the stick together push twice, on a diagonal.
+    const terminal = 22 / Math.log(50);
+    expect(2 * Math.SQRT2 * terminal).toBeLessThanOrEqual(CAMERA_SPEED.walk);
+    expect(terminal).toBeLessThanOrEqual(CAMERA_SPEED.rise);
+  });
+});
 
 describe('INITIAL_CAMERA and CAMERA_LIMITS', () => {
   it('opens at the centre, at eye height, facing slot 0 and looking a touch down', () => {

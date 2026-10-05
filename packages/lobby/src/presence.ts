@@ -1,9 +1,10 @@
 /**
  * Lobby presence, the pure half of multiplayer: the position packet members
- * exchange, when to send one, how loud a voice is at a distance, what a
- * display name may contain, and how many packets a sender may deliver. No
- * DOM, no clock and no transport: the presence feeds in apps/web pass the
- * time in and move the bytes.
+ * exchange, when to send one, what a display name may contain, and how many
+ * packets a sender may deliver. No DOM, no clock and no transport: the
+ * presence feeds in apps/web pass the time in and move the bytes. How loud a
+ * voice is at a distance, and who may hear it, is voice.ts's, on Fable's
+ * attenuation and acoustics (attenuation.ts, acoustics.ts).
  *
  * Everything a peer sends is untrusted input, so decoding rejects rather than
  * repairs. A packet of the wrong size or version, or one placing its sender
@@ -11,7 +12,7 @@
  * something plausible.
  */
 
-import { CAMERA_LIMITS } from './camera.js';
+import { CAMERA_LIMITS, CAMERA_SPEED } from './camera.js';
 
 /**
  * A member's position and heading, on three.js axes (+Y up): metres, with yaw
@@ -133,36 +134,6 @@ export function sendPolicy(lastSent: SelfState | null, lastSentAt: number, now: 
   return moved > MOVE_THRESHOLD || turned > TURN_THRESHOLD;
 }
 
-/** Voices play at full volume within this many metres of you… */
-const FULL_VOLUME_RANGE = 2;
-/** …fade out to silence here… */
-export const AUDIBLE_RANGE = 9;
-/**
- * …and past this distance a feed stops receiving their audio at all. It is
- * wider than AUDIBLE_RANGE so that walking back into earshot finds the track
- * already flowing.
- */
-export const SUBSCRIBE_RANGE = 14;
-
-/**
- * How near a peer `dist` metres away is, per the lobby contract:
- * `clamp(1 − (dist − 2) / (9 − 2), 0, 1)`. 1 within 2 m, falling linearly to
- * 0 at AUDIBLE_RANGE and beyond. A distance that is not a number is 0.
- */
-export function near(dist: number): number {
-  const nearness = 1 - (dist - FULL_VOLUME_RANGE) / (AUDIBLE_RANGE - FULL_VOLUME_RANGE);
-  return Number.isNaN(nearness) ? 0 : clamp01(nearness);
-}
-
-/**
- * The playback volume, 0 to 1, for a peer at nearness `nearness` (from
- * `near`). Linear in amplitude, so the fade reaches silence exactly at
- * AUDIBLE_RANGE. Anything that is not a number is silent.
- */
-export function gainFor(nearness: number): number {
-  return Number.isNaN(nearness) ? 0 : clamp01(nearness);
-}
-
 /** GitHub's login limit, and the most a name tag shows. */
 export const NAME_MAX_LENGTH = 39;
 const FALLBACK_NAME = 'member';
@@ -173,13 +144,25 @@ const FALLBACK_NAME = 'member';
  * pass for another.
  */
 const UNSAFE_CHARACTERS = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu;
+/**
+ * Letters and symbols that draw nothing: the Hangul fillers (U+3164, U+115F,
+ * U+1160, the halfwidth U+FFA0) and the Braille blank (U+2800). A name made
+ * of them is as empty as one made of spaces, so they count as spaces.
+ */
+const BLANK_CHARACTERS = /[ᅟᅠ⠀ㅤﾠ]/gu;
+/** Combining marks a base character may carry; more would only stack up over the row and the name tag. */
+const MAX_MARKS_PER_BASE = 2;
+const MARK = /^\p{M}$/u;
+const VISIBLE = /[\p{L}\p{N}]/u;
 
 /**
- * A display name that is safe to show: unsafe characters stripped,
+ * A display name that is safe to show: unsafe characters stripped, the blank
+ * ones made spaces, at most two combining marks on any one character,
  * surrounding whitespace trimmed, at most NAME_MAX_LENGTH code points (a
  * character outside the Basic Multilingual Plane is never split), and
- * "member" when nothing is left or the input is not a string. Render it with
- * `textContent` all the same: this is not HTML escaping.
+ * "member" when no letter or number is left to see or the input is not a
+ * string. Render it with `textContent` all the same: this is not HTML
+ * escaping.
  */
 export function sanitizeName(name: unknown): string {
   if (typeof name !== 'string') {
@@ -187,15 +170,24 @@ export function sanitizeName(name: unknown): string {
   }
   let clamped = '';
   let count = 0;
-  for (const character of name.replace(UNSAFE_CHARACTERS, '').trim()) {
+  let marks = 0;
+  for (const character of name.replace(UNSAFE_CHARACTERS, '').replace(BLANK_CHARACTERS, ' ').trim()) {
     if (count === NAME_MAX_LENGTH) {
       break;
+    }
+    if (MARK.test(character)) {
+      marks += 1;
+      if (marks > MAX_MARKS_PER_BASE) {
+        continue;
+      }
+    } else {
+      marks = 0;
     }
     clamped += character;
     count += 1;
   }
   clamped = clamped.trimEnd();
-  return clamped.length > 0 ? clamped : FALLBACK_NAME;
+  return VISIBLE.test(clamped) ? clamped : FALLBACK_NAME;
 }
 
 /** The most packets one sender may deliver in any one second: three times the ten a well-behaved peer sends. */
@@ -249,8 +241,31 @@ export function forgetSender(state: PacketLimiter, identity: string): void {
   state.recent.delete(identity);
 }
 
-function clamp01(value: number): number {
-  return Math.min(1, Math.max(0, value));
+/**
+ * Metres any step may cover on top of CAMERA_SPEED's: packets that left a
+ * sender a tenth of a second apart can arrive together.
+ */
+export const STEP_SLACK = 3;
+
+/**
+ * Whether a peer could have walked from `from`, heard at `fromAt`, to `to`,
+ * heard at `at` (milliseconds on one monotonic clock): no faster across the
+ * floor or up and down than CAMERA_SPEED allows, give or take STEP_SLACK
+ * metres. A peer's first position (`from` null) is always plausible; a time
+ * that went backwards, or isn't a number, allows the slack alone; a position
+ * that isn't a number never is. A packet that fails is ignored, which keeps
+ * a modified client from flipping between two places faster than anyone can
+ * walk.
+ */
+export function plausibleStep(from: SelfState | null, fromAt: number, to: SelfState, at: number): boolean {
+  if (from === null) {
+    return true;
+  }
+  const elapsed = at - fromAt;
+  const seconds = elapsed > 0 ? elapsed / 1000 : 0;
+  const across = Math.hypot(to.x - from.x, to.z - from.z);
+  const up = Math.abs(to.y - from.y);
+  return across <= CAMERA_SPEED.walk * seconds + STEP_SLACK && up <= CAMERA_SPEED.rise * seconds + STEP_SLACK;
 }
 
 /** `angle` in (−π, π]; NaN for anything that is not a finite number. */

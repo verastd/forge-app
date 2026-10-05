@@ -1,11 +1,12 @@
 import { expect, test } from '@playwright/test';
-import type { Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 
 import { INITIAL_CAMERA, appAt, facing, slotFromIndex } from '../../packages/lobby/dist/index.js';
 import {
   DATA_LINK,
   DATA_SLOT,
   EMPTY_ABOVE_DATA,
+  addGhost,
   clickThrough,
   directoryBlock,
   expectInSight,
@@ -18,8 +19,11 @@ import {
   holdKey,
   lobbyRoot,
   openLobby,
+  peoplePanel,
+  personRow,
   radius,
   readCamera,
+  removeGhost,
   savedCamera,
   seedCamera,
   serveFlags,
@@ -27,6 +31,7 @@ import {
   slotOnScreen,
   tapScene,
   tapThrough,
+  voiceLine,
 } from './helpers/lobby';
 import { demoSignIn, signInAs } from './helpers/session';
 
@@ -53,7 +58,10 @@ import { demoSignIn, signInAs } from './helpers/session';
  * test opts out, as the full-motion block below does (it never visits `/`).
  *
  * Presence on the practice build is the local feed: tabs of one browser
- * over a BroadcastChannel, no server and no voice. The LiveKit feed is
+ * over a BroadcastChannel, no server and no voice. The people panel ("People
+ * nearby") says so, and lists everyone else in the room with their
+ * distance. Another tab is played from inside the page where one will do
+ * (`addGhost`), which saves building a second scene. The LiveKit feed is
  * live-lobby.spec.ts's; this server is never given LiveKit settings
  * (playwright.config.ts blanks them), so its token route says voice is
  * unavailable.
@@ -72,15 +80,19 @@ function directoryLink(page: Page) {
     .getByRole('link', { name: DATA_LINK, exact: true });
 }
 
-function peopleNearby(page: Page) {
-  return page.getByRole('complementary', { name: 'People nearby' });
-}
+const peopleNearby = peoplePanel;
+const PRACTICE = 'This practice copy has no voice. Voice is on the live site, signed in with GitHub.';
+const NOBODY = 'Nobody else is here yet.';
+/** Another practice tab, played by `addGhost`. */
+const GHOST = 'practice-0a0b0c';
 
 test('the browser has WebGL2, or every scene test below fails for that reason', async ({ page }) => {
   await expectWebGL2(page);
 });
 
-test('signed in, the lobby comes up at the centre, facing the Data screen, alone', async ({ page }) => {
+test('signed in, the lobby comes up at the centre, facing the Data screen, alone, and the panel says why there is no voice', async ({
+  page,
+}) => {
   test.setTimeout(90_000);
   await openLobby(page);
 
@@ -98,7 +110,25 @@ test('signed in, the lobby comes up at the centre, facing the Data screen, alone
   await expect(root).toHaveAttribute('data-feed', 'local');
   await expect(root).toHaveAttribute('data-peers', '0');
   await expect(root).toHaveAttribute('data-voice', 'unavailable');
-  await expect(page.getByRole('button', { name: 'Voice unavailable' })).toBeDisabled();
+  await expect(root).toHaveAttribute('data-sound', 'none');
+  await expect(root).toHaveAttribute('data-deafened', 'false');
+  const panel = peopleNearby(page);
+  await expect(voiceLine(page)).toHaveText(PRACTICE);
+  await expect(panel.getByRole('button', { name: 'Mic', exact: true })).toBeDisabled();
+  await expect(panel.getByRole('button', { name: 'Deafen', exact: true })).toBeDisabled();
+  // The practice feed sees the room (this browser's tabs), so it can say nobody is here.
+  await expect(panel.getByText(NOBODY)).toBeVisible();
+  // No room, so no cave sound to report, and no trouble to announce.
+  await expect(panel.getByText(/cave sound/i)).toHaveCount(0);
+  for (const which of ['problem', 'elsewhere', 'room-sound'] as const) {
+    await expect(voiceLine(page, which)).toHaveText('');
+  }
+  // No voices, so no range to tell.
+  await expect(page.getByText('Tap a panel to open', { exact: true })).toBeVisible();
+  await expect(page.getByText(/Voices carry/)).toHaveCount(0);
+  // At the right: the cave's top-left corner is its Exit.
+  const box = await panel.boundingBox();
+  expect(box !== null && box.x >= (page.viewportSize()?.width ?? 0) / 2, 'the panel stands in the right half').toBe(true);
 });
 
 test('while the wall is the page the heading, the lede and the directory are out of sight, from the first render on', async ({
@@ -571,6 +601,28 @@ test.describe('on a phone', () => {
     await expect(root).toHaveAttribute('data-hover-glow', 'off');
     await expect(page).toHaveURL(/\/apps$/);
   });
+
+  test('the people panel shows the nearest four and anyone speaking, then "and N more" opens the rest', async ({ page }) => {
+    test.setTimeout(120_000);
+    // The panel's fullest state (a development build's fixture on the practice feed).
+    await openLobby(page, '/apps?voice-fixture=full');
+    const panel = peopleNearby(page);
+    const rows = panel.locator('li[data-person-id]');
+    await expect(rows).toHaveCount(8);
+    const shown = async () =>
+      (await rows.evaluateAll((items) => items.filter((item) => item.getClientRects().length > 0).map((item) => item.getAttribute('data-person-id'))));
+    // The nearest three, and the one speaking at 31 m, ahead of nearer people who are quiet.
+    expect(await shown()).toEqual(['gh:1001', 'gh:1002', 'gh:1003', 'gh:1006']);
+    const more = panel.getByRole('button', { name: 'and 4 more' });
+    await expect(more).toHaveAttribute('aria-expanded', 'false');
+    await more.focus();
+    await page.keyboard.press('Enter');
+    // Opened: everyone, and focus on the first of them that was out of sight.
+    await expect(panel.getByRole('button', { name: 'Show fewer' })).toHaveAttribute('aria-expanded', 'true');
+    expect(await shown()).toHaveLength(8);
+    await expect(personRow(page, 'gh:1004').getByRole('button', { name: 'What you hear of octocat' })).toBeFocused();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  });
 });
 
 test('two tabs signed in with the practice account see each other, and a closed one leaves', async ({
@@ -594,9 +646,17 @@ test('two tabs signed in with the practice account see each other, and a closed 
     const root = lobbyRoot(tab);
     await expect(root).toHaveAttribute('data-feed', 'local');
     await expect(root).toHaveAttribute('data-voice', 'unavailable');
-    // The practice account's login, in the nearby list: both stand at the spawn point.
-    await expect(tab.getByRole('complementary', { name: 'People nearby' })).toContainText('you');
-    await expect(tab.getByRole('button', { name: 'Voice unavailable' })).toBeDisabled();
+    const panel = peopleNearby(tab);
+    // The practice build carries no voice, and says so.
+    await expect(voiceLine(tab)).toHaveText(PRACTICE);
+    await expect(panel.getByRole('button', { name: 'Mic', exact: true })).toBeDisabled();
+    // The other tab, in the list, under the practice account's login and with
+    // its distance: both stand at the spawn point. No voice, so no mute.
+    const others = panel.getByRole('list', { name: 'People in the lobby' }).getByRole('listitem');
+    await expect(others).toHaveCount(1);
+    await expect(others.first()).toContainText('you');
+    await expect(others.first().getByText('0 m', { exact: true })).toBeVisible();
+    await expect(others.first().getByRole('button', { name: /^Mute/ })).toHaveCount(0);
   }
 
   await other.close();
@@ -604,7 +664,7 @@ test('two tabs signed in with the practice account see each other, and a closed 
   // lost; then the peer goes when it has been silent for 3 s, seen on the
   // next software-rendered frame. Measured at 2 to 5 s: allow 10.
   await expect(lobbyRoot(page)).toHaveAttribute('data-peers', '0', { timeout: 10_000 });
-  await expect(page.getByRole('complementary', { name: 'People nearby' })).toContainText('nobody in range');
+  await expect(peopleNearby(page)).toContainText(NOBODY);
 });
 
 test('someone whose position has not arrived is listed as joining, with no orb, until it does', async ({ page }) => {
@@ -613,40 +673,217 @@ test('someone whose position has not arrived is listed as joining, with no orb, 
   await signInToLobby(page);
   await expectReady(page);
   const root = lobbyRoot(page);
-  await expect(peopleNearby(page)).toContainText('nobody in range');
+  await expect(peopleNearby(page)).toContainText(NOBODY);
 
-  // Another practice tab as the local feed hears one: a hello every half
-  // second, and no position yet (the feed drops a tab silent for 3 s).
-  await page.evaluate(() => {
-    const channel = new BroadcastChannel('forge.lobby');
-    const hello = { type: 'hello', id: 'practice-0a0b0c', name: 'ghost' };
-    channel.postMessage(hello);
-    Object.assign(window, { __ghost: { channel, timer: setInterval(() => channel.postMessage(hello), 500) } });
-  });
-  await expect(peopleNearby(page)).toContainText('ghost · joining', { timeout: 20_000 });
+  // Another practice tab as the local feed hears one, with no position yet.
+  await addGhost(page, GHOST, 'ghost');
+  const row = personRow(page, GHOST);
+  await expect(row).toContainText('ghost', { timeout: 20_000 });
+  await expect(row).toContainText('joining');
   await expect(root).toHaveAttribute('data-peers', '0');
 
   // Its first position, 3 m ahead: now an orb, and a row with its distance.
-  await page.evaluate(() => {
-    const bytes = new Uint8Array(9);
-    const view = new DataView(bytes.buffer);
-    view.setUint8(0, 1);
-    view.setInt16(3, 170, true);
-    view.setInt16(5, -300, true);
-    const { channel } = (window as unknown as { __ghost: { channel: BroadcastChannel } }).__ghost;
-    channel.postMessage({ type: 'pos', id: 'practice-0a0b0c', name: 'ghost', pos: bytes });
-  });
+  await addGhost(page, GHOST, 'ghost', { x: 0, y: 1.7, z: -3 });
   await expect(root).toHaveAttribute('data-peers', '1', { timeout: 20_000 });
-  await expect(peopleNearby(page)).toContainText('ghost');
-  await expect(peopleNearby(page)).not.toContainText('joining');
+  await expect(row).toContainText('3 m');
+  await expect(row).not.toContainText('joining');
 
-  await page.evaluate(() => {
-    const ghost = (window as unknown as { __ghost: { channel: BroadcastChannel; timer: number } }).__ghost;
-    clearInterval(ghost.timer);
-    ghost.channel.postMessage({ type: 'bye', id: 'practice-0a0b0c' });
-  });
+  await removeGhost(page, GHOST);
   await expect(root).toHaveAttribute('data-peers', '0', { timeout: 20_000 });
-  await expect(peopleNearby(page)).toContainText('nobody in range');
+  await expect(peopleNearby(page)).toContainText(NOBODY);
+});
+
+test("the panel's controls are reached by keyboard, in order, and say what they are", async ({ page }) => {
+  test.setTimeout(120_000);
+  await expectWebGL2(page);
+  await signInToLobby(page);
+  await expectReady(page);
+  await addGhost(page, GHOST, 'ghost', { x: 4, y: 1.7, z: 0 });
+  const panel = peopleNearby(page);
+  await expect(personRow(page, GHOST)).toContainText('4 m', { timeout: 20_000 });
+
+  // No voice here, but the buttons stay in the tab order (aria-disabled), so a
+  // keyboard finds them and the status line beside them says why.
+  const mic = panel.getByRole('button', { name: 'Mic', exact: true });
+  const deafen = panel.getByRole('button', { name: 'Deafen', exact: true });
+  await expect(mic).toHaveAttribute('aria-pressed', 'false');
+  await expect(mic).toHaveAttribute('aria-disabled', 'true');
+  await expect(deafen).toHaveAttribute('aria-pressed', 'false');
+  await mic.focus();
+  await expect(mic).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(deafen).toBeFocused();
+  // Next, the ghost's row: its level bar, the way to the numbers.
+  await page.keyboard.press('Tab');
+  await expect(personRow(page, GHOST).locator('[aria-describedby]')).toBeFocused();
+  // Pressing a button that can't act does nothing, and says nothing new.
+  await mic.focus();
+  await page.keyboard.press('Enter');
+  await expect(mic).toHaveAttribute('aria-pressed', 'false');
+  await expect(voiceLine(page)).toHaveText(PRACTICE);
+});
+
+test("a row's level bar shows what you hear as a tooltip, on focus or hover, and Escape hides it either way", async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  await openLobby(page);
+  await addGhost(page, GHOST, 'ghost', { x: 0, y: 1.7, z: -6 });
+  const level = personRow(page, GHOST).getByRole('button', { name: 'What you hear of ghost' });
+  const tip = personRow(page, GHOST).getByRole('tooltip');
+  await expect(personRow(page, GHOST)).toContainText('6 m', { timeout: 20_000 });
+
+  // The numbers stay out of sight until asked for.
+  await expect(tip).toBeHidden();
+  await level.focus();
+  await expect(tip).toBeVisible();
+  // The full name first, then the numbers. The practice build has no voice:
+  // nothing direct, no reverb, and so no lowpass to report.
+  await expect(tip).toHaveText('ghost Direct 0% · Reverb 0%');
+  await expect(level).toHaveAccessibleDescription('ghost Direct 0% · Reverb 0%');
+  await page.keyboard.press('Escape');
+  await expect(tip).toBeHidden();
+  await expect(level).toBeFocused();
+  // Space is the bar's own (a button): it brings the tip back, and leaves the camera where it is.
+  const before = await readCamera(page);
+  await page.keyboard.press('Space');
+  await expect(tip).toBeVisible();
+  await page.waitForTimeout(1_500);
+  expect((await readCamera(page)).y).toBe(before.y);
+  // Focus again, or a hover, brings it back.
+  await level.blur();
+  await expect(tip).toBeHidden();
+  await level.focus();
+  await expect(tip).toBeVisible();
+  await level.blur();
+  await expect(tip).toBeHidden();
+
+  // Hovered, with keyboard focus somewhere else: Escape still hides it (WCAG 1.4.13).
+  await level.hover();
+  await expect(tip).toBeVisible();
+  await expect(level).not.toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(tip).toBeHidden();
+  await page.waitForTimeout(300);
+  await expect(tip).toBeHidden();
+  // Off it and back on, it shows again; and the pointer can move onto the tip itself.
+  await page.mouse.move(200, 500);
+  await level.hover();
+  await expect(tip).toBeVisible();
+  await tip.hover();
+  await expect(tip).toBeVisible();
+});
+
+test('a control that goes away under focus hands it on: to Mic, to the next row, or to the list', async ({ page }) => {
+  test.setTimeout(150_000);
+  // The fixture's "Turn on sound" and Retry go away when pressed, as the real ones do.
+  await openLobby(page, '/apps?voice-fixture=full');
+  const panel = peopleNearby(page);
+  const mic = panel.getByRole('button', { name: 'Mic', exact: true });
+  await panel.getByRole('button', { name: 'Turn on sound' }).focus();
+  await page.keyboard.press('Enter');
+  await expect(panel.getByRole('button', { name: 'Turn on sound' })).toHaveCount(0);
+  await expect(mic).toBeFocused();
+  await expect(voiceLine(page)).toHaveText('Voice on');
+  await panel.getByRole('button', { name: 'Retry' }).focus();
+  await page.keyboard.press('Enter');
+  await expect(panel.getByRole('button', { name: 'Retry' })).toHaveCount(0);
+  await expect(mic).toBeFocused();
+
+  // Rows, on the practice feed: two other tabs, at 4 and 8 m.
+  await openLobby(page);
+  await addGhost(page, 'practice-0a0b01', 'ghost-a', { x: 0, y: 1.7, z: -4 });
+  await addGhost(page, 'practice-0a0b02', 'ghost-b', { x: 0, y: 1.7, z: -8 });
+  const a = personRow(page, 'practice-0a0b01').getByRole('button', { name: 'What you hear of ghost-a' });
+  const b = personRow(page, 'practice-0a0b02').getByRole('button', { name: 'What you hear of ghost-b' });
+  await expect(personRow(page, 'practice-0a0b02')).toContainText('8 m', { timeout: 20_000 });
+  // The first leaves while its bar has focus: the next row's bar has it.
+  await a.focus();
+  await removeGhost(page, 'practice-0a0b01');
+  await expect(personRow(page, 'practice-0a0b01')).toHaveCount(0, { timeout: 20_000 });
+  await expect(b).toBeFocused();
+  // The last leaves: the list goes with them, and Mic has focus.
+  await removeGhost(page, 'practice-0a0b02');
+  await expect(personRow(page, 'practice-0a0b02')).toHaveCount(0, { timeout: 20_000 });
+  await expect(panel.getByRole('button', { name: 'Mic', exact: true })).toBeFocused();
+  await expect(panel.getByText(NOBODY)).toBeVisible();
+});
+
+test('the list holds its order while the pointer is over it, and takes the new order once it leaves', async ({ page }) => {
+  test.setTimeout(150_000);
+  await openLobby(page);
+  await addGhost(page, 'practice-0a0b01', 'ghost-a', { x: 0, y: 1.7, z: -4 });
+  await addGhost(page, 'practice-0a0b02', 'ghost-b', { x: 0, y: 1.7, z: -8 });
+  const rows = peopleNearby(page).locator('li[data-person-id]');
+  const order = () => rows.evaluateAll((items) => items.map((item) => item.getAttribute('data-person-id')));
+  await expect.poll(order, { timeout: 20_000 }).toEqual(['practice-0a0b01', 'practice-0a0b02']);
+
+  // The pointer on the second row, about to press something there; then the first walks past it.
+  await rows.nth(1).hover();
+  await addGhost(page, 'practice-0a0b01', 'ghost-a', { x: 0, y: 1.7, z: -12 });
+  await expect(personRow(page, 'practice-0a0b01')).toContainText('12 m', { timeout: 20_000 });
+  await page.waitForTimeout(1_000);
+  expect(await order()).toEqual(['practice-0a0b01', 'practice-0a0b02']);
+  // Off the list: half a second later it takes the new order.
+  await page.mouse.move(200, 500);
+  await expect.poll(order, { timeout: 5_000 }).toEqual(['practice-0a0b02', 'practice-0a0b01']);
+});
+
+test("the panel's fullest state: every word, label and live region", async ({ page }) => {
+  test.setTimeout(120_000);
+  await openLobby(page, '/apps?voice-fixture=full');
+  const panel = peopleNearby(page);
+  const root = lobbyRoot(page);
+  await expect(root).toHaveAttribute('data-voice', 'off');
+  await expect(root).toHaveAttribute('data-sound', 'blocked');
+  await expect(root).toHaveAttribute('data-room-sound', 'failed');
+
+  // Sound held back: the status line says so, beside the button that fixes it.
+  await expect(voiceLine(page)).toHaveText('Voice on. Sound is off until you press Turn on sound.');
+  await expect(panel.getByRole('button', { name: 'Turn on sound' })).toBeVisible();
+  await expect(voiceLine(page, 'room-sound')).toHaveText('Cave sound failed.');
+  await expect(voiceLine(page, 'problem')).toHaveText(
+    "Your browser blocked the mic. Allow the microphone in your browser's site settings, then press Mic again.",
+  );
+  await expect(voiceLine(page, 'elsewhere')).toHaveText('');
+
+  // Toggles keep their words; aria-pressed says which way they are.
+  const deafen = panel.getByRole('button', { name: 'Deafen', exact: true });
+  await expect(deafen).toHaveAttribute('aria-pressed', 'false');
+  await deafen.click();
+  await expect(deafen).toHaveAttribute('aria-pressed', 'true');
+  await expect(deafen).toHaveText('Deafen');
+  await expect(root).toHaveAttribute('data-deafened', 'true');
+  const muted = panel.getByRole('button', { name: 'Mute devon-kit' });
+  await expect(muted).toHaveAttribute('aria-pressed', 'true');
+  await expect(muted).toHaveText('Mute devon-kit');
+  expect(await muted.evaluate((button) => (button.firstChild?.textContent ?? '').trim())).toBe('Mute');
+
+  // Why you can't hear someone.
+  const words = async (id: string) => (await personRow(page, id).locator('[class*="words"]').allTextContents()).join('');
+  expect(await words('gh:1003')).toBe('muted by you');
+  expect(await words('gh:1004')).toBe('mic off');
+  expect(await words('gh:1005')).toBe('too many voices nearby');
+  expect(await words('gh:1006')).toBe('');
+  // Still received at 38 m (a voice is kept to 45 m), but past the 35 m falloff: nothing to hear.
+  expect(await words('gh:1008')).toBe('out of range');
+  // Joining: no distance yet, so no range word.
+  await expect(personRow(page, 'gh:1007')).toContainText('joining');
+  expect(await words('gh:1007')).toBe('');
+  // Names: their own direction, and the whole of a long one on hover.
+  const long = personRow(page, 'gh:1002').locator('[class*="name"]').first();
+  await expect(long).toHaveAttribute('dir', 'auto');
+  await expect(long).toHaveAttribute('title', 'a-login-as-long-as-github-allows-them-x');
+  // The numbers: no lowpass for someone you hear nothing of.
+  await expect(personRow(page, 'gh:1004').getByRole('button', { name: 'What you hear of octocat' })).toHaveAccessibleDescription(
+    'octocat Direct 0% · Reverb 0%',
+  );
+  await expect(personRow(page, 'gh:1006').getByRole('button', { name: 'What you hear of far-talker' })).toHaveAccessibleDescription(
+    'far-talker Direct 4% · Reverb 13% · 2.4 kHz',
+  );
+  await expect(personRow(page, 'gh:1008').getByRole('button', { name: 'What you hear of past-the-echo' })).toHaveAccessibleDescription(
+    'past-the-echo Direct 0% · Reverb 0%',
+  );
 });
 
 test("the practice build's token route has no LiveKit settings: even a GitHub session gets 503", async ({

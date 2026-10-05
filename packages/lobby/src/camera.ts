@@ -46,6 +46,16 @@ export const CAMERA_LIMITS: Readonly<{
 /** The centre of the cave at eye height, looking down −Z (at slot 0) and a touch down. Frozen. */
 export const INITIAL_CAMERA: CameraState = Object.freeze({ x: 0, y: WALL.eye, z: 0, yaw: 0, pitch: 0.04 });
 
+/**
+ * The fastest the camera moves, in metres a second. `walk` is across the
+ * floor: the keys and the touch stick together, on a diagonal, come to 15.9.
+ * `rise` is up or down: Space and Shift come to 5.6, and the wheel is held to
+ * it. The scene's controls hold the camera to both, so a peer whose packets
+ * place them farther apart than this allows (presence.ts `plausibleStep`) is
+ * not taken at their word. Frozen.
+ */
+export const CAMERA_SPEED: Readonly<{ walk: number; rise: number }> = Object.freeze({ walk: 16, rise: 24 });
+
 const TAU = 2 * Math.PI;
 
 /**
