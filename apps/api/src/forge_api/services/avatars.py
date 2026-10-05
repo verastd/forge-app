@@ -20,6 +20,7 @@ import base64
 import binascii
 import hashlib
 import json
+import re
 import struct
 from collections.abc import Iterable
 from datetime import datetime
@@ -184,6 +185,35 @@ def _has_uri(value: Any) -> bool:
     return False
 
 
+#: An image embedded in the JSON itself: drawn through <img>, which fetches nothing.
+_DATA_IMAGE: Final = re.compile(r"^data:image/(?:png|jpeg|webp);base64,", re.IGNORECASE)
+_GLTF_VERSION: Final = re.compile(r"^2\.[0-9]+$")
+
+
+def _uri_problem(document: dict[str, Any]) -> str | None:
+    """Why a head's URIs would reach outside it, or None. A buffer must be the GLB's own
+    BIN chunk: a `data:` buffer is fetched, which the lobby's CSP (connect-src) forbids,
+    so it would never load. An image may be a `data:image/...` URI. Any other `uri`, here
+    or in an extension, names something outside the file."""
+    buffers = document.get("buffers")
+    if isinstance(buffers, list) and any(isinstance(b, dict) and "uri" in b for b in buffers):
+        uris = [b["uri"] for b in buffers if isinstance(b, dict) and "uri" in b]
+        return "buffer_uri" if all(str(u).startswith("data:") for u in uris) else "external_uri"
+    rest = {key: value for key, value in document.items() if key not in ("buffers", "images")}
+    images = document.get("images")
+    for image in images if isinstance(images, list) else []:
+        if not isinstance(image, dict):
+            continue
+        uri = image.get("uri")
+        if uri is not None and not (isinstance(uri, str) and _DATA_IMAGE.match(uri)):
+            return "external_uri"
+        if _has_uri({key: value for key, value in image.items() if key != "uri"}):
+            return "external_uri"
+    if isinstance(buffers, list) and _has_uri(buffers):
+        return "external_uri"
+    return "external_uri" if _has_uri(rest) else None
+
+
 def check_glb(raw: bytes) -> bool:
     """Checks a head is a self-contained binary glTF 2.0; answers whether it carries both
     eye empties (AVATAR_EYE_NODES). 400 invalid_request for anything else."""
@@ -201,8 +231,15 @@ def check_glb(raw: bytes) -> bool:
         raise _invalid("data", "not_glb") from None
     if not isinstance(document, dict) or not isinstance(document.get("asset"), dict):
         raise _invalid("data", "not_glb")
-    if _has_uri(document):
-        raise _invalid("data", "external_uri")
+    # GLTFLoader reads the JSON's own asset.version (and minVersion), not the container's.
+    asset = document["asset"]
+    if not _GLTF_VERSION.match(str(asset.get("version", ""))) or (
+        "minVersion" in asset and not _GLTF_VERSION.match(str(asset["minVersion"]))
+    ):
+        raise _invalid("data", "not_gltf2")
+    problem = _uri_problem(document)
+    if problem is not None:
+        raise _invalid("data", problem)
     if document.get("extensionsRequired"):
         # Draco, meshopt and the like need decoders the lobby doesn't load.
         raise _invalid("data", "extension_required")

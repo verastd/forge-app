@@ -130,6 +130,19 @@ def test_check_image_refuses_what_it_cannot_prove(raw: bytes, kind: str, reason:
     assert caught.value.payload["reason"] == reason
 
 
+V2 = {"version": "2.0"}
+
+
+def test_check_glb_takes_images_embedded_as_data_uris() -> None:
+    document = {
+        "asset": {"version": "2.1", "minVersion": "2.0"},
+        "images": [{"uri": "data:image/png;base64,iVBORw0KGgo="}, {"bufferView": 0}],
+        "buffers": [{"byteLength": 4}],
+        "nodes": [{"name": "EyeL"}, {"name": "EyeR"}],
+    }
+    assert avatars_service.check_glb(glb(document)) is True
+
+
 def test_check_glb_answers_whether_the_head_carries_both_eyes() -> None:
     assert avatars_service.check_glb(glb()) is True
     assert avatars_service.check_glb(glb(eyes=False)) is False
@@ -151,10 +164,36 @@ def test_check_glb_answers_whether_the_head_carries_both_eyes() -> None:
             "not_glb",
         ),
         (glb({"nodes": []}), "not_glb"),
-        (glb({"asset": {}, "buffers": [{"uri": "https://example.test/a.bin"}]}), "external_uri"),
-        (glb({"asset": {}, "images": [[{"uri": "x.png"}]]}), "external_uri"),
+        # The JSON must say glTF 2.x itself: GLTFLoader reads it, not the container's.
+        (glb({"asset": {}}), "not_gltf2"),
+        (glb({"asset": {"version": "1.0"}}), "not_gltf2"),
+        (glb({"asset": {"version": 2}}), "not_gltf2"),
+        (glb({"asset": {"version": "2.0", "minVersion": "3.0"}}), "not_gltf2"),
+        (glb({"asset": V2, "buffers": [{"uri": "https://example.test/a.bin"}]}), "external_uri"),
         (
-            glb({"asset": {}, "extensionsRequired": ["KHR_draco_mesh_compression"]}),
+            glb({"asset": V2, "buffers": [{"uri": "data:application/octet-stream;base64,AA=="}]}),
+            "buffer_uri",
+        ),
+        (glb({"asset": V2, "images": [{"uri": "x.png"}]}), "external_uri"),
+        (glb({"asset": V2, "images": [{"uri": "data:text/html;base64,PHA+"}]}), "external_uri"),
+        (
+            glb(
+                {
+                    "asset": V2,
+                    "images": [
+                        {"uri": "data:image/png;base64,AA==", "extensions": {"x": {"uri": "y"}}}
+                    ],
+                }
+            ),
+            "external_uri",
+        ),
+        (glb({"asset": V2, "buffers": [{"extensions": {"x": {"uri": "y"}}}]}), "external_uri"),
+        (
+            glb({"asset": V2, "extensions": {"x": [{"uri": "https://example.test"}]}}),
+            "external_uri",
+        ),
+        (
+            glb({"asset": V2, "extensionsRequired": ["KHR_draco_mesh_compression"]}),
             "extension_required",
         ),
     ],

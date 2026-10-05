@@ -269,6 +269,38 @@ test.describe('the avatar editor', () => {
   });
 });
 
+test.describe('a head that fails to load', () => {
+  test.describe.configure({ timeout: 120_000 });
+
+  test('is tried again while the robot still wears it', async ({ page, context, baseURL }) => {
+    await signInAs(context, baseURL ?? '', { sub: '4242', login: 'trent-admin' });
+    // A glTF 2.0 head with nothing in it but its two eye empties: enough to load.
+    const json = Buffer.from(JSON.stringify({ asset: { version: '2.0' }, scene: 0, scenes: [{ nodes: [0, 1] }], nodes: [{ name: 'EyeL' }, { name: 'EyeR' }] }));
+    const padded = Buffer.concat([json, Buffer.alloc((4 - (json.length % 4)) % 4, 0x20)]);
+    const header = Buffer.alloc(20);
+    header.write('glTF', 0, 'ascii');
+    header.writeUInt32LE(2, 4);
+    header.writeUInt32LE(20 + padded.length, 8);
+    header.writeUInt32LE(padded.length, 12);
+    header.writeUInt32LE(0x4e4f534a, 16);
+    const head = Buffer.concat([header, padded]);
+    const tries: number[] = [];
+    await page.route(`**/bff/avatars/assets/${SHA}`, (route) => {
+      tries.push(Date.now());
+      return tries.length === 1
+        ? route.fulfill({ status: 502, contentType: 'application/json', body: JSON.stringify({ error: 'service_unreachable' }) })
+        : route.fulfill({ status: 200, contentType: 'model/gltf-binary', body: head });
+    });
+    await openEditor(page);
+    await page.getByRole('button', { name: /Phantom mask/ }).click();
+    await expect.poll(() => tries.length, { timeout: 15_000 }).toBe(1);
+    // It keeps its own head meanwhile, and asks again about half a minute later.
+    await expect(page.locator('[data-preview]')).toHaveAttribute('data-preview', 'ready', { timeout: 30_000 });
+    await expect.poll(() => tries.length, { timeout: 60_000, intervals: [1_000] }).toBe(2);
+    expect(tries[1]! - tries[0]!).toBeGreaterThanOrEqual(30_000);
+  });
+});
+
 test.describe('the avatars BFF, against a stand-in API', () => {
   test.describe.configure({ mode: 'serial', timeout: 60_000 });
 

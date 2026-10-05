@@ -20,6 +20,8 @@
  *
  * Until a library head or a chest image arrives, the robot wears its own
  * head and the chestplate shows its loading scan; neither ever leaves a gap.
+ * One that fails to load (offline for a moment, a 5xx) is tried again every
+ * RETRY_MS while the robot still wears it, keeping the fallback meanwhile.
  */
 
 import * as THREE from 'three';
@@ -30,6 +32,12 @@ import type { AvatarHead } from '@forge/shared';
 
 import type { RobotAssets, RobotBody } from './assets';
 import { JOINT_COLOR, createBodyMaterial, paint } from './material';
+
+/**
+ * After a head or chest image fails to load, how long before trying again: a
+ * little longer than robot/assets.ts keeps a failure cached.
+ */
+export const RETRY_MS = 35_000;
 
 /** The robot's size in the lobby: 1.4 m tall, so it hovers about a third of a metre up at eye height. */
 export const ROBOT_SCALE = 1.4;
@@ -273,6 +281,9 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
   let headMaterials: THREE.Material[] = [];
   let pendingHead: string | null = null;
   let pendingChest: string | null = null;
+  /** When to try a failed head or chest image again (performance.now() ms), or null. */
+  let headRetryAt: number | null = null;
+  let chestRetryAt: number | null = null;
   let chestFadeTarget = 0;
   let talk = 0;
   let holding = false;
@@ -345,15 +356,20 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
         }
       },
       () => {
-        // The head didn't load: the robot keeps its own, and a later look change tries again.
-        if (pendingHead === head.sha256) pendingHead = null;
+        // The head didn't load: the robot keeps its own, and tries again in a while.
+        if (disposed || pendingHead !== head.sha256) return;
+        pendingHead = null;
+        headRetryAt = performance.now() + RETRY_MS;
       },
     );
   };
 
-  const wearChest = (next: RobotLook): void => {
-    uniforms.uChestFade.value = 0;
-    chestFadeTarget = 0;
+  /** `retry`: the emblem stays up while the image is tried again, rather than the loading scan. */
+  const wearChest = (next: RobotLook, retry = false): void => {
+    if (!retry) {
+      uniforms.uChestFade.value = 0;
+      chestFadeTarget = 0;
+    }
     const emblem = (): void => {
       uniforms.uChest.value = assets.emblem(next.id, next.name, next.colors);
       uniforms.uChestAspect.value = 1;
@@ -366,11 +382,12 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
     }
     const sha = next.chest;
     pendingChest = sha;
-    uniforms.uChest.value = blank;
+    if (!retry) uniforms.uChest.value = blank;
     assets.chest(sha).then(
       (texture) => {
         if (disposed || pendingChest !== sha) return;
         pendingChest = null;
+        if (retry) uniforms.uChestFade.value = 0;
         const image = texture.image as { width?: number; height?: number } | undefined;
         uniforms.uChest.value = texture;
         uniforms.uChestAspect.value = image?.width && image.height ? image.width / image.height : 1;
@@ -379,7 +396,9 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
       () => {
         if (disposed || pendingChest !== sha) return;
         pendingChest = null;
-        emblem();
+        // The emblem meanwhile, and the image again in a while.
+        if (!retry) emblem();
+        chestRetryAt = performance.now() + RETRY_MS;
       },
     );
   };
@@ -397,13 +416,17 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
     flameMaterial.color.set(next.colors.eye);
     if (first || previous.head?.sha256 !== next.head?.sha256 || previous.head?.fit !== next.head?.fit) {
       pendingHead = null;
+      headRetryAt = null;
       dropHead();
       if (next.head) wearHead(next.head);
     } else {
       tintHead();
     }
     const emblemChanged = !next.chest && (previous.name !== next.name || previous.colors.accent !== next.colors.accent || previous.colors.eye !== next.colors.eye);
-    if (first || previous.chest !== next.chest || emblemChanged) wearChest(next);
+    if (first || previous.chest !== next.chest || emblemChanged) {
+      chestRetryAt = null;
+      wearChest(next);
+    }
   };
 
   setLook(initial);
@@ -421,6 +444,17 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
       holding = loading;
     },
     update(frame) {
+      if (headRetryAt !== null || chestRetryAt !== null) {
+        const now = performance.now();
+        if (headRetryAt !== null && now >= headRetryAt) {
+          headRetryAt = null;
+          if (look.head) wearHead(look.head);
+        }
+        if (chestRetryAt !== null && now >= chestRetryAt) {
+          chestRetryAt = null;
+          if (look.chest) wearChest(look, true);
+        }
+      }
       const p = robotPose({ ...frame, phase });
       uniforms.uTime.value = frame.t;
       uniforms.uThrust.value = p.thrust;
