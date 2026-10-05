@@ -9,6 +9,7 @@ import {
   addGhost,
   clickThrough,
   directoryBlock,
+  enterLobby,
   expectInSight,
   expectOutOfSight,
   expectReady,
@@ -19,6 +20,8 @@ import {
   holdKey,
   lobbyRoot,
   openLobby,
+  openPeople,
+  peopleCount,
   peoplePanel,
   personRow,
   radius,
@@ -58,9 +61,12 @@ import { demoSignIn, signInAs } from './helpers/session';
  * test opts out, as the full-motion block below does (it never visits `/`).
  *
  * Presence on the practice build is the local feed: tabs of one browser
- * over a BroadcastChannel, no server and no voice. The people panel ("People
- * nearby") says so, and lists everyone else in the room with their
- * distance. Another tab is played from inside the page where one will do
+ * over a BroadcastChannel, no server and no voice. The HUD ("People
+ * nearby") says so, and its people drawer lists everyone else in the room
+ * with their distance.
+ *
+ * Every visit starts at the Enter gate; `openLobby` presses Enter
+ * (`enterLobby`), which also stands in for the browser's gesture for sound. Another tab is played from inside the page where one will do
  * (`addGhost`), which saves building a second scene. The LiveKit feed is
  * live-lobby.spec.ts's; this server is never given LiveKit settings
  * (playwright.config.ts blanks them), so its token route says voice is
@@ -113,22 +119,89 @@ test('signed in, the lobby comes up at the centre, facing the Data screen, alone
   await expect(root).toHaveAttribute('data-sound', 'none');
   await expect(root).toHaveAttribute('data-deafened', 'false');
   const panel = peopleNearby(page);
+  // The practice build has no voice, and says so in the one notice over the dock.
   await expect(voiceLine(page)).toHaveText(PRACTICE);
-  await expect(panel.getByRole('button', { name: 'Mic', exact: true })).toBeDisabled();
-  await expect(panel.getByRole('button', { name: 'Deafen', exact: true })).toBeDisabled();
-  // The practice feed sees the room (this browser's tabs), so it can say nobody is here.
-  await expect(panel.getByText(NOBODY)).toBeVisible();
-  // No room, so no cave sound to report, and no trouble to announce.
-  await expect(panel.getByText(/cave sound/i)).toHaveCount(0);
-  for (const which of ['problem', 'elsewhere', 'room-sound'] as const) {
+  await expect(voiceLine(page)).toBeVisible();
+  // No voice whatever is pressed: no Mic, no Deafen, the dock is the people count alone.
+  await expect(panel.getByRole('button', { name: 'Mic', exact: true })).toHaveCount(0);
+  await expect(panel.getByRole('button', { name: 'Deafen', exact: true })).toHaveCount(0);
+  const count = peopleCount(page);
+  await expect(count).toHaveAccessibleName('1 here');
+  await expect(count).toHaveAttribute('aria-expanded', 'false');
+  for (const which of ['problem', 'elsewhere'] as const) {
     await expect(voiceLine(page, which)).toHaveText('');
   }
-  // No voices, so no range to tell.
-  await expect(page.getByText('Tap a panel to open', { exact: true })).toBeVisible();
+  // No hint line and no cave-sound pill: the cave is left clear.
+  await expect(page.getByText('Tap a panel to open')).toHaveCount(0);
   await expect(page.getByText(/Voices carry/)).toHaveCount(0);
-  // At the right: the cave's top-left corner is its Exit.
-  const box = await panel.boundingBox();
-  expect(box !== null && box.x >= (page.viewportSize()?.width ?? 0) / 2, 'the panel stands in the right half').toBe(true);
+  await expect(panel.getByText(/cave sound/i)).toHaveCount(0);
+  // Bottom centre, like a game's HUD: the cave's top-left corner is its Exit.
+  const viewport = page.viewportSize() ?? { width: 0, height: 0 };
+  const box = await count.boundingBox();
+  expect(box !== null && box.y > viewport.height - 100, 'the count sits along the bottom edge').toBe(true);
+  expect(box !== null && Math.abs(box.x + box.width / 2 - viewport.width / 2) < 120, 'the dock is centred').toBe(true);
+  // The practice feed sees the room (this browser's tabs), so the drawer can say nobody is here.
+  const drawer = await openPeople(page);
+  await expect(drawer.getByText(NOBODY)).toBeVisible();
+  await expect(drawer.getByRole('searchbox')).toHaveCount(0);
+});
+
+test.describe('the Enter gate', () => {
+  test("it says who's here and holds the HUD back; pressed before the view is up it says it's entering, then goes", async ({
+    page,
+  }) => {
+    test.setTimeout(90_000);
+    await expectWebGL2(page);
+    // Animation frames held back until released: the scene builds over frames,
+    // so the view stays loading for as long as this test needs.
+    await page.addInitScript(() => {
+      const held: FrameRequestCallback[] = [];
+      const real = window.requestAnimationFrame.bind(window);
+      const host = window as unknown as { __holdFrames: boolean; __releaseFrames(): void };
+      host.__holdFrames = true;
+      host.__releaseFrames = () => {
+        host.__holdFrames = false;
+        for (const callback of held.splice(0)) {
+          real(callback);
+        }
+      };
+      window.requestAnimationFrame = (callback) => {
+        if (host.__holdFrames) {
+          held.push(callback);
+          return 0;
+        }
+        return real(callback);
+      };
+    });
+    await gotoLobby(page);
+    const root = lobbyRoot(page);
+    await expect(root).toHaveAttribute('data-gate', 'open', { timeout: 60_000 });
+    const enter = page.getByRole('button', { name: 'Enter', exact: true });
+    await expect(enter).toBeVisible();
+    // The gate's line (the drawer's head, behind it, says the same out of sight).
+    await expect(page.getByText('1 here · 0 talking', { exact: true }).first()).toBeVisible();
+    // The practice build has no voice: nothing about sound or a mic to promise.
+    await expect(page.getByText(/turns on sound/)).toHaveCount(0);
+    // Behind the gate: no dock, no stick, no drawer.
+    await expect(peopleCount(page)).toBeHidden();
+    // Exit stays, over the gate.
+    await expect(page.getByRole('link', { name: 'Exit the cave' })).toBeVisible();
+
+    // Pressed while the view still builds: it says so, busy, until the view is up.
+    await enter.click();
+    await expect(root).toHaveAttribute('data-gate', 'entering');
+    await expect(root).toHaveAttribute('data-lobby-state', 'loading');
+    const entering = page.getByRole('button', { name: 'Entering', exact: true });
+    await expect(entering).toBeVisible();
+    await expect(entering).toHaveAttribute('aria-busy', 'true');
+    await expect(entering).toHaveAttribute('aria-disabled', 'true');
+
+    await page.evaluate(() => (window as unknown as { __releaseFrames(): void }).__releaseFrames());
+    await expectReady(page);
+    await expect(root).toHaveAttribute('data-gate', 'gone');
+    await expect(page.getByRole('button', { name: /^Enter/ })).toHaveCount(0);
+    await expect(peopleCount(page)).toBeVisible();
+  });
 });
 
 test('while the wall is the page the heading, the lede and the directory are out of sight, from the first render on', async ({
@@ -160,12 +233,13 @@ test('while the wall is the page the heading, the lede and the directory are out
   const link = directoryLink(page);
   await expect(link).toHaveAttribute('href', '/apps/data');
   await expect(link).toHaveAttribute('data-slug', 'data');
-  // 32 × 90 slots, one of them lit. Plain digits: no thousands separator.
-  await expect(
-    page
-      .getByRole('navigation', { name: 'Apps', exact: true })
-      .getByText('2879 empty slots are waiting for the next proposal.', { exact: true }),
-  ).toHaveCount(1);
+  // 32 × 90 slots, one of them lit, and the way to fill the next.
+  const directory = page.getByRole('navigation', { name: 'Apps', exact: true });
+  await expect(directory.getByText('2,879 empty slots', { exact: true })).toHaveCount(1);
+  await expect(directory.getByRole('link', { name: /Propose the next app/ })).toHaveAttribute(
+    'href',
+    '/propose',
+  );
 });
 
 test('a keyboard Tab into the directory shows it, for as long as focus is in it', async ({
@@ -187,7 +261,10 @@ test('a keyboard Tab into the directory shows it, for as long as focus is in it'
   // The heading block never shows on the wall.
   await expectOutOfSight(headingBlock(page));
 
-  // On out of it, and it steps out of sight again.
+  // On to the Propose card, still in it; then out of it, and it steps out of sight again.
+  await page.keyboard.press('Tab');
+  await expect(directory.getByRole('link', { name: /Propose the next app/ })).toBeFocused();
+  await expectInSight(directory);
   await page.keyboard.press('Tab');
   await expect(directoryLink(page)).not.toBeFocused();
   await expectOutOfSight(directory);
@@ -297,7 +374,7 @@ test('a round trip to the Data app comes back to the spot it left from', async (
   test.setTimeout(180_000);
   await expectWebGL2(page);
   await signInToLobby(page);
-  await expectReady(page);
+  await enterLobby(page);
 
   // Walk first, so there is somewhere other than the spawn point to come back to.
   const start = await readCamera(page);
@@ -313,7 +390,10 @@ test('a round trip to the Data app comes back to the spot it left from', async (
   expect(saved.z).toBeLessThan(0);
 
   await clickThrough(page.getByRole('link', { name: 'Back to the lobby' }), /\/apps\?from=data$/);
+  // Entered once in this page load: no gate the second time.
+  await expect(lobbyRoot(page)).not.toHaveAttribute('data-gate', 'open');
   await expectReady(page);
+  await expect(lobbyRoot(page)).toHaveAttribute('data-gate', 'gone');
   // Back from an app to the wall, focus goes to the page's h1 (SiteChrome), not into the
   // directory, so nothing that is out of sight shows itself on arrival.
   await expect(page.getByRole('heading', { name: 'Apps', level: 1 })).toBeFocused();
@@ -479,6 +559,12 @@ test.describe('without the 3D view', () => {
     await expect(page.getByText('Everything the community has built, on one wall.')).toBeVisible();
     await expectInSight(directoryBlock(page));
     await expect(directoryLink(page)).toHaveAttribute('href', '/apps/data');
+    // The flat lobby: a tile per lit app, a card to propose the next, and no cave, no voice, no Enter.
+    await expect(directoryLink(page)).toContainText('Slot 0 · Live');
+    await expect(page.getByRole('link', { name: /Propose the next app/ })).toHaveAttribute('href', '/propose');
+    await expect(page.getByRole('button', { name: 'Enter', exact: true })).toHaveCount(0);
+    await expect(peoplePanel(page)).toHaveCount(0);
+    await expect(page.getByRole('link', { name: 'Exit the cave' })).toHaveCount(0);
   });
 
   test('the apps_lobby flag off, back from an app: focus goes to its directory link, the way in here', async ({
@@ -602,26 +688,38 @@ test.describe('on a phone', () => {
     await expect(page).toHaveURL(/\/apps$/);
   });
 
-  test('the people panel shows the nearest four and anyone speaking, then "and N more" opens the rest', async ({ page }) => {
+  test('the people sheet: the count up top opens it, every line carries its Mute, the far ones fold, and the scrim closes it', async ({
+    page,
+  }) => {
     test.setTimeout(120_000);
-    // The panel's fullest state (a development build's fixture on the practice feed).
+    // The HUD's fullest state (a development build's fixture on the practice feed).
     await openLobby(page, '/apps?voice-fixture=full');
-    const panel = peopleNearby(page);
-    const rows = panel.locator('li[data-person-id]');
-    await expect(rows).toHaveCount(8);
-    const shown = async () =>
-      (await rows.evaluateAll((items) => items.filter((item) => item.getClientRects().length > 0).map((item) => item.getAttribute('data-person-id'))));
-    // The nearest three, and the one speaking at 31 m, ahead of nearer people who are quiet.
-    expect(await shown()).toEqual(['gh:1001', 'gh:1002', 'gh:1003', 'gh:1006']);
-    const more = panel.getByRole('button', { name: 'and 4 more' });
-    await expect(more).toHaveAttribute('aria-expanded', 'false');
-    await more.focus();
-    await page.keyboard.press('Enter');
-    // Opened: everyone, and focus on the first of them that was out of sight.
-    await expect(panel.getByRole('button', { name: 'Show fewer' })).toHaveAttribute('aria-expanded', 'true');
-    expect(await shown()).toHaveLength(8);
-    await expect(personRow(page, 'gh:1004').getByRole('button', { name: 'What you hear of octocat' })).toBeFocused();
+    const count = peopleCount(page);
+    // Top right, across from Exit.
+    const countBox = await count.boundingBox();
+    expect(countBox !== null && countBox.y < 80 && countBox.x > 390 / 2, 'the count sits top right').toBe(true);
+    // Mic and Deafen stay in the dock at the bottom, between the stick and the lift.
+    await expect(peoplePanel(page).getByRole('button', { name: 'Mic', exact: true })).toBeVisible();
+
+    const drawer = await openPeople(page);
+    const box = await drawer.boundingBox();
+    expect(box !== null && Math.round(box.y + box.height) === 844 && box.width === 390, 'a bottom sheet, edge to edge').toBe(true);
+    // Nine here: a search. The two out of range stay folded behind their count.
+    await expect(drawer.getByRole('searchbox', { name: 'Find a name' })).toBeVisible();
+    await expect(personRow(page, 'gh:1008')).toHaveCount(0);
+    // Every line shows its Mute, no opening first.
+    await expect(personRow(page, 'gh:1001').getByRole('button', { name: 'Mute mara' })).toBeVisible();
+    await expect(personRow(page, 'gh:1004').getByRole('button', { name: 'Mute octocat' })).toBeVisible();
+    // A search unfolds what it finds.
+    await drawer.getByRole('searchbox', { name: 'Find a name' }).fill('echo');
+    await expect(drawer.locator('li[data-person-id]')).toHaveCount(1);
+    await expect(personRow(page, 'gh:1008')).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+    // A tap above the sheet, on the scrim, closes it.
+    await page.touchscreen.tap(195, 120);
+    await expect(drawer).toBeHidden();
+    await expect(count).toHaveAttribute('aria-expanded', 'false');
+
   });
 });
 
@@ -635,7 +733,7 @@ test('two tabs signed in with the practice account see each other, and a closed 
   await signInToLobby(page);
   const other = await context.newPage();
   await other.goto('/apps');
-  await Promise.all([expectReady(page, 120_000), expectReady(other, 120_000)]);
+  await Promise.all([enterLobby(page, 120_000), enterLobby(other, 120_000)]);
 
   // Once both views are up, each finds the other within ten seconds.
   const tabs = [page, other];
@@ -649,10 +747,13 @@ test('two tabs signed in with the practice account see each other, and a closed 
     const panel = peopleNearby(tab);
     // The practice build carries no voice, and says so.
     await expect(voiceLine(tab)).toHaveText(PRACTICE);
-    await expect(panel.getByRole('button', { name: 'Mic', exact: true })).toBeDisabled();
+    await expect(panel.getByRole('button', { name: 'Mic', exact: true })).toHaveCount(0);
+    await expect(peopleCount(tab)).toHaveAccessibleName('2 here');
     // The other tab, in the list, under the practice account's login and with
-    // its distance: both stand at the spawn point. No voice, so no mute.
-    const others = panel.getByRole('list', { name: 'People in the lobby' }).getByRole('listitem');
+    // its distance: both stand at the spawn point. No voice, so no mute, and
+    // no groups by what you hear: one list.
+    const drawer = await openPeople(tab);
+    const others = drawer.getByRole('list', { name: 'Here' }).getByRole('listitem');
     await expect(others).toHaveCount(1);
     await expect(others.first()).toContainText('you');
     await expect(others.first().getByText('0 m', { exact: true })).toBeVisible();
@@ -671,8 +772,9 @@ test('someone whose position has not arrived is listed as joining, with no orb, 
   test.setTimeout(120_000);
   await expectWebGL2(page);
   await signInToLobby(page);
-  await expectReady(page);
+  await enterLobby(page);
   const root = lobbyRoot(page);
+  await openPeople(page);
   await expect(peopleNearby(page)).toContainText(NOBODY);
 
   // Another practice tab as the local feed hears one, with no position yet.
@@ -693,120 +795,92 @@ test('someone whose position has not arrived is listed as joining, with no orb, 
   await expect(peopleNearby(page)).toContainText(NOBODY);
 });
 
-test("the panel's controls are reached by keyboard, in order, and say what they are", async ({ page }) => {
-  test.setTimeout(120_000);
-  await expectWebGL2(page);
-  await signInToLobby(page);
-  await expectReady(page);
-  await addGhost(page, GHOST, 'ghost', { x: 4, y: 1.7, z: 0 });
-  const panel = peopleNearby(page);
-  await expect(personRow(page, GHOST)).toContainText('4 m', { timeout: 20_000 });
-
-  // No voice here, but the buttons stay in the tab order (aria-disabled), so a
-  // keyboard finds them and the status line beside them says why.
-  const mic = panel.getByRole('button', { name: 'Mic', exact: true });
-  const deafen = panel.getByRole('button', { name: 'Deafen', exact: true });
-  await expect(mic).toHaveAttribute('aria-pressed', 'false');
-  await expect(mic).toHaveAttribute('aria-disabled', 'true');
-  await expect(deafen).toHaveAttribute('aria-pressed', 'false');
-  await mic.focus();
-  await expect(mic).toBeFocused();
-  await page.keyboard.press('Tab');
-  await expect(deafen).toBeFocused();
-  // Next, the ghost's row: its level bar, the way to the numbers.
-  await page.keyboard.press('Tab');
-  await expect(personRow(page, GHOST).locator('[aria-describedby]')).toBeFocused();
-  // Pressing a button that can't act does nothing, and says nothing new.
-  await mic.focus();
-  await page.keyboard.press('Enter');
-  await expect(mic).toHaveAttribute('aria-pressed', 'false');
-  await expect(voiceLine(page)).toHaveText(PRACTICE);
-});
-
-test("a row's level bar shows what you hear as a tooltip, on focus or hover, and Escape hides it either way", async ({
+test("the HUD by keyboard: the count opens the drawer, Tab goes into it, a row opens, and Escape closes it back to the count", async ({
   page,
 }) => {
   test.setTimeout(120_000);
-  await openLobby(page);
-  await addGhost(page, GHOST, 'ghost', { x: 0, y: 1.7, z: -6 });
-  const level = personRow(page, GHOST).getByRole('button', { name: 'What you hear of ghost' });
-  const tip = personRow(page, GHOST).getByRole('tooltip');
-  await expect(personRow(page, GHOST)).toContainText('6 m', { timeout: 20_000 });
+  await expectWebGL2(page);
+  await signInToLobby(page);
+  await enterLobby(page);
+  await addGhost(page, GHOST, 'ghost', { x: 4, y: 1.7, z: 0 });
+  const count = peopleCount(page);
+  await expect(count).toHaveAccessibleName('2 here', { timeout: 20_000 });
 
-  // The numbers stay out of sight until asked for.
-  await expect(tip).toBeHidden();
-  await level.focus();
-  await expect(tip).toBeVisible();
-  // The full name first, then the numbers. The practice build has no voice:
-  // nothing direct, no reverb, and so no lowpass to report.
-  await expect(tip).toHaveText('ghost Direct 0% · Reverb 0%');
-  await expect(level).toHaveAccessibleDescription('ghost Direct 0% · Reverb 0%');
-  await page.keyboard.press('Escape');
-  await expect(tip).toBeHidden();
-  await expect(level).toBeFocused();
-  // Space is the bar's own (a button): it brings the tip back, and leaves the camera where it is.
+  await count.focus();
+  await page.keyboard.press('Enter');
+  await expect(count).toHaveAttribute('aria-expanded', 'true');
+  const drawer = peoplePanel(page).getByRole('region', { name: 'People in the lobby' });
+  await expect(drawer).toBeVisible();
+  // Next after the count: the drawer, its Close first, then the rows.
+  await page.keyboard.press('Tab');
+  await expect(drawer.getByRole('button', { name: 'Close' })).toBeFocused();
+  await page.keyboard.press('Tab');
+  const row = personRow(page, GHOST).locator('[data-control="row"]');
+  await expect(row).toBeFocused();
+  await expect(row).toHaveAttribute('aria-expanded', 'false');
+  await expect(personRow(page, GHOST)).toContainText('4 m');
+  // Space is the row's own (a button): it opens it, and leaves the camera where it is.
   const before = await readCamera(page);
   await page.keyboard.press('Space');
-  await expect(tip).toBeVisible();
+  await expect(row).toHaveAttribute('aria-expanded', 'true');
   await page.waitForTimeout(1_500);
   expect((await readCamera(page)).y).toBe(before.y);
-  // Focus again, or a hover, brings it back.
-  await level.blur();
-  await expect(tip).toBeHidden();
-  await level.focus();
-  await expect(tip).toBeVisible();
-  await level.blur();
-  await expect(tip).toBeHidden();
-
-  // Hovered, with keyboard focus somewhere else: Escape still hides it (WCAG 1.4.13).
-  await level.hover();
-  await expect(tip).toBeVisible();
-  await expect(level).not.toBeFocused();
+  // No voice here, so no Mute in it: the full name only.
+  await expect(personRow(page, GHOST).getByRole('button', { name: /^Mute/ })).toHaveCount(0);
+  // Escape closes the drawer, focus back on the count.
   await page.keyboard.press('Escape');
-  await expect(tip).toBeHidden();
-  await page.waitForTimeout(300);
-  await expect(tip).toBeHidden();
-  // Off it and back on, it shows again; and the pointer can move onto the tip itself.
-  await page.mouse.move(200, 500);
-  await level.hover();
-  await expect(tip).toBeVisible();
-  await tip.hover();
-  await expect(tip).toBeVisible();
+  await expect(drawer).toBeHidden();
+  await expect(count).toBeFocused();
+  await expect(count).toHaveAttribute('aria-expanded', 'false');
+  await expect(voiceLine(page)).toHaveText(PRACTICE);
 });
 
-test('a control that goes away under focus hands it on: to Mic, to the next row, or to the list', async ({ page }) => {
-  test.setTimeout(150_000);
-  // The fixture's "Turn on sound" and Retry go away when pressed, as the real ones do.
+test('a press opens a row to the full name and Mute, one row at a time', async ({ page }) => {
+  test.setTimeout(120_000);
   await openLobby(page, '/apps?voice-fixture=full');
-  const panel = peopleNearby(page);
-  const mic = panel.getByRole('button', { name: 'Mic', exact: true });
-  await panel.getByRole('button', { name: 'Turn on sound' }).focus();
-  await page.keyboard.press('Enter');
-  await expect(panel.getByRole('button', { name: 'Turn on sound' })).toHaveCount(0);
-  await expect(mic).toBeFocused();
-  await expect(voiceLine(page)).toHaveText('Voice on');
-  await panel.getByRole('button', { name: 'Retry' }).focus();
-  await page.keyboard.press('Enter');
-  await expect(panel.getByRole('button', { name: 'Retry' })).toHaveCount(0);
-  await expect(mic).toBeFocused();
+  const drawer = await openPeople(page);
+  const long = personRow(page, 'gh:1002');
+  const mara = personRow(page, 'gh:1001');
+  // Folded, a line is the name, why you can't hear them, and the distance; Mute waits.
+  await expect(long.getByRole('button', { name: /^Mute/ })).toBeHidden();
+  await long.locator('[data-control="row"]').click();
+  await expect(long.locator('[data-control="row"]')).toHaveAttribute('aria-expanded', 'true');
+  // The whole of a long name, as text, under the line.
+  await expect(long.getByText('a-login-as-long-as-github-allows-them-x', { exact: true }).last()).toBeVisible();
+  await expect(long.getByRole('button', { name: 'Mute a-login-as-long-as-github-allows-them-x' })).toBeVisible();
+  // Another row opens, and this one folds.
+  await mara.locator('[data-control="row"]').click();
+  await expect(mara.getByRole('button', { name: 'Mute mara' })).toBeVisible();
+  await expect(long.locator('[data-control="row"]')).toHaveAttribute('aria-expanded', 'false');
+  await expect(long.getByRole('button', { name: /^Mute/ })).toBeHidden();
+  // Mute moves them to the bottom group at once, and back.
+  await mara.getByRole('button', { name: 'Mute mara' }).click();
+  await expect(drawer.getByRole('list', { name: 'Muted by you' }).locator('li[data-person-id="gh:1001"]')).toHaveCount(1);
+  await expect(mara.getByRole('button', { name: 'Mute mara' })).toHaveAttribute('aria-pressed', 'true');
+  await mara.getByRole('button', { name: 'Mute mara' }).click();
+  await expect(drawer.getByRole('list', { name: 'In earshot' }).locator('li[data-person-id="gh:1001"]')).toHaveCount(1);
+});
 
+test('a row that goes away under focus hands it on: to the next row, or, with the last, to the count', async ({ page }) => {
+  test.setTimeout(150_000);
   // Rows, on the practice feed: two other tabs, at 4 and 8 m.
   await openLobby(page);
   await addGhost(page, 'practice-0a0b01', 'ghost-a', { x: 0, y: 1.7, z: -4 });
   await addGhost(page, 'practice-0a0b02', 'ghost-b', { x: 0, y: 1.7, z: -8 });
-  const a = personRow(page, 'practice-0a0b01').getByRole('button', { name: 'What you hear of ghost-a' });
-  const b = personRow(page, 'practice-0a0b02').getByRole('button', { name: 'What you hear of ghost-b' });
+  const drawer = await openPeople(page);
+  const a = personRow(page, 'practice-0a0b01').locator('[data-control="row"]');
+  const b = personRow(page, 'practice-0a0b02').locator('[data-control="row"]');
   await expect(personRow(page, 'practice-0a0b02')).toContainText('8 m', { timeout: 20_000 });
-  // The first leaves while its bar has focus: the next row's bar has it.
+  // The first leaves while its row has focus: the next row has it.
   await a.focus();
   await removeGhost(page, 'practice-0a0b01');
   await expect(personRow(page, 'practice-0a0b01')).toHaveCount(0, { timeout: 20_000 });
   await expect(b).toBeFocused();
-  // The last leaves: the list goes with them, and Mic has focus.
+  // The last leaves: the list goes with them, and the count has focus.
   await removeGhost(page, 'practice-0a0b02');
   await expect(personRow(page, 'practice-0a0b02')).toHaveCount(0, { timeout: 20_000 });
-  await expect(panel.getByRole('button', { name: 'Mic', exact: true })).toBeFocused();
-  await expect(panel.getByText(NOBODY)).toBeVisible();
+  await expect(peopleCount(page)).toBeFocused();
+  await expect(drawer.getByText(NOBODY)).toBeVisible();
 });
 
 test('the list holds its order while the pointer is over it, and takes the new order once it leaves', async ({ page }) => {
@@ -814,6 +888,7 @@ test('the list holds its order while the pointer is over it, and takes the new o
   await openLobby(page);
   await addGhost(page, 'practice-0a0b01', 'ghost-a', { x: 0, y: 1.7, z: -4 });
   await addGhost(page, 'practice-0a0b02', 'ghost-b', { x: 0, y: 1.7, z: -8 });
+  await openPeople(page);
   const rows = peopleNearby(page).locator('li[data-person-id]');
   const order = () => rows.evaluateAll((items) => items.map((item) => item.getAttribute('data-person-id')));
   await expect.poll(order, { timeout: 20_000 }).toEqual(['practice-0a0b01', 'practice-0a0b02']);
@@ -829,61 +904,83 @@ test('the list holds its order while the pointer is over it, and takes the new o
   await expect.poll(order, { timeout: 5_000 }).toEqual(['practice-0a0b02', 'practice-0a0b01']);
 });
 
-test("the panel's fullest state: every word, label and live region", async ({ page }) => {
+test("the HUD's fullest state: every word, label, group and live region", async ({ page }) => {
   test.setTimeout(120_000);
   await openLobby(page, '/apps?voice-fixture=full');
   const panel = peopleNearby(page);
   const root = lobbyRoot(page);
   await expect(root).toHaveAttribute('data-voice', 'off');
-  await expect(root).toHaveAttribute('data-sound', 'blocked');
-  await expect(root).toHaveAttribute('data-room-sound', 'failed');
-
-  // Sound held back: the status line says so, beside the button that fixes it.
-  await expect(voiceLine(page)).toHaveText('Voice on. Sound is off until you press Turn on sound.');
-  await expect(panel.getByRole('button', { name: 'Turn on sound' })).toBeVisible();
-  await expect(voiceLine(page, 'room-sound')).toHaveText('Cave sound failed.');
+  // Enter was the browser's gesture: sound is on from the first step, so no "Turn on sound".
+  await expect(root).toHaveAttribute('data-sound', 'on');
+  await expect(panel.getByRole('button', { name: 'Turn on sound' })).toHaveCount(0);
+  await expect(voiceLine(page)).toHaveText('Voice on');
+  // The one notice: why the mic didn't start, in --danger, and Mic says so too.
   await expect(voiceLine(page, 'problem')).toHaveText(
-    "Your browser blocked the mic. Allow the microphone in your browser's site settings, then press Mic again.",
+    'Your browser blocked the mic. Allow it in the site settings, then press the mic.',
   );
+  await expect(voiceLine(page, 'problem')).toBeVisible();
   await expect(voiceLine(page, 'elsewhere')).toHaveText('');
+  const mic = panel.getByRole('button', { name: 'Mic', exact: true });
+  await expect(mic).toHaveAttribute('aria-pressed', 'false');
+  await expect(mic).toHaveAttribute('title', 'Mic');
 
   // Toggles keep their words; aria-pressed says which way they are.
   const deafen = panel.getByRole('button', { name: 'Deafen', exact: true });
   await expect(deafen).toHaveAttribute('aria-pressed', 'false');
   await deafen.click();
   await expect(deafen).toHaveAttribute('aria-pressed', 'true');
-  await expect(deafen).toHaveText('Deafen');
+  await expect(deafen).toHaveAccessibleName('Deafen');
   await expect(root).toHaveAttribute('data-deafened', 'true');
+
+  // The count: everyone, you included, lit while someone is talking.
+  await expect(peopleCount(page)).toHaveAccessibleName('9 here');
+  const drawer = await openPeople(page);
+  await expect(drawer).toContainText('9 here · 1 talking');
+  await expect(drawer.getByRole('searchbox', { name: 'Find a name' })).toBeVisible();
+  // Grouped by what you hear: out of range folded behind its count until asked for.
+  const group = (name: string) => drawer.getByRole('list', { name, exact: true }).locator('li[data-person-id]');
+  const ids = (name: string) => group(name).evaluateAll((items) => items.map((item) => item.getAttribute('data-person-id')));
+  expect(await ids('Talking')).toEqual(['gh:1006']);
+  expect(await ids('In earshot')).toEqual(['gh:1001', 'gh:1002', 'gh:1004', 'gh:1005']);
+  expect(await ids('Muted by you')).toEqual(['gh:1003']);
+  await expect(drawer.getByRole('list', { name: 'Out of range', exact: true })).toHaveCount(0);
+  const show = drawer.getByRole('button', { name: 'Show', exact: true });
+  await expect(show).toHaveAttribute('aria-expanded', 'false');
+  await show.click();
+  await expect(drawer.getByRole('button', { name: 'Hide', exact: true })).toHaveAttribute('aria-expanded', 'true');
+  expect(await ids('Out of range')).toEqual(['gh:1008', 'gh:1007']);
+  await expect(drawer).toContainText('within 35 m');
+
+  // Why you can't hear someone, where the group's own heading doesn't say it.
+  const words = async (id: string) => (await personRow(page, id).locator('[class*="words"]').allTextContents()).join('');
+  expect(await words('gh:1003')).toBe('');
+  expect(await words('gh:1004')).toBe('mic off');
+  expect(await words('gh:1005')).toBe('too many voices nearby');
+  expect(await words('gh:1006')).toBe('');
+  expect(await words('gh:1008')).toBe('');
+  // Joining: no distance yet, and it says so.
+  expect(await words('gh:1007')).toBe('joining');
+
+  // Mute keeps its word; aria-pressed and the person's name say the rest.
+  await personRow(page, 'gh:1003').locator('[data-control="row"]').click();
   const muted = panel.getByRole('button', { name: 'Mute devon-kit' });
   await expect(muted).toHaveAttribute('aria-pressed', 'true');
   await expect(muted).toHaveText('Mute devon-kit');
   expect(await muted.evaluate((button) => (button.firstChild?.textContent ?? '').trim())).toBe('Mute');
-
-  // Why you can't hear someone.
-  const words = async (id: string) => (await personRow(page, id).locator('[class*="words"]').allTextContents()).join('');
-  expect(await words('gh:1003')).toBe('muted by you');
-  expect(await words('gh:1004')).toBe('mic off');
-  expect(await words('gh:1005')).toBe('too many voices nearby');
-  expect(await words('gh:1006')).toBe('');
-  // Still received at 38 m (a voice is kept to 45 m), but past the 35 m falloff: nothing to hear.
-  expect(await words('gh:1008')).toBe('out of range');
-  // Joining: no distance yet, so no range word.
-  await expect(personRow(page, 'gh:1007')).toContainText('joining');
-  expect(await words('gh:1007')).toBe('');
   // Names: their own direction, and the whole of a long one on hover.
   const long = personRow(page, 'gh:1002').locator('[class*="name"]').first();
   await expect(long).toHaveAttribute('dir', 'auto');
   await expect(long).toHaveAttribute('title', 'a-login-as-long-as-github-allows-them-x');
-  // The numbers: no lowpass for someone you hear nothing of.
-  await expect(personRow(page, 'gh:1004').getByRole('button', { name: 'What you hear of octocat' })).toHaveAccessibleDescription(
-    'octocat Direct 0% · Reverb 0%',
-  );
-  await expect(personRow(page, 'gh:1006').getByRole('button', { name: 'What you hear of far-talker' })).toHaveAccessibleDescription(
-    'far-talker Direct 4% · Reverb 13% · 2.4 kHz',
-  );
-  await expect(personRow(page, 'gh:1008').getByRole('button', { name: 'What you hear of past-the-echo' })).toHaveAccessibleDescription(
-    'past-the-echo Direct 0% · Reverb 0%',
-  );
+  // No numbers about the sound anywhere: no levels, no reverb, no kHz.
+  await expect(panel.getByText(/Reverb|Direct|kHz/)).toHaveCount(0);
+
+  // The search: by name, anywhere in the room.
+  await drawer.getByRole('searchbox', { name: 'Find a name' }).fill('zzz');
+  await expect(drawer.getByText('Nobody here by that name.')).toBeVisible();
+  await drawer.getByRole('searchbox', { name: 'Find a name' }).fill('kit');
+  expect(await drawer.locator('li[data-person-id]').evaluateAll((items) => items.map((item) => item.getAttribute('data-person-id')))).toEqual([
+    'gh:1003',
+  ]);
 });
 
 test("the practice build's token route has no LiveKit settings: even a GitHub session gets 503", async ({

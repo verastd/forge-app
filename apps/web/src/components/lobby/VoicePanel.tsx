@@ -1,44 +1,54 @@
 'use client';
 
 /**
- * The people panel, "People nearby": who else is in the lobby, what you hear
- * of each of them and why, and your own voice controls, all from the presence
- * feed's voice snapshot (presence/types.ts). In the cave's own look: its
- * amber `--cave-*` colours, mono type and square buttons (Lobby.module.css).
+ * The lobby's HUD for voice and people (the "Dock" redesign): everything
+ * from the presence feed's voice snapshot (presence/types.ts), in the cave's
+ * own look (its amber `--cave-*` colours, mono type and square corners;
+ * Lobby.module.css).
  *
- * Top to bottom, a block that keeps its size: the elsewhere notice and
- * "Rejoin here", when another tab or device took this one's seat; "Turn on
- * sound", while the browser holds sound back until a tap; a status line
- * saying whether voice is on and, if not, why ("Rejoin" after the room closed,
- * "Try again" after a join that failed in this browser); the cave-sound pill;
- * the mic and deafen buttons; and why the mic didn't start. Under it, the
- * only part that scrolls: everyone else in the room, nearest first, joining
- * last. Each row's level bar keeps the technical detail of what you hear from
- * them (the full name, direct and reverb levels, the lowpass, occlusion)
- * behind a tooltip, the way the run-time chip on Contribute keeps its token
- * estimate (components/RunEstimate.tsx): it shows on hover or focus, a tap
- * toggles it, and Escape hides it, whether it was hovered or focused (WCAG
- * 1.4.13).
+ * Bottom centre, one column, top to bottom:
+ * - the people drawer, while it is open: everyone else in the room, grouped
+ *   by what you can hear of them (talking, in earshot, out of range, which
+ *   stays folded behind its count, and muted by you), with a search from
+ *   eight people on. One line per person; a press opens the line to the full
+ *   name and Mute. Without voice (the practice build) it is one list,
+ *   nearest first. On a phone it is a bottom sheet over a scrim, with Mute on
+ *   every line;
+ * - one notice, the most pressing of: the lobby open in another tab or
+ *   device ("Rejoin here"), sound held back by the browser ("Turn on
+ *   sound"), voice closed or failed ("Rejoin", "Try again"), why the mic
+ *   didn't start, and voice connecting or not on here at all;
+ * - the dock: Mic (its fill is the mic's level), Deafen and the people count,
+ *   three icons in one bar. Without voice for good (signed out, the practice
+ *   build, not set up) the dock is the count alone. On a phone the count
+ *   moves to the top right.
+ *
+ * Every action that waits on something shows it: Mic turns to a spinner
+ * while it starts or stops, the notice's buttons spin until what they asked
+ * for settles, and the notice spins while voice connects.
  *
  * For keyboards and screen readers:
  * - The buttons stay focusable when they can't act (`aria-disabled`, not
- *   `disabled`), and the status line says why.
- * - The live regions (the status, the mic problem, the elsewhere notice and
- *   the cave sound failing) are always in the page, with their text set and
- *   cleared, so a screen reader announces each change.
- * - A control that goes away under focus hands it on first: "Turn on sound",
- *   Retry, "Rejoin here", "Rejoin" and "Try again" to Mic; a row to the next
- *   row's same control, or else to the list.
- * - The order holds still while the pointer is over the list or focus is in
- *   it, so a click never lands on someone who just moved into its place.
+ *   `disabled`), and the notice says why.
+ * - The live regions (the status, the mic problem and the elsewhere notice)
+ *   are always in the page, with their text set and cleared, so a screen
+ *   reader announces each change; the one that matters most is also the
+ *   notice on screen.
+ * - A control that goes away under focus hands it on first: the notice's
+ *   buttons to Mic (or the count, without voice); a row to the next row's
+ *   same control, or else to its list.
+ * - The order holds still while the pointer is over the drawer or focus is
+ *   in it, so a press never lands on someone who just moved into its place.
  * - Toggles keep their words and let `aria-pressed` carry the state.
+ * - Escape in the drawer closes it, focus back on the count.
  * Names are the feed's, already sanitised, and reach the page as text only.
  */
 
 import { VOICE } from '@forge/lobby';
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
-import type { ButtonHTMLAttributes, CSSProperties, RefObject } from 'react';
+import type { ButtonHTMLAttributes, CSSProperties, ReactNode, RefObject } from 'react';
 
+import { HeadphonesIcon, MicIcon, PeopleIcon, Spinner } from './icons';
 import styles from './Lobby.module.css';
 import { NO_VOICE } from './presence/noneFeed';
 import type { NoneReason } from './presence/noneFeed';
@@ -138,6 +148,49 @@ export function useFeedSummary(feed: PresenceFeed | null): FeedSummary {
   return useSyncExternalStore(subscribe, read, () => NO_SUMMARY);
 }
 
+// ---------- who's here ----------
+
+/** The room in numbers, for the count, the drawer's head and the Enter gate. */
+export interface RoomCount {
+  /** The feed can see the room: voice is on, or the practice build's tabs. */
+  sees: boolean;
+  /** Everyone in the room, you included. */
+  here: number;
+  /** Everyone else speaking, and heard by you. */
+  talking: number;
+  /** Not seeing the room yet, but on the way: no feed yet, or voice connecting. */
+  finding: boolean;
+}
+
+export function roomCount({ status, voice }: FeedState): RoomCount {
+  const sees = voice.available || status?.kind === 'local';
+  const connecting =
+    status === null ||
+    (status.kind !== 'none' && status.state === 'connecting') ||
+    voice.connection === 'connecting' ||
+    voice.connection === 'reconnecting';
+  return {
+    sees,
+    here: voice.people.length + 1,
+    talking: voice.people.filter((person) => person.speaking).length,
+    finding: !sees && connecting,
+  };
+}
+
+// ---------- the mic on entry ----------
+
+/**
+ * Whether you want your mic on, for this page load: the Enter gate asks for
+ * it (`wantMicOnEntry`), and pressing Mic says yes or no from then on. The
+ * panel turns it on once per feed when voice comes up, so coming back from
+ * an app finds the mic as you left it.
+ */
+let micWanted = false;
+
+export function wantMicOnEntry(): void {
+  micWanted = true;
+}
+
 // ---------- words ----------
 
 const NO_VOICE_BECAUSE: Record<Exclude<NoneReason, 'elsewhere'>, string> = {
@@ -153,7 +206,7 @@ const PRACTICE_COPY = 'This practice copy has no voice. Voice is on the live sit
 const PRACTICE_SIGNED_OUT = "Sign in to see who's here. The practice copy has no voice.";
 const ELSEWHERE = "You're in the lobby in another tab or device.";
 
-/** Whether voice is on, and if it isn't, why; empty when another block says it (elsewhere) or there's no feed yet. */
+/** Whether voice is on, and if it isn't, why; empty when another notice says it (elsewhere) or there's no feed yet. */
 function statusLine({ status, voice }: FeedState, practice: boolean): string {
   switch (voice.connection) {
     case 'connected':
@@ -177,7 +230,25 @@ function statusLine({ status, voice }: FeedState, practice: boolean): string {
   if (status.kind === 'none' && status.reason !== 'elsewhere') {
     return status.reason === 'signed-out' && practice ? PRACTICE_SIGNED_OUT : NO_VOICE_BECAUSE[status.reason];
   }
+  if (status.kind === 'livekit' && status.state === 'connecting') {
+    return 'Connecting…';
+  }
   return '';
+}
+
+/**
+ * No voice on this visit, whatever is pressed: signed out, the practice
+ * build, voice not set up, or the server out of reach (which says reload).
+ * The dock is the people count alone then.
+ */
+function voiceGone(status: FeedStatus | null, voice: VoiceSnapshot): boolean {
+  if (status === null || voice.available) {
+    return false;
+  }
+  if (status.kind === 'local') {
+    return true;
+  }
+  return status.kind === 'none' && status.reason !== 'elsewhere' && status.reason !== 'failed';
 }
 
 const MIC_LABEL: Record<MicState, string> = {
@@ -188,69 +259,67 @@ const MIC_LABEL: Record<MicState, string> = {
 };
 
 const MIC_PROBLEM: Record<Exclude<MicProblem, null>, string> = {
-  denied: "Your browser blocked the mic. Allow the microphone in your browser's site settings, then press Mic again.",
+  denied: 'Your browser blocked the mic. Allow it in the site settings, then press the mic.',
   'no-device': 'No microphone found.',
-  failed: "The mic didn't start. Press Mic to try again.",
+  failed: "The mic didn't start. Press the mic to try again.",
 };
 
-/** On a phone, the nearest few (and anyone speaking) until the list is opened up; Lobby.module.css hides the rest. */
-const PHONE_ROWS = 4;
-/** How long the order holds still after the pointer leaves the list, or focus leaves it. */
+/** Where the search shows: a list this long is worth finding a name in. */
+const SEARCH_FROM = 8;
+/** How long the order holds still after the pointer leaves the drawer, or focus leaves it. */
 const ORDER_HOLD_MS = 500;
 
-/** What you hear of someone, in numbers: the row's tooltip, under their full name. */
-function technical(person: Person): string {
-  const parts = [`Direct ${Math.round(person.direct * 100)}%`, `Reverb ${Math.round(person.reverb * 100)}%`];
-  // Nothing heard (a feed without voice, or someone out of earshot): a lowpass is nothing to report.
-  if (person.cutoffHz > 0 && (person.direct > 0 || person.reverb > 0)) {
-    parts.push(`${(person.cutoffHz / 1000).toFixed(1)} kHz`);
-  }
-  if (person.occlusion > 0) {
-    parts.push(`Occluded ${Math.round(person.occlusion * 100)}%`);
-  }
-  return parts.join(' · ');
-}
+type Group = 'here' | 'talking' | 'earshot' | 'far' | 'muted';
 
-/** Why you can't hear someone, when voice is on: muted by you, their mic, the distance, or the cap. */
-function stateWords(person: Person): string | null {
-  if (person.reception === null) {
-    return null;
+/**
+ * Which group someone is listed in. Without voice there is nothing to hear,
+ * so everyone is simply here. With it: muted by you, speaking (and heard),
+ * within the falloff, or past it (and anyone whose position hasn't arrived,
+ * since nobody knows yet whether they're in range).
+ */
+function groupOf(person: Person, voiced: boolean): Group {
+  if (!voiced) {
+    return 'here';
   }
   if (person.mutedByYou) {
-    return 'muted by you';
+    return 'muted';
+  }
+  if (person.speaking) {
+    return 'talking';
+  }
+  if (person.distance === null || person.distance >= VOICE.falloffDistance) {
+    return 'far';
+  }
+  return 'earshot';
+}
+
+/** Why you can't hear someone, beside their name; nothing the group's own heading already says. */
+function stateWords(person: Person, group: Group): string | null {
+  if (person.mutedByYou) {
+    return group === 'muted' ? null : 'muted by you';
+  }
+  if (person.distance === null) {
+    return 'joining';
+  }
+  if (person.reception === null) {
+    return null;
   }
   if (!person.micOn) {
     return 'mic off';
   }
-  // Joining: where they are isn't known, so neither is whether they're in range.
-  if (person.distance === null) {
-    return null;
-  }
   if (person.distance >= VOICE.falloffDistance) {
-    return 'out of range';
+    return group === 'far' ? null : 'out of range';
   }
   if (person.crowded) {
     return 'too many voices nearby';
   }
-  return person.reception === 'out-of-range' ? 'out of range' : null;
+  return person.reception === 'out-of-range' && group !== 'far' ? 'out of range' : null;
 }
 
-/** The rows a phone shows before the list is opened: everyone speaking (and heard), then the nearest. */
-function phoneRows(people: Person[]): Set<string> {
-  const shown = new Set(people.filter((person) => person.speaking).map((person) => person.id));
-  for (const person of people) {
-    if (shown.size >= PHONE_ROWS) {
-      break;
-    }
-    shown.add(person.id);
-  }
-  return shown;
-}
-
-// ---------- focus that doesn't fall to the page ----------
+// ---------- buttons that hand focus on, and say they're busy ----------
 
 /**
- * A button that goes away once it has done its job ("Turn on sound", Retry,
+ * A button that goes away once it has done its job ("Turn on sound",
  * "Rejoin here"…): if it has focus when it goes, focus moves to `handOff()`
  * first. A layout effect's cleanup runs before React takes the node out.
  */
@@ -271,42 +340,135 @@ function HandOffButton({ handOff, ...props }: ButtonHTMLAttributes<HTMLButtonEle
   return <button ref={ref} type="button" {...props} />;
 }
 
+/**
+ * A notice's action: spins, and won't act twice, from the press until what
+ * it started settles (or it goes away, its job done).
+ */
+function ActionButton({
+  handOff,
+  onAct,
+  children,
+}: {
+  handOff: () => HTMLElement | null;
+  onAct(): Promise<unknown> | void;
+  children: ReactNode;
+}) {
+  const [busy, setBusy] = useState(false);
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  return (
+    <HandOffButton
+      handOff={handOff}
+      className={styles.action}
+      aria-busy={busy || undefined}
+      aria-disabled={busy || undefined}
+      onClick={() => {
+        if (busy) {
+          return;
+        }
+        const result = onAct();
+        if (result instanceof Promise) {
+          setBusy(true);
+          void result
+            .catch(() => undefined)
+            .finally(() => {
+              if (mounted.current) {
+                setBusy(false);
+              }
+            });
+        }
+      }}
+    >
+      {busy && <Spinner />}
+      {children}
+    </HandOffButton>
+  );
+}
+
 // ---------- the panel ----------
 
 export interface VoicePanelProps {
   feed: PresenceFeed | null;
   /** The mic button, whose `--lvl` the scene sets every frame from the feed's mic level. */
   micRef: RefObject<HTMLButtonElement | null>;
-  reducedMotion: boolean;
   /** The practice build: no voice there, and no GitHub sign-in, so the wording says so. */
   practice: boolean;
   /** Joins again: "Rejoin here" (takes the seat back from the other tab), "Rejoin" and "Try again". */
-  onRejoin(): void;
+  onRejoin(): Promise<void> | void;
 }
 
-export function VoicePanel({ feed, micRef, reducedMotion, practice, onRejoin }: VoicePanelProps) {
+type NoticeKind = 'elsewhere' | 'status' | 'problem' | null;
+
+export function VoicePanel({ feed, micRef, practice, onRejoin }: VoicePanelProps) {
   const state = useFeedState(feed);
   const { status, voice } = state;
+  const room = roomCount(state);
   const elsewhere = status?.kind === 'none' && status.reason === 'elsewhere';
   const failed = status?.kind === 'none' && status.reason === 'failed';
   const closed = voice.connection === 'closed';
+  const gone = voiceGone(status, voice);
   const line = statusLine(state, practice);
   const pending = voice.mic === 'starting' || voice.mic === 'stopping';
   const micBlocked = !voice.available || pending;
   const micPressed = voice.available && (voice.mic === 'on' || voice.mic === 'stopping');
   const problem = voice.available && voice.micProblem !== null ? MIC_PROBLEM[voice.micProblem] : '';
+  const connecting = line === 'Connecting…' || line === 'Reconnecting…';
+
+  // One notice on screen at a time: what stops you hearing anyone first, then the mic, then the rest.
+  const urgent = voice.soundBlocked || closed || failed;
+  const notice: NoticeKind = elsewhere
+    ? 'elsewhere'
+    : urgent && line !== ''
+      ? 'status'
+      : problem !== ''
+        ? 'problem'
+        : line !== '' && voice.connection !== 'connected'
+          ? 'status'
+          : null;
+
+  const [open, setOpen] = useState(false);
+  const drawerId = useId();
+  const countRef = useRef<HTMLButtonElement>(null);
   const statusRef = useRef<HTMLParagraphElement>(null);
-  /** Where focus goes when the control that had it goes away: Mic, always there, or else the status line. */
-  const toMic = useCallback((): HTMLElement | null => micRef.current ?? statusRef.current, [micRef]);
+  /** Where focus goes when the control that had it goes away: Mic, when it shows, or else the count. */
+  const toMic = useCallback((): HTMLElement | null => {
+    const mic = micRef.current;
+    return mic !== null && !mic.hidden ? mic : countRef.current;
+  }, [micRef]);
+
+  // Entered with the mic asked for: on, once per feed, as soon as voice can take it.
+  const askedFor = useRef<PresenceFeed | null>(null);
+  useEffect(() => {
+    if (
+      feed !== null &&
+      askedFor.current !== feed &&
+      micWanted &&
+      voice.available &&
+      voice.connection === 'connected' &&
+      voice.mic === 'off' &&
+      voice.micProblem === null
+    ) {
+      askedFor.current = feed;
+      void feed.setMic(true);
+    }
+  }, [feed, voice.available, voice.connection, voice.mic, voice.micProblem]);
 
   const toggleMic = (): void => {
     if (!feed || micBlocked) {
       return;
     }
+    const on = voice.mic !== 'on';
+    micWanted = on;
+    askedFor.current = feed;
     // Inside the click: let the browser play sound first, then the mic (each
     // wants the gesture, iOS especially).
     void feed.resumeAudio();
-    void feed.setMic(voice.mic !== 'on');
+    void feed.setMic(on);
   };
 
   const toggleDeafen = (): void => {
@@ -315,129 +477,179 @@ export function VoicePanel({ feed, micRef, reducedMotion, practice, onRejoin }: 
     }
   };
 
-  // Everyone else the panel can see: who's here only when the feed can see the room.
-  const seesRoom = voice.available || status?.kind === 'local';
-  const people = voice.people;
+  const close = (): void => {
+    setOpen(false);
+    countRef.current?.focus();
+  };
+
+  const hereLabel = room.sees ? `${room.here} here` : 'People';
   return (
-    <aside className={styles.chat} aria-label="People nearby">
-      <div className={styles.head}>
-        <div className={elsewhere ? styles.elsewhere : styles.srOnly}>
+    <aside className={styles.hud} aria-label="People nearby" data-deafened={voice.deafened ? 'true' : undefined}>
+      <div className={styles.notices}>
+        <div className={notice === 'elsewhere' ? styles.notice : styles.srOnly}>
           <p role="status" data-live="elsewhere">
             {elsewhere ? ELSEWHERE : ''}
           </p>
-          {elsewhere && (
-            <HandOffButton handOff={toMic} onClick={onRejoin}>
+          {notice === 'elsewhere' && (
+            <ActionButton handOff={toMic} onAct={onRejoin}>
               Rejoin here
-            </HandOffButton>
+            </ActionButton>
           )}
         </div>
-        {voice.soundBlocked && (
-          <HandOffButton handOff={toMic} className={styles.sound} onClick={() => void feed?.resumeAudio()}>
-            Turn on sound
-          </HandOffButton>
-        )}
-        <p
-          ref={statusRef}
-          tabIndex={-1}
-          className={
-            line === ''
-              ? styles.srOnly
-              : cx(styles.status, voice.connection === 'connected' && !voice.soundBlocked && styles.live)
-          }
-          role="status"
-          data-live="status"
-        >
-          {line}
-        </p>
-        {(closed || failed) && (
-          <HandOffButton handOff={toMic} className={styles.again} onClick={onRejoin}>
-            {closed ? 'Rejoin' : 'Try again'}
-          </HandOffButton>
-        )}
-        {voice.available && voice.roomSound !== 'off' && (
-          <p className={cx(styles.pill, voice.roomSound === 'failed' && styles.failed)}>
-            {voice.roomSound === 'rendering' &&
-              (reducedMotion ? (
-                'Rendering cave sound…'
-              ) : (
-                <>
-                  <span className={styles.spinner} aria-hidden="true" />
-                  Rendering cave sound
-                </>
-              ))}
-            {voice.roomSound === 'live' && 'Cave sound'}
-            {voice.roomSound === 'failed' && (
-              <>
-                Cave sound failed
-                <HandOffButton handOff={toMic} onClick={() => feed?.retryRoomSound()}>
-                  Retry
-                </HandOffButton>
-              </>
-            )}
+        <div className={notice === 'status' ? styles.notice : styles.srOnly}>
+          {notice === 'status' && connecting && <Spinner />}
+          <p ref={statusRef} tabIndex={-1} role="status" data-live="status">
+            {line}
           </p>
-        )}
-        <p className={styles.srOnly} role="status" data-live="room-sound">
-          {voice.available && voice.roomSound === 'failed' ? 'Cave sound failed.' : ''}
-        </p>
-        <div className={styles.controls}>
-          <button
-            ref={micRef}
-            type="button"
-            className={cx(styles.mic, micPressed && styles.on, voice.speaking && styles.speaking)}
-            aria-pressed={micPressed}
-            aria-disabled={micBlocked || undefined}
-            onClick={toggleMic}
-          >
-            <span>{MIC_LABEL[voice.available ? voice.mic : 'off']}</span>
-          </button>
-          <button
-            type="button"
-            className={cx(styles.toggle, voice.deafened && styles.on)}
-            aria-pressed={voice.deafened}
-            aria-disabled={!voice.available || undefined}
-            onClick={toggleDeafen}
-          >
-            Deafen
-          </button>
+          {notice === 'status' && voice.soundBlocked && (
+            <ActionButton handOff={toMic} onAct={() => feed?.resumeAudio()}>
+              Turn on sound
+            </ActionButton>
+          )}
+          {notice === 'status' && (closed || failed) && (
+            <ActionButton handOff={toMic} onAct={onRejoin}>
+              {closed ? 'Rejoin' : 'Try again'}
+            </ActionButton>
+          )}
         </div>
-        <p className={problem === '' ? styles.srOnly : styles.problem} role="status" data-live="problem">
-          {problem}
-        </p>
+        <div className={notice === 'problem' ? cx(styles.notice, styles.danger) : styles.srOnly}>
+          <p role="status" data-live="problem">
+            {problem}
+          </p>
+        </div>
       </div>
-      {people.length > 0 ? (
-        <PeopleList people={people} canMute={voice.available} feed={feed} handOff={toMic} />
-      ) : (
-        seesRoom && <p className={styles.empty}>Nobody else is here yet.</p>
-      )}
+
+      <div className={styles.dock} data-controls={gone ? 'count' : 'voice'} data-dimmed={elsewhere ? 'true' : undefined}>
+        <button
+          ref={micRef}
+          type="button"
+          hidden={gone}
+          className={cx(
+            styles.dockButton,
+            styles.mic,
+            micPressed && styles.on,
+            voice.speaking && styles.speaking,
+            problem !== '' && styles.refused,
+          )}
+          aria-label={MIC_LABEL[voice.available ? voice.mic : 'off']}
+          title={MIC_LABEL[voice.available ? voice.mic : 'off']}
+          aria-pressed={micPressed}
+          aria-disabled={micBlocked || undefined}
+          aria-busy={pending || undefined}
+          onClick={toggleMic}
+        >
+          {pending ? <Spinner /> : <MicIcon off={!micPressed} />}
+          <span className={styles.meter} aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          hidden={gone}
+          className={cx(styles.dockButton, styles.deafen, voice.deafened && styles.on)}
+          aria-label="Deafen"
+          title={voice.deafened ? 'Deafened' : 'Deafen'}
+          aria-pressed={voice.deafened}
+          aria-disabled={!voice.available || undefined}
+          onClick={toggleDeafen}
+        >
+          <HeadphonesIcon off={voice.deafened} />
+        </button>
+        <button
+          ref={countRef}
+          type="button"
+          data-hud="count"
+          className={cx(styles.dockButton, styles.count, open && styles.on, room.talking > 0 && styles.lit)}
+          aria-label={hereLabel}
+          title={hereLabel}
+          aria-expanded={open}
+          aria-controls={drawerId}
+          onClick={() => setOpen(!open)}
+        >
+          <PeopleIcon />
+          {room.sees ? <span>{room.here}</span> : room.finding && <Spinner />}
+        </button>
+      </div>
+      {open && <div className={styles.scrim} aria-hidden="true" onClick={() => setOpen(false)} />}
+      <section
+        id={drawerId}
+        className={styles.drawer}
+        aria-label="People in the lobby"
+        hidden={!open}
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') {
+            event.stopPropagation();
+            close();
+          }
+        }}
+      >
+        <span className={styles.grip} aria-hidden="true" />
+        <header className={styles.drawerHead}>
+          <h2>People</h2>
+          {room.sees && (
+            <span className={styles.drawerCount}>{`${room.here} here · ${room.talking} talking`}</span>
+          )}
+          <button type="button" className={styles.close} aria-label="Close" onClick={close}>
+            <span aria-hidden="true">×</span>
+          </button>
+        </header>
+        <People
+          people={voice.people}
+          voiced={voice.available}
+          canMute={voice.available}
+          feed={feed}
+          room={room}
+          handOff={() => countRef.current}
+        />
+      </section>
     </aside>
   );
 }
 
+// ---------- the drawer's list ----------
+
+/** `people` in the order of `frozen` (ids), anyone new after them in their own order. */
+function holdOrder(people: Person[], frozen: string[]): Person[] {
+  const rank = new Map(frozen.map((id, i) => [id, i]));
+  return [...people].sort((a, b) => (rank.get(a.id) ?? Infinity) - (rank.get(b.id) ?? Infinity));
+}
+
+const GROUP_TITLE: Record<Group, string> = {
+  here: 'Here',
+  talking: 'Talking',
+  earshot: 'In earshot',
+  far: 'Out of range',
+  muted: 'Muted by you',
+};
+
 /**
- * Everyone else in the room, the part of the panel that scrolls. The order
- * is the feed's (nearest first, joining last), except that it holds still
- * while the pointer is over the list or focus is in it, and for
- * ORDER_HOLD_MS after. On a phone it shows the nearest few, and anyone
- * speaking, until "and N more" opens it up.
+ * Everyone else in the room, in groups, the part of the drawer that scrolls.
+ * The order is the feed's (nearest first, joining last), except that it
+ * holds still while the pointer is over it or focus is in it, and for
+ * ORDER_HOLD_MS after.
  */
-function PeopleList({
+function People({
   people,
+  voiced,
   canMute,
   feed,
+  room,
   handOff,
 }: {
   people: Person[];
+  voiced: boolean;
   canMute: boolean;
   feed: PresenceFeed | null;
+  room: RoomCount;
   handOff: () => HTMLElement | null;
 }) {
-  const listId = useId();
-  const listRef = useRef<HTMLUListElement>(null);
+  const searchId = useId();
+  const farId = useId();
+  const [query, setQuery] = useState('');
+  const [showFar, setShowFar] = useState(false);
+  const [openId, setOpenId] = useState<string | null>(null);
   const [frozen, setFrozen] = useState<string[] | null>(null);
-  const [expanded, setExpanded] = useState(false);
-  const [focusFirstExtra, setFocusFirstExtra] = useState(false);
   const holding = useRef({ pointer: false, focus: false });
   const releaseTimer = useRef<number | undefined>(undefined);
+  const bodyRef = useRef<HTMLDivElement>(null);
 
   const hold = (): void => {
     window.clearTimeout(releaseTimer.current);
@@ -452,42 +664,91 @@ function PeopleList({
   };
   useEffect(() => () => window.clearTimeout(releaseTimer.current), []);
 
-  // The list itself going (the last person left) with focus in it: Mic has it next.
+  // The list itself going (the last person left) with focus in it: the count has it next.
   const target = useRef(handOff);
   useLayoutEffect(() => {
     target.current = handOff;
   });
+  const hasPeople = people.length > 0;
   useLayoutEffect(() => {
-    const list = listRef.current;
+    if (!hasPeople) {
+      return undefined;
+    }
+    const body = bodyRef.current;
     return () => {
-      if (list !== null && list.contains(document.activeElement)) {
+      if (body !== null && body.contains(document.activeElement)) {
         target.current()?.focus();
       }
     };
-  }, []);
+  }, [hasPeople]);
+
+  if (!hasPeople) {
+    if (room.sees) {
+      return <p className={styles.empty}>Nobody else is here yet.</p>;
+    }
+    return (
+      <p className={styles.empty}>
+        {room.finding ? (
+          <>
+            <Spinner />
+            Finding who&apos;s here…
+          </>
+        ) : (
+          "Can't see who's here right now."
+        )}
+      </p>
+    );
+  }
 
   const ordered = frozen === null ? people : holdOrder(people, frozen);
-  const shown = phoneRows(ordered);
-  const extra = ordered.length - shown.size;
+  const needle = query.trim().toLowerCase();
+  const found = needle === '' ? ordered : ordered.filter((person) => person.name.toLowerCase().includes(needle));
+  const groups = new Map<Group, Person[]>();
+  for (const person of found) {
+    const group = groupOf(person, voiced);
+    groups.set(group, [...(groups.get(group) ?? []), person]);
+  }
+  // Searching opens everything: the name you're after may be out of range.
+  const farShown = showFar || needle !== '';
 
-  // Opened up: focus to the first row that was out of sight.
-  useEffect(() => {
-    if (!focusFirstExtra) {
-      return;
-    }
-    setFocusFirstExtra(false);
-    listRef.current?.querySelector<HTMLElement>('li[data-extra] [data-control="level"]')?.focus();
-  }, [focusFirstExtra]);
+  const list = (group: Group, members: Person[]) => (
+    <ul className={styles.list} aria-label={GROUP_TITLE[group]} id={group === 'far' ? farId : undefined}>
+      {members.map((person) => (
+        <PersonRow
+          key={person.id}
+          person={person}
+          group={group}
+          open={openId === person.id}
+          onToggle={() => setOpenId(openId === person.id ? null : person.id)}
+          canMute={canMute}
+          onMute={(muted) => feed?.setMuted(person.id, muted)}
+          handOff={handOff}
+        />
+      ))}
+    </ul>
+  );
 
   return (
-    <div className={styles.roster}>
-      <ul
-        ref={listRef}
-        id={listId}
-        className={styles.list}
-        aria-label="People in the lobby"
-        tabIndex={-1}
-        data-expanded={expanded ? 'true' : undefined}
+    <>
+      {people.length + 1 >= SEARCH_FROM && (
+        <div className={styles.search}>
+          <label htmlFor={searchId} className={styles.srOnly}>
+            Find a name
+          </label>
+          <input
+            id={searchId}
+            type="search"
+            placeholder="Find a name"
+            autoComplete="off"
+            spellCheck={false}
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+        </div>
+      )}
+      <div
+        ref={bodyRef}
+        className={styles.roster}
         onPointerEnter={() => {
           holding.current.pointer = true;
           hold();
@@ -508,56 +769,64 @@ function PeopleList({
           letGo();
         }}
       >
-        {ordered.map((person) => (
-          <PersonRow
-            key={person.id}
-            person={person}
-            extra={!shown.has(person.id)}
-            canMute={canMute}
-            onMute={(muted) => feed?.setMuted(person.id, muted)}
-          />
-        ))}
-      </ul>
-      {extra > 0 && (
-        <HandOffButton
-          handOff={() => listRef.current}
-          className={styles.more}
-          aria-expanded={expanded}
-          aria-controls={listId}
-          onClick={() => {
-            setExpanded(!expanded);
-            if (!expanded) {
-              setFocusFirstExtra(true);
-            }
-          }}
-        >
-          {expanded ? 'Show fewer' : `and ${extra} more`}
-        </HandOffButton>
-      )}
-    </div>
+        {found.length === 0 && <p className={styles.empty}>Nobody here by that name.</p>}
+        {(['here', 'talking', 'earshot', 'far', 'muted'] as const).map((group) => {
+          const members = groups.get(group);
+          if (members === undefined) {
+            return null;
+          }
+          return (
+            <div key={group} className={styles.group} data-group={group}>
+              <div className={styles.groupHead}>
+                <span>{GROUP_TITLE[group]}</span>
+                <span className={styles.groupCount}>{members.length}</span>
+                {group === 'earshot' && <span className={styles.groupNote}>{`within ${VOICE.falloffDistance} m`}</span>}
+                {group === 'far' && needle === '' && (
+                  <button
+                    type="button"
+                    className={styles.reveal}
+                    aria-expanded={farShown}
+                    aria-controls={farId}
+                    onClick={() => setShowFar(!showFar)}
+                  >
+                    {farShown ? 'Hide' : 'Show'}
+                  </button>
+                )}
+              </div>
+              {(group !== 'far' || farShown) && list(group, members)}
+            </div>
+          );
+        })}
+      </div>
+    </>
   );
-}
-
-/** `people` in the order of `frozen` (ids), anyone new after them in their own order. */
-function holdOrder(people: Person[], frozen: string[]): Person[] {
-  const rank = new Map(frozen.map((id, i) => [id, i]));
-  return [...people].sort((a, b) => (rank.get(a.id) ?? Infinity) - (rank.get(b.id) ?? Infinity));
 }
 
 function PersonRow({
   person,
-  extra,
+  group,
+  open,
+  onToggle,
   canMute,
   onMute,
+  handOff,
 }: {
   person: Person;
-  extra: boolean;
+  group: Group;
+  open: boolean;
+  onToggle(): void;
   canMute: boolean;
   onMute(muted: boolean): void;
+  /** Where focus goes if the list goes too (the last person left): the count. */
+  handOff: () => HTMLElement | null;
 }) {
   const rowRef = useRef<HTMLLIElement>(null);
+  const target = useRef(handOff);
+  useLayoutEffect(() => {
+    target.current = handOff;
+  });
   // Leaving with focus on one of its controls: the next row's same control
-  // has it next, or else the list.
+  // has it next, or else the list; and if the list went with it, the count.
   useLayoutEffect(() => {
     const row = rowRef.current;
     return () => {
@@ -565,163 +834,58 @@ function PersonRow({
         return;
       }
       const control = document.activeElement.dataset.control;
-      const next = row.nextElementSibling;
+      const next = row.nextElementSibling ?? row.previousElementSibling;
       const same = control !== undefined && next !== null ? next.querySelector<HTMLElement>(`[data-control="${control}"]`) : null;
-      (same ?? (row.parentElement as HTMLElement | null))?.focus();
+      const list = row.parentElement;
+      if (same !== null) {
+        same.focus();
+      } else if (list !== null) {
+        list.tabIndex = -1;
+        list.focus();
+      }
+      // Once React has finished taking nodes out: focus fallen to the page means the list went too.
+      queueMicrotask(() => {
+        if (document.activeElement === null || document.activeElement === document.body) {
+          target.current()?.focus();
+        }
+      });
     };
   }, []);
 
-  const words = stateWords(person);
+  const words = stateWords(person, group);
   return (
     <li
       ref={rowRef}
-      className={cx(styles.person, person.speaking && styles.talking, person.distance === null && styles.joining, extra && styles.extra)}
+      className={cx(styles.person, person.speaking && styles.talking, person.distance === null && styles.joining)}
       data-person-id={person.id}
-      data-extra={extra ? 'true' : undefined}
+      data-open={open ? 'true' : undefined}
     >
-      <div className={styles.line}>
+      <button type="button" className={styles.row} aria-expanded={open} data-control="row" onClick={onToggle}>
         <i aria-hidden="true" style={{ '--near': String(person.nearness) } as CSSProperties} />
-        <span className={styles.name} dir="auto" title={person.name}>
+        <span className={styles.who}>
+          <span className={styles.name} dir="auto" title={person.name}>
+            {person.name}
+          </span>
+          {words !== null && <span className={styles.words}>{words}</span>}
+        </span>
+        <span className={styles.far}>{person.distance === null ? '' : `${Math.round(person.distance)} m`}</span>
+      </button>
+      {open && (
+        <span className={styles.fullName} dir="auto">
           {person.name}
         </span>
-        <span className={styles.far}>{person.distance === null ? 'joining' : `${Math.round(person.distance)} m`}</span>
-      </div>
-      <div className={styles.detail}>
-        <Level person={person} />
-        {words !== null && <span className={styles.words}>{words}</span>}
-        {canMute && (
-          <button
-            type="button"
-            className={styles.mute}
-            aria-pressed={person.mutedByYou}
-            data-control="mute"
-            onClick={() => onMute(!person.mutedByYou)}
-          >
-            Mute<span className={styles.srOnly}>{` ${person.name}`}</span>
-          </button>
-        )}
-      </div>
+      )}
+      {canMute && (
+        <button
+          type="button"
+          className={styles.mute}
+          aria-pressed={person.mutedByYou}
+          data-control="mute"
+          onClick={() => onMute(!person.mutedByYou)}
+        >
+          Mute<span className={styles.srOnly}>{` ${person.name}`}</span>
+        </button>
+      )}
     </li>
   );
 }
-
-/**
- * One small bar for what you hear of someone (direct plus reverb), on a
- * button, with their full name and the numbers behind a tooltip: shown on
- * hover or focus, toggled by a tap or a press, and hidden by Escape whether
- * it was hovered or focused. Being a button, Space presses it rather than
- * lifting the camera.
- */
-function Level({ person }: { person: Person }) {
-  const tipId = useId();
-  const [hovered, setHovered] = useState(false);
-  const [focused, setFocused] = useState(false);
-  const [dismissed, setDismissed] = useState(false);
-  /** Whether the tip was showing when a touch began: the tap that follows toggles it. */
-  const touch = useRef<{ wasShown: boolean } | null>(null);
-  const buttonRef = useRef<HTMLButtonElement>(null);
-  const tipRef = useRef<HTMLSpanElement>(null);
-  const shown = (hovered || focused) && !dismissed;
-  const heard = Math.min(1, person.direct + person.reverb);
-
-  // Shown: placed over the bar (under it, if there's no room above), on the
-  // viewport, since the list scrolls and would clip it; kept there as the
-  // page or the list scrolls.
-  useLayoutEffect(() => {
-    if (!shown) {
-      return undefined;
-    }
-    const place = (): void => {
-      const button = buttonRef.current;
-      const tip = tipRef.current;
-      if (button === null || tip === null) {
-        return;
-      }
-      const bar = button.getBoundingClientRect();
-      const box = tip.getBoundingClientRect();
-      const below = bar.top - 6 - box.height < 8;
-      tip.dataset.side = below ? 'below' : 'above';
-      tip.style.top = `${below ? bar.bottom + 6 : bar.top - 6 - box.height}px`;
-      tip.style.left = `${Math.max(8, Math.min(bar.left, window.innerWidth - box.width - 8))}px`;
-    };
-    place();
-    window.addEventListener('scroll', place, true);
-    window.addEventListener('resize', place);
-    return () => {
-      window.removeEventListener('scroll', place, true);
-      window.removeEventListener('resize', place);
-    };
-  }, [shown, person.name, person.direct, person.reverb, person.cutoffHz, person.occlusion]);
-
-  // While hovered, Escape anywhere hides it: the keyboard's focus may be elsewhere.
-  useEffect(() => {
-    if (!hovered) {
-      return undefined;
-    }
-    const onKey = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') {
-        setDismissed(true);
-      }
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [hovered]);
-
-  return (
-    <span
-      className={styles.level}
-      data-open={shown ? 'true' : undefined}
-      onPointerEnter={(event) => {
-        if (event.pointerType === 'mouse') {
-          setHovered(true);
-        }
-      }}
-      onPointerLeave={(event) => {
-        if (event.pointerType === 'mouse') {
-          setHovered(false);
-          setDismissed(false);
-        }
-      }}
-    >
-      <button
-        ref={buttonRef}
-        type="button"
-        className={styles.levelButton}
-        aria-describedby={tipId}
-        data-control="level"
-        onPointerDown={(event) => {
-          touch.current = event.pointerType === 'mouse' ? null : { wasShown: shown };
-        }}
-        onFocus={() => setFocused(true)}
-        onBlur={() => {
-          setFocused(false);
-          setDismissed(false);
-        }}
-        onKeyDown={(event) => {
-          if (event.key === 'Escape') {
-            setDismissed(true);
-          }
-        }}
-        onClick={() => {
-          // A tap shows it if it wasn't showing as the finger came down, and hides it if it was; a click or a key press toggles it.
-          setDismissed(touch.current !== null ? touch.current.wasShown : shown);
-          touch.current = null;
-        }}
-      >
-        <span className={styles.bar} aria-hidden="true">
-          <span style={{ width: `${Math.round(heard * 100)}%` }} />
-        </span>
-        <span className={styles.srOnly}>{`What you hear of ${person.name}`}</span>
-      </button>
-      <span ref={tipRef} role="tooltip" id={tipId} className={styles.tip}>
-        <span className={styles.tipName} dir="auto">
-          {person.name}
-        </span>{' '}
-        <span>{technical(person)}</span>
-      </span>
-    </span>
-  );
-}
-
-/** The hint line's range: how far a voice carries in the cave (VOICE.falloffDistance). */
-export const VOICE_RANGE_HINT = `Voices carry about ${VOICE.falloffDistance} m`;

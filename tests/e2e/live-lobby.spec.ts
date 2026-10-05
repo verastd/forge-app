@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 
 import {
   DATA_LINK,
-  expectReady,
+  enterLobby,
   expectWebGL2,
   holdKey,
   lobbyRoot,
@@ -224,7 +224,7 @@ test("a member's lobby tries LiveKit, tries once more when the scene is up, and 
   // once more by itself once the scene is up: a second ask for a token. When
   // the first try fails after the scene is up, the second starts in the same
   // task, so data-feed need never show `none` in between: the asks count.
-  await expectReady(page);
+  await enterLobby(page);
   const root = lobbyRoot(page);
   const sockets = () =>
     page.evaluate(() => (window as unknown as { __lobbySockets: string[] }).__lobbySockets.filter((url) => url.startsWith('wss://example.invalid/rtc')).length);
@@ -279,11 +279,13 @@ test("refused a token, the lobby says why there's no voice, and never downloads 
       route.fulfill({ status, contentType: 'application/json', body: JSON.stringify({ error }) }),
     );
     await page.goto('/apps');
-    // The panel is up as soon as the view is, before the scene has finished building.
+    // The HUD waits behind the Enter gate; past it, the notice says why.
+    await enterLobby(page);
     await expect(voiceLine(page), `after a ${status}`).toHaveText(says, { timeout: 60_000 });
     await expect(lobbyRoot(page)).toHaveAttribute('data-feed', 'none');
     await expect(lobbyRoot(page)).toHaveAttribute('data-voice', 'unavailable');
-    await expect(panel.getByRole('button', { name: 'Mic', exact: true })).toBeDisabled();
+    // No voice on this visit whatever is pressed: the dock is the people count alone.
+    await expect(panel.getByRole('button', { name: 'Mic', exact: true })).toHaveCount(0);
     // No room to see, so no claim that nobody is in it, and the route's refusal is not one to try again.
     await expect(panel.getByText('Nobody else is here yet.')).toHaveCount(0);
     await expect(panel.getByRole('button', { name: 'Try again' })).toHaveCount(0);
@@ -315,7 +317,7 @@ test('opened in another tab or device, the lobby gives up its seat, says so, and
     }
   });
   await page.goto('/apps');
-  await expectReady(page);
+  await enterLobby(page);
 
   const root = lobbyRoot(page);
   const people = page.getByRole('complementary', { name: 'People nearby' });

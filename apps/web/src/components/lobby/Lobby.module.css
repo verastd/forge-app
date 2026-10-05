@@ -7,11 +7,12 @@
  * site's mono face.
  *
  * Layers, bottom to top: the stage (the canvas and the peers' name tags,
- * fixed to the viewport), the veil (fades the stage in), the overlay (Exit,
- * the page's heading and directory, and the people panel, laid out in the
- * page's flow), then the HUD (hint, touch controls, toast). The overlay and
- * the HUD only take the pointer inside their own boxes, so the canvas gets
- * every drag and tap around them.
+ * fixed to the viewport), the Enter gate (over the stage until you're in,
+ * then it fades), the touch stick and the lift buttons, the overlay (Exit,
+ * the page's heading and directory, and the HUD: the dock, its notice and
+ * the people drawer), then the toast. The overlay and the HUD only take the
+ * pointer inside their own boxes, so the canvas gets every drag and tap
+ * around them. The HUD, the stick and the lift wait for the gate to go.
  */
 
 .root {
@@ -36,10 +37,9 @@
 
 /* The prototype's type, on everything that is the prototype's: not on the page's own heading and directory. */
 .stage,
-.veil,
+.gate,
 .message,
-.chat,
-.hint,
+.hud,
 .toast,
 .exit {
   font-family: var(--font-mono);
@@ -111,35 +111,6 @@
   box-shadow: 0 0 0 3px rgba(var(--cave-accent-rgb), 0.35);
 }
 
-/* ---- the veil ---- */
-
-.veil {
-  position: fixed;
-  inset: 0;
-  z-index: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 22px;
-  background: var(--bg);
-  opacity: 1;
-  transition: opacity 1.6s ease;
-  pointer-events: none;
-}
-
-.veilOff {
-  opacity: 0;
-}
-
-.veil p {
-  margin: 0;
-  font-size: 12px;
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
-  color: rgba(var(--cave-text-rgb), 0.6);
-}
-
 /* ---- the overlay ---- */
 
 .overlay {
@@ -167,8 +138,8 @@
  * lines and square corners. Top left, where the heading was, while the wall
  * is the page: first in the overlay, so it is the page's first stop after
  * the nav, and the directory, when a keyboard user brings it back, opens
- * under it. Clear of the people panel (top right, or bottom left at 640 px
- * and under), the hint, the touch stick, the lift buttons and the toast.
+ * under it. Clear of the people count (top right at 640 px and under), the
+ * touch stick, the lift buttons and the toast.
  */
 .exit {
   pointer-events: auto;
@@ -239,400 +210,188 @@
   text-transform: uppercase;
 }
 
-.chat {
+
+/* No wall (switched off, no WebGL2, or a view that broke): the overlay is a
+   normal page at the site's width, the heading over the app tiles (the
+   "flat lobby"), with no cave and no voice. */
+.page {
+  display: block;
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 40px 24px 80px;
+}
+
+.page .intro {
+  align-items: stretch;
+  gap: 24px;
+  max-width: none;
+}
+
+.page .message {
+  align-self: flex-start;
+  max-width: 62ch;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elev);
+  color: var(--text-muted);
+  font-family: var(--font);
+  font-size: 0.94rem;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+/* ---- the Enter gate ---- */
+
+.gate {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  width: min(300px, 100%);
-  font-size: 12px;
+  align-items: center;
+  justify-content: center;
+  gap: 28px;
+  padding: 0 24px;
+  background: color-mix(in srgb, var(--bg) 90%, transparent);
+  color: var(--cave-text);
+  text-align: center;
+  opacity: 1;
+  transition: opacity 0.9s ease;
+}
+
+.gateOff {
+  opacity: 0;
+  visibility: hidden;
   pointer-events: none;
+  transition:
+    opacity 0.9s ease,
+    visibility 0s linear 0.9s;
 }
 
-.chat > * {
-  pointer-events: auto;
+.root[data-motion='reduced'] .gate {
+  transition: none;
 }
 
-.mic {
-  --lvl: 0;
-  position: relative;
+.gateHead {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.gateName {
+  font-size: 11px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: rgba(var(--cave-text-rgb), 0.62);
+}
+
+.gateWho {
   display: flex;
   align-items: center;
-  align-self: flex-start;
   gap: 10px;
-  height: 44px;
-  padding: 0 16px 0 14px;
-  overflow: hidden;
-  border: 1px solid rgba(var(--cave-line-rgb), 0.35);
-  border-radius: 0;
-  background: rgba(var(--cave-ink-rgb), 0.6);
-  color: rgba(var(--cave-text-rgb), 0.7);
-  font: 500 11px var(--font-mono);
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  cursor: pointer;
-}
-
-.mic::before {
-  content: '';
-  flex: none;
-  width: 10px;
-  height: 16px;
-  border-radius: 5px;
-  background: rgba(var(--cave-text-rgb), 0.55);
-}
-
-.mic.on {
-  color: var(--cave-text);
-  border-color: var(--cave-line);
-}
-
-.mic.on::before {
-  background: var(--cave-accent);
-  box-shadow: 0 0 calc(2px + 14px * var(--lvl)) var(--cave-accent);
-}
-
-.mic.on::after {
-  content: '';
-  position: absolute;
-  left: 0;
-  bottom: 0;
-  height: 100%;
-  width: calc(100% * var(--lvl));
-  background: rgba(var(--cave-accent-rgb), 0.14);
-  transition: width 0.08s;
-  pointer-events: none;
-}
-
-/* The lobby is open in another tab or device: say so, and offer the seat back. */
-.elsewhere {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 10px 12px;
-  border: 1px solid rgba(var(--cave-line-rgb), 0.35);
-  background: rgba(var(--cave-ink-rgb), 0.7);
-  color: var(--cave-text);
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.elsewhere p {
-  margin: 0;
-}
-
-.elsewhere button {
-  height: 36px;
-  padding: 0 14px;
-  border: 1px solid var(--cave-line);
-  border-radius: 0;
-  background: rgba(var(--cave-accent-rgb), 0.12);
-  color: var(--cave-text);
-  font: 500 11px var(--font-mono);
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  cursor: pointer;
-}
-
-/* ---- the HUD ---- */
-
-.hint {
-  position: fixed;
-  left: 24px;
-  bottom: 22px;
-  z-index: 2;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 18px;
-  max-width: calc(100% - 48px);
-  pointer-events: none;
+  min-height: 18px;
   font-size: 12px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: rgba(var(--cave-text-rgb), 0.55);
-}
-
-.mob {
-  display: none;
-}
-
-.toast {
-  position: fixed;
-  left: 50%;
-  bottom: 64px;
-  z-index: 3;
-  max-width: calc(100% - 48px);
-  padding: 10px 16px;
-  border: 1px solid rgba(var(--cave-line-rgb), 0.35);
-  background: rgba(var(--cave-ink-rgb), 0.7);
-  color: var(--cave-text);
-  font-size: 12px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  text-align: center;
-  opacity: 0;
-  transform: translateX(-50%) translateY(8px);
-  transition:
-    opacity 0.25s,
-    transform 0.25s;
-  pointer-events: none;
-}
-
-.toast:empty {
-  display: none;
-}
-
-.toast.on {
-  opacity: 1;
-  transform: translateX(-50%);
-}
-
-.stick {
-  display: none;
-  position: fixed;
-  left: 24px;
-  bottom: 88px;
-  z-index: 2;
-  width: 120px;
-  height: 120px;
-  border-radius: 50%;
-  border: 1px solid rgba(var(--cave-line-rgb), 0.35);
-  background: rgba(var(--cave-ink-rgb), 0.35);
-  touch-action: none;
-}
-
-.stick div {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 48px;
-  height: 48px;
-  margin: -24px;
-  border-radius: 50%;
-  background: rgba(var(--cave-accent-rgb), 0.35);
-  border: 1px solid var(--cave-accent);
-  pointer-events: none;
-}
-
-.lift {
-  display: none;
-  position: fixed;
-  right: 24px;
-  bottom: 88px;
-  z-index: 2;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.lift button {
-  width: 52px;
-  height: 52px;
-  border: 1px solid rgba(var(--cave-line-rgb), 0.35);
-  border-radius: 0;
-  background: rgba(var(--cave-ink-rgb), 0.55);
-  color: var(--cave-text);
-  font-size: 14px;
-  touch-action: none;
-}
-
-@media (pointer: coarse) {
-  .stick {
-    display: block;
-  }
-
-  .lift {
-    display: flex;
-  }
-
-  .chat {
-    width: min(240px, 100%);
-  }
-
-  .desk {
-    display: none;
-  }
-
-  .mob {
-    display: inline;
-  }
-
-  .hint {
-    left: 18px;
-    bottom: 18px;
-    font-size: 11px;
-  }
-
-  /* Clear of the stick and the lift buttons. */
-  .toast {
-    bottom: 232px;
-  }
-}
-
-/* A touch screen or a narrow one: the site nav is a 44 px menu button in this corner (LobbyNav.module.css), so Exit sits right of it. */
-@media (pointer: coarse), (max-width: 640px) {
-  .exit {
-    margin-left: 52px;
-  }
-}
-
-/* No room beside the heading: the people panel moves to the bottom left, off the wall. */
-@media (max-width: 640px) {
-  .overlay {
-    padding: 16px;
-  }
-
-  .chat {
-    position: fixed;
-    left: 16px;
-    bottom: 96px;
-    z-index: 2;
-    width: min(240px, calc(100vw - 32px));
-  }
-}
-
-/* …and above the stick, on a phone. */
-@media (max-width: 640px) and (pointer: coarse) {
-  .chat {
-    bottom: 224px;
-  }
-}
-
-
-/* ---- the people panel (VoicePanel.tsx) ----
- *
- * A head that keeps its size (the notices, "Turn on sound", the status line,
- * the cave-sound pill, Mic and Deafen, why the mic didn't start) over the
- * list of people, the only part that scrolls; the panel scrolls as a whole
- * only if the head alone doesn't fit. It is capped in height on every screen,
- * so it never runs under the lift buttons, the stick, Exit, the menu button
- * or the toast:
- * - a desktop: at the right, under the nav (in the page's flow until the
- *   wall is up), stopping short of the toast;
- * - a touch screen: below the menu button, and above the lift column;
- * - a phone (640 px and under): fixed at the bottom left, above the stick,
- *   and below the menu button and Exit; the toast moves to the top right;
- * - a short touch screen (a phone held sideways): its own place at the top,
- *   left of the lift column and clear of the stick and the hint.
- * On a phone or a short touch screen the list shows the nearest four (and
- * anyone speaking) until "and N more" opens it.
- * Trouble (a failed reverb, a refused mic, someone you muted) uses the
- * site's --danger, which the cave's palette never reuses.
- */
-
-/* At the right, wrapped or not: the cave's top-left corner belongs to its Exit. */
-.chat {
-  margin-left: auto;
-  /* 88 px down at most (an in-flow nav and the gutter), and 112 px clear of the bottom: the toast and the hint. */
-  max-height: calc(100dvh - 200px);
-  overflow-y: auto;
-}
-
-.head {
-  display: flex;
-  flex: none;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.roster {
-  display: flex;
-  flex: 0 1 auto;
-  flex-direction: column;
-  gap: 6px;
-  /* At least one row shows; past that the list scrolls, and the head never does. */
-  min-height: 58px;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-}
-
-.status {
-  margin: 0;
-  padding: 8px 10px;
-  border: 1px solid rgba(var(--cave-line-rgb), 0.25);
-  background: rgba(var(--cave-ink-rgb), 0.7);
-  color: rgba(var(--cave-text-rgb), 0.85);
-  font-size: 11px;
-  letter-spacing: 0.04em;
-  line-height: 1.45;
-}
-
-.status.live {
-  border-color: rgba(var(--cave-line-rgb), 0.5);
-  color: var(--cave-text);
   letter-spacing: 0.14em;
   text-transform: uppercase;
 }
 
-/* The browser holds sound until a tap: one tap here fixes it. */
-.sound {
-  height: 44px;
-  padding: 0 14px;
-  border: 1px solid var(--cave-line);
-  border-radius: 0;
-  background: rgba(var(--cave-accent-rgb), 0.18);
-  color: var(--cave-text);
-  font: 500 11px var(--font-mono);
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  cursor: pointer;
+.gateWho .icon {
+  stroke: rgba(var(--cave-text-rgb), 0.75);
 }
 
-/* "Rejoin" after the room closed, "Try again" after a join that failed here: as "Rejoin here". */
-.again {
-  align-self: flex-start;
-  height: 36px;
-  padding: 0 14px;
-  border: 1px solid var(--cave-line);
-  border-radius: 0;
-  background: rgba(var(--cave-accent-rgb), 0.12);
-  color: var(--cave-text);
-  font: 500 11px var(--font-mono);
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  cursor: pointer;
+.gateWho.lit .icon,
+.count.lit .icon {
+  stroke: var(--cave-accent);
+  filter: drop-shadow(0 0 6px var(--cave-accent));
 }
 
-.pill {
+.enter {
   display: inline-flex;
   align-items: center;
-  align-self: flex-start;
-  gap: 8px;
-  margin: 0;
-  padding: 3px 8px;
-  border: 1px solid rgba(var(--cave-line-rgb), 0.3);
-  background: rgba(var(--cave-ink-rgb), 0.6);
-  color: rgba(var(--cave-text-rgb), 0.75);
-  font-size: 10px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-}
-
-.pill.failed {
-  border-color: var(--danger-line);
-  color: var(--danger);
-}
-
-.pill button {
-  height: 22px;
-  padding: 0 8px;
-  border: 1px solid currentColor;
+  justify-content: center;
+  gap: 12px;
+  min-width: 190px;
+  height: 56px;
+  padding: 0 44px;
+  border: 1px solid var(--cave-line);
   border-radius: 0;
-  background: transparent;
-  color: inherit;
-  font: 500 10px var(--font-mono);
-  letter-spacing: 0.14em;
+  background: rgba(var(--cave-accent-rgb), 0.14);
+  box-shadow:
+    0 0 0 1px rgba(var(--cave-accent-rgb), 0.15),
+    0 10px 36px rgba(var(--cave-accent-rgb), 0.14);
+  color: var(--cave-text);
+  font: 500 13px var(--font-mono);
+  letter-spacing: 0.28em;
   text-transform: uppercase;
   cursor: pointer;
+}
+
+.enter:hover {
+  background: rgba(var(--cave-accent-rgb), 0.22);
+}
+
+.enter:focus-visible {
+  outline: 2px solid var(--cave-accent);
+  outline-offset: 3px;
+}
+
+.enter[aria-busy='true'] {
+  cursor: progress;
+}
+
+.gateNote {
+  max-width: 36ch;
+  margin: 0;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  text-wrap: balance;
+  /* 0.62: AA on the veil. */
+  color: rgba(var(--cave-text-rgb), 0.62);
+}
+
+/* The HUD, the stick and the lift wait for the gate to go. */
+.root:not([data-gate='gone']) .hud,
+.root:not([data-gate='gone']) .stick,
+.root:not([data-gate='gone']) .lift {
+  visibility: hidden;
+}
+
+/* ---- glyphs and the spinner (icons.tsx) ---- */
+
+.icon {
+  position: relative;
+  z-index: 1;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.micBody {
+  fill: none;
 }
 
 .spinner {
-  width: 9px;
-  height: 9px;
+  flex: none;
+  display: inline-block;
+  width: 12px;
+  height: 12px;
   border: 1.5px solid currentColor;
   border-right-color: transparent;
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
+}
+
+/* Reduced motion: no turning, a slow breath instead, so it still reads as busy. */
+.root[data-motion='reduced'] .spinner {
+  animation: breathe 1.6s ease-in-out infinite;
 }
 
 @keyframes spin {
@@ -641,67 +400,380 @@
   }
 }
 
-.controls {
+@keyframes breathe {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* ---- the HUD (VoicePanel.tsx) ----
+ *
+ * One column at the bottom centre: the people drawer (while open), one
+ * notice, and the dock. On a phone (640 px and under) the count moves to the
+ * top right, the notice sits above the stick and the lift, and the drawer is
+ * a bottom sheet over a scrim. Trouble (a refused mic, someone you muted)
+ * uses the site's --danger, which the cave's palette never reuses.
+ */
+
+.hud {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 24px;
+  z-index: 3;
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  flex-direction: column;
+  align-items: center;
+  padding: 0 16px;
+  font-size: 11px;
+  pointer-events: none;
 }
 
-/* The mic stays focusable while it can't act (aria-disabled, not disabled), so a keyboard still reaches it. */
-.mic[aria-disabled='true'] {
-  cursor: not-allowed;
-  opacity: 0.6;
+.scrim {
+  display: none;
 }
 
-.mic[aria-disabled='true']::before {
-  background: rgba(var(--cave-text-rgb), 0.3);
+/* Drawer, notice, dock, top to bottom; the drawer comes last in the page, so Tab goes from the count into it. */
+.drawer {
+  order: 0;
 }
 
-/* You're speaking (your own mic's meter hears you). */
-.mic.speaking::before {
-  box-shadow:
-    0 0 0 3px rgba(var(--cave-accent-rgb), 0.3),
-    0 0 calc(2px + 14px * var(--lvl)) var(--cave-accent);
+.notices {
+  order: 1;
 }
 
-/* Deafen: the mic button's look, without the meter. */
-.toggle {
+.dock {
+  order: 2;
+}
+
+/* -- the dock -- */
+
+.dock {
+  display: flex;
+  align-items: stretch;
   height: 44px;
-  padding: 0 14px;
   border: 1px solid rgba(var(--cave-line-rgb), 0.35);
-  border-radius: 0;
-  background: rgba(var(--cave-ink-rgb), 0.6);
-  color: rgba(var(--cave-text-rgb), 0.7);
+  background: rgba(var(--cave-ink-rgb), 0.72);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  color: var(--cave-text);
   font: 500 11px var(--font-mono);
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  pointer-events: auto;
+}
+
+/* Open in another tab: the dock dims until you rejoin (the notice above it holds the button). */
+.dock[data-dimmed] {
+  opacity: 0.5;
+}
+
+.dockButton {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 44px;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: rgba(var(--cave-text-rgb), 0.7);
+  font: inherit;
+  letter-spacing: inherit;
   cursor: pointer;
 }
 
-.toggle.on {
+.dockButton[hidden] {
+  display: none;
+}
+
+.dockButton:not([hidden]) ~ .dockButton {
+  border-left: 1px solid rgba(var(--cave-line-rgb), 0.2);
+}
+
+.dockButton:hover {
   color: var(--cave-text);
-  border-color: var(--cave-line);
+  background: rgba(var(--cave-accent-rgb), 0.06);
+}
+
+.dockButton:focus-visible {
+  outline: 2px solid var(--cave-accent);
+  outline-offset: -2px;
+}
+
+/* Focusable while it can't act (aria-disabled, not disabled), so a keyboard still reaches it. */
+.dockButton[aria-disabled='true'] {
+  cursor: not-allowed;
+  color: rgba(var(--cave-text-rgb), 0.4);
+  background: none;
+}
+
+.dockButton[aria-busy='true'] {
+  cursor: progress;
+  color: var(--cave-text);
+}
+
+/* Mic: lit while live, its fill rising with your level (the scene sets --lvl every frame). */
+.mic {
+  --lvl: 0;
+}
+
+.mic.on {
+  color: var(--cave-text);
+}
+
+.mic.on .micBody {
+  fill: var(--cave-accent);
+}
+
+.mic.on .icon {
+  filter: drop-shadow(0 0 calc(3px + 6px * var(--lvl)) var(--cave-accent));
+}
+
+.mic.speaking .icon {
+  filter: drop-shadow(0 0 calc(6px + 8px * var(--lvl)) var(--cave-accent));
+}
+
+.meter {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 0;
+  background: rgba(var(--cave-accent-rgb), 0.16);
+  transition: height 0.08s;
+  pointer-events: none;
+}
+
+.mic.on .meter {
+  height: calc(100% * var(--lvl));
+}
+
+.mic.refused {
+  color: var(--danger);
+}
+
+.deafen.on {
+  color: var(--cave-text);
+  background: rgba(var(--cave-accent-rgb), 0.12);
+  box-shadow: inset 1px 0 0 var(--cave-line);
+}
+
+.count {
+  padding: 0 14px 0 12px;
+  color: var(--cave-text);
+}
+
+.count .icon {
+  stroke: rgba(var(--cave-text-rgb), 0.75);
+}
+
+.count.on {
   background: rgba(var(--cave-accent-rgb), 0.12);
 }
 
-.toggle[aria-disabled='true'] {
-  cursor: not-allowed;
-  opacity: 0.6;
+.count span:not(.spinner) {
+  font-variant-numeric: tabular-nums;
 }
 
-.problem {
-  margin: 0;
-  padding: 8px 10px;
-  border: 1px solid var(--danger-line);
+/* Deafened: the count's glyph goes dark, talkers or not. */
+.hud[data-deafened] .count .icon {
+  stroke: rgba(var(--cave-text-rgb), 0.45);
+  filter: none;
+}
+
+/* -- the notice: one at a time, with its action beside it -- */
+
+.notices {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  max-width: 100%;
+}
+
+.notice {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  max-width: min(460px, 100%);
+  min-height: 40px;
+  margin-bottom: 8px;
+  padding: 6px 6px 6px 14px;
+  border: 1px solid rgba(var(--cave-line-rgb), 0.35);
   background: rgba(var(--cave-ink-rgb), 0.8);
-  color: var(--danger);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  color: rgba(var(--cave-text-rgb), 0.9);
   font-size: 11px;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.04em;
   line-height: 1.45;
+  pointer-events: auto;
+}
+
+.notice p {
+  margin: 0;
+}
+
+.notice:not(:has(button)) {
+  padding-right: 14px;
+}
+
+.danger {
+  justify-content: center;
+  border-color: var(--danger-line);
+  color: var(--danger);
+  text-align: center;
+}
+
+.action {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--cave-line);
+  border-radius: 0;
+  background: rgba(var(--cave-accent-rgb), 0.14);
+  color: var(--cave-text);
+  font: 500 10px var(--font-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.action:hover {
+  background: rgba(var(--cave-accent-rgb), 0.22);
+}
+
+.action:focus-visible {
+  outline: 2px solid var(--cave-accent);
+  outline-offset: 2px;
+}
+
+.action[aria-busy='true'] {
+  cursor: progress;
+}
+
+/* -- the people drawer -- */
+
+.drawer {
+  display: flex;
+  flex-direction: column;
+  width: min(360px, 100%);
+  /* Clear of Exit and the nav strip above, and of the notice and the dock below. */
+  max-height: min(600px, calc(100dvh - 220px));
+  margin-bottom: 8px;
+  border: 1px solid rgba(var(--cave-line-rgb), 0.35);
+  background: rgba(var(--cave-ink-rgb), 0.8);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  color: var(--cave-text);
+  pointer-events: auto;
+}
+
+.drawer[hidden] {
+  display: none;
+}
+
+.grip {
+  display: none;
+}
+
+.drawerHead {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+  height: 44px;
+  padding: 0 6px 0 14px;
+  border-bottom: 1px solid rgba(var(--cave-line-rgb), 0.2);
+}
+
+.drawerHead h2 {
+  margin: 0;
+  font: 500 11px var(--font-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--cave-text);
+}
+
+.drawerCount {
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgba(var(--cave-text-rgb), 0.62);
+}
+
+.close {
+  margin-left: auto;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: rgba(var(--cave-text-rgb), 0.62);
+  font: 400 16px var(--font-mono);
+  cursor: pointer;
+}
+
+.close:hover {
+  color: var(--cave-text);
+}
+
+.close:focus-visible,
+.reveal:focus-visible,
+.mute:focus-visible {
+  outline: 2px solid var(--cave-line);
+  outline-offset: 2px;
+}
+
+.search {
+  flex: none;
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(var(--cave-line-rgb), 0.2);
+}
+
+.search input {
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid rgba(var(--cave-line-rgb), 0.25);
+  border-radius: 0;
+  background: rgba(var(--cave-ink-rgb), 0.5);
+  color: var(--cave-text);
+  font: 500 11px var(--font-mono);
+  letter-spacing: 0.06em;
+  outline: none;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.search input::placeholder {
+  color: rgba(var(--cave-text-rgb), 0.45);
+}
+
+.search input:focus-visible {
+  border-color: var(--cave-line);
+}
+
+.roster {
+  min-height: 0;
+  padding: 4px 0 8px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .empty {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   margin: 0;
+  padding: 14px;
   /* 0.62: 5:1 on the dark cave, AA for small text. */
   color: rgba(var(--cave-text-rgb), 0.62);
   font-size: 11px;
@@ -709,10 +781,49 @@
   text-transform: uppercase;
 }
 
+.groupHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 22px;
+  padding: 12px 14px 4px;
+  color: rgba(var(--cave-text-rgb), 0.62);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.group:first-child .groupHead {
+  padding-top: 10px;
+}
+
+.groupCount,
+.groupNote {
+  color: rgba(var(--cave-text-rgb), 0.45);
+}
+
+.groupNote {
+  margin-left: auto;
+  letter-spacing: 0.06em;
+}
+
+.reveal {
+  margin-left: auto;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid rgba(var(--cave-line-rgb), 0.3);
+  border-radius: 0;
+  background: transparent;
+  color: rgba(var(--cave-text-rgb), 0.75);
+  font: 500 10px var(--font-mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
 .list {
   display: flex;
   flex-direction: column;
-  gap: 4px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -720,37 +831,62 @@
 
 .list:focus-visible {
   outline: 2px solid var(--cave-line);
-  outline-offset: 2px;
+  outline-offset: -2px;
 }
 
+/* One line per person; a press opens it to the full name and Mute. */
 .person {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 6px 8px;
-  border: 1px solid rgba(var(--cave-line-rgb), 0.16);
-  background: rgba(var(--cave-ink-rgb), 0.55);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   color: rgba(var(--cave-text-rgb), 0.85);
   font-size: 11px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
-/* In the room, but no position yet: listed, with no orb. */
-.person.joining {
-  opacity: 0.62;
+.person[data-open] {
+  background: rgba(var(--cave-accent-rgb), 0.06);
 }
 
-.line,
-.detail {
-  display: flex;
+.group[data-group='talking'] .person {
+  color: var(--cave-text);
+}
+
+.group[data-group='far'] .person,
+.group[data-group='muted'] .person {
+  color: rgba(var(--cave-text-rgb), 0.62);
+}
+
+.row {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 6px minmax(0, 1fr) 40px;
   align-items: center;
-  gap: 8px;
-  min-width: 0;
+  gap: 10px;
+  width: 100%;
+  height: 30px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-align: left;
+  text-transform: inherit;
+  cursor: pointer;
 }
 
-.line i {
-  flex: none;
+.row:hover {
+  background: rgba(var(--cave-accent-rgb), 0.06);
+}
+
+.row:focus-visible {
+  outline: 2px solid var(--cave-line);
+  outline-offset: -2px;
+}
+
+.row i {
   width: 6px;
   height: 6px;
   border-radius: 50%;
@@ -760,7 +896,7 @@
 }
 
 /* Speaking, and heard by you: the dot pulses (and stays lit, still, with reduced motion). */
-.person.talking .line i {
+.person.talking .row i {
   opacity: 1;
   box-shadow:
     0 0 0 3px rgba(var(--cave-accent-rgb), 0.35),
@@ -774,8 +910,29 @@
   }
 }
 
-.root[data-motion='reduced'] .person.talking .line i {
+.root[data-motion='reduced'] .person.talking .row i {
   animation: none;
+}
+
+/* In the room, with no position yet: an empty ring, no orb. */
+.person.joining .row i {
+  border: 1px solid rgba(var(--cave-accent-rgb), 0.5);
+  background: transparent;
+  box-shadow: none;
+  opacity: 1;
+}
+
+.group[data-group='muted'] .row i {
+  background: var(--danger);
+  box-shadow: none;
+  opacity: 0.8;
+}
+
+.who {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
 }
 
 .name {
@@ -785,135 +942,61 @@
   white-space: nowrap;
 }
 
-.far {
+.words {
   flex: none;
-  margin-left: auto;
-  opacity: 0.62;
+  font-size: 10px;
+  color: rgba(var(--cave-text-rgb), 0.62);
 }
 
-.words {
-  opacity: 0.62;
+.far {
   font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: rgba(var(--cave-text-rgb), 0.62);
+}
+
+.fullName {
+  grid-row: 2;
+  grid-column: 1;
+  align-self: center;
+  padding: 2px 10px 10px 30px;
+  color: var(--cave-text);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: none;
+  overflow-wrap: anywhere;
 }
 
 .mute {
-  flex: none;
+  grid-row: 2;
+  grid-column: 2;
+  align-self: start;
+  display: none;
+  align-items: center;
   height: 26px;
-  margin-left: auto;
-  padding: 0 8px;
+  margin: 0 14px 10px 0;
+  padding: 0 10px;
   border: 1px solid rgba(var(--cave-line-rgb), 0.35);
   border-radius: 0;
   background: transparent;
-  color: rgba(var(--cave-text-rgb), 0.8);
+  color: rgba(var(--cave-text-rgb), 0.85);
   font: 500 10px var(--font-mono);
   letter-spacing: 0.12em;
   text-transform: uppercase;
   cursor: pointer;
+}
+
+.person[data-open] .mute {
+  display: inline-flex;
+}
+
+.mute:hover {
+  border-color: var(--cave-line);
 }
 
 .mute[aria-pressed='true'] {
   border-color: var(--danger-line);
   color: var(--danger);
-}
-
-/* What you hear of someone: one small bar on a button, and their name and
-   the numbers behind a tooltip (as components/RunEstimate.tsx keeps its
-   token estimate). The tooltip is fixed to the viewport where it shows
-   (VoicePanel.tsx places it), so the scrolling list never clips it. */
-.level {
-  display: inline-flex;
-  align-items: center;
-}
-
-.levelButton {
-  display: inline-flex;
-  align-items: center;
-  padding: 8px 2px;
-  border: 0;
-  border-radius: 0;
-  background: none;
-  color: inherit;
-  cursor: help;
-}
-
-.levelButton:focus-visible {
-  outline: 2px solid var(--cave-line);
-  outline-offset: 2px;
-}
-
-.bar {
-  display: block;
-  width: 44px;
-  height: 4px;
-  overflow: hidden;
-  background: rgba(var(--cave-line-rgb), 0.16);
-}
-
-.bar span {
-  display: block;
-  height: 100%;
-  background: var(--cave-accent);
-  transition: width 0.2s;
-}
-
-.tip {
-  position: fixed;
-  left: 0;
-  top: 0;
-  z-index: 30;
-  width: max-content;
-  max-width: min(240px, 70vw);
-  padding: 6px 8px;
-  border: 1px solid rgba(var(--cave-line-rgb), 0.35);
-  background: rgba(var(--cave-ink-rgb), 0.95);
-  color: var(--cave-text);
-  font-size: 10px;
-  letter-spacing: 0.06em;
-  line-height: 1.4;
-  text-transform: none;
-  white-space: normal;
-  visibility: hidden;
-}
-
-/* Bridges the gap to the bar, so the pointer can move onto the tooltip. */
-.tip::after {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 100%;
-  height: 6px;
-}
-
-.tip[data-side='below']::after {
-  top: auto;
-  bottom: 100%;
-}
-
-/* The full name, in its own direction, on the first line. */
-.tipName {
-  display: block;
-  overflow-wrap: anywhere;
-}
-
-.level[data-open='true'] .tip {
-  visibility: visible;
-}
-
-/* "And N more": a phone shows the nearest few until it's pressed (below). */
-.more {
-  display: none;
-  align-self: flex-start;
-  height: 28px;
-  padding: 0 10px;
-  border: 1px solid rgba(var(--cave-line-rgb), 0.35);
-  border-radius: 0;
-  background: rgba(var(--cave-ink-rgb), 0.6);
-  color: rgba(var(--cave-text-rgb), 0.8);
-  font: 500 10px var(--font-mono);
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  cursor: pointer;
 }
 
 .srOnly {
@@ -929,80 +1012,292 @@
   border: 0;
 }
 
-/* A touch screen: below its 44 px menu button, and over the lift column (88 px up, 112 px tall, and a 16 px gap). */
+/* ---- the toast, the stick and the lift ---- */
+
+.toast {
+  position: fixed;
+  left: 50%;
+  top: 24px;
+  z-index: 3;
+  max-width: calc(100% - 48px);
+  padding: 10px 16px;
+  border: 1px solid rgba(var(--cave-line-rgb), 0.35);
+  background: rgba(var(--cave-ink-rgb), 0.7);
+  color: var(--cave-text);
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  text-align: center;
+  opacity: 0;
+  transform: translateX(-50%) translateY(-8px);
+  transition:
+    opacity 0.25s,
+    transform 0.25s;
+  pointer-events: none;
+}
+
+.toast:empty {
+  display: none;
+}
+
+.toast.on {
+  opacity: 1;
+  transform: translateX(-50%);
+}
+
+/* Under the overlay (its drawer covers them on a phone), over the gate once it goes. */
+.stick {
+  display: none;
+  position: fixed;
+  left: 24px;
+  bottom: 24px;
+  z-index: 1;
+  width: 88px;
+  height: 88px;
+  border-radius: 50%;
+  border: 1px solid rgba(var(--cave-line-rgb), 0.35);
+  background: rgba(var(--cave-ink-rgb), 0.35);
+  touch-action: none;
+}
+
+.stick div {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 36px;
+  height: 36px;
+  margin: -18px;
+  border-radius: 50%;
+  background: rgba(var(--cave-accent-rgb), 0.35);
+  border: 1px solid var(--cave-accent);
+  pointer-events: none;
+}
+
+.lift {
+  display: none;
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 1;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lift button {
+  width: 44px;
+  height: 44px;
+  border: 1px solid rgba(var(--cave-line-rgb), 0.35);
+  border-radius: 0;
+  background: rgba(var(--cave-ink-rgb), 0.55);
+  color: var(--cave-text);
+  font-size: 12px;
+  touch-action: none;
+}
+
 @media (pointer: coarse) {
-  .chat {
-    margin-top: 56px;
-    max-height: calc(100dvh - 80px - 216px);
+  .stick {
+    display: block;
+  }
+
+  .lift {
+    display: flex;
   }
 }
 
-/* A phone: fixed at the bottom left (above), below the menu button and Exit
-   (16 + 44 + 8 px); the toast moves to the top right, clear of Exit, since
-   the panel holds the left column. */
-@media (max-width: 640px) {
-  .chat {
-    margin: 0;
-    max-height: calc(100dvh - 96px - 68px);
+/* A touch screen or a narrow one: the site nav is a 44 px menu button in this corner (LobbyNav.module.css), so Exit sits right of it. */
+@media (pointer: coarse), (max-width: 640px) {
+  .exit {
+    margin-left: 52px;
   }
 
+  /* Below the menu button, Exit and the count. */
   .toast {
+    top: 72px;
+  }
+}
+
+/* ---- a phone ---- */
+
+@media (max-width: 640px) {
+  .overlay {
+    padding: 16px;
+  }
+
+  .page {
+    padding: 28px 16px 60px;
+  }
+
+  .page .intro {
+    gap: 20px;
+  }
+
+  .stick {
+    left: 16px;
+  }
+
+  .lift {
+    right: 16px;
+  }
+
+  .hud {
+    padding: 0;
+  }
+
+  /* No blur here: a backdrop filter would make the dock the box its fixed count is placed in. */
+  .dock {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
+  /* The count, top right, across from Exit. */
+  .count {
+    position: fixed;
     top: 16px;
     right: 16px;
-    bottom: auto;
-    left: auto;
-    max-width: calc(100vw - 172px);
-    transform: translateY(-8px);
+    z-index: 3;
+    height: 44px;
+    gap: 10px;
+    padding: 0 14px;
+    border: 1px solid rgba(var(--cave-line-rgb), 0.35);
+    background: rgba(var(--cave-ink-rgb), 0.6);
+    pointer-events: auto;
   }
 
-  .toast.on {
-    transform: none;
+  .dockButton:not([hidden]) ~ .count {
+    border-left: 1px solid rgba(var(--cave-line-rgb), 0.35);
   }
-}
 
-@media (max-width: 640px) and (pointer: coarse) {
-  .chat {
-    max-height: calc(100dvh - 224px - 68px);
+  .count.on {
+    border-color: var(--cave-line);
+    background: rgba(var(--cave-accent-rgb), 0.12);
   }
-}
 
-/* A short touch screen, a phone held sideways: the panel at the top, left of
-   the lift column (24 + 52 + 16 px from the right), clear of the stick and
-   the hint below it; the toast at the top right, over the lift column. */
-@media (pointer: coarse) and (max-height: 520px) {
-  .chat {
+  /* No voice for good: no bar, only the count up top. */
+  .dock[data-controls='count'] {
+    height: 0;
+    border: 0;
+    background: none;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
+  /* Above the stick and the lift column (24 + 94 px), the width of the screen. */
+  .notice {
     position: fixed;
-    top: 72px;
-    right: 92px;
-    bottom: auto;
-    left: auto;
-    z-index: 2;
-    width: min(300px, 40vw);
-    max-height: calc(100dvh - 72px - 48px);
+    left: 16px;
+    right: 16px;
+    bottom: 128px;
+    max-width: none;
     margin: 0;
+    justify-content: space-between;
   }
 
-  .toast {
-    top: 24px;
-    right: 24px;
-    bottom: auto;
-    left: auto;
-    max-width: calc(100vw - 180px);
-    transform: translateY(-8px);
+  .danger {
+    justify-content: center;
   }
 
-  .toast.on {
-    transform: none;
-  }
-}
-
-/* The nearest four, and anyone speaking, until "and N more" opens the list up. */
-@media (max-width: 640px), (pointer: coarse) and (max-height: 520px) {
-  .list:not([data-expanded]) > .extra {
-    display: none;
-  }
-
-  .more {
+  /* The drawer is a bottom sheet, over a scrim that closes it. */
+  .scrim {
     display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 1;
+    background: linear-gradient(to bottom, transparent 30%, rgba(var(--cave-ink-rgb), 0.6) 45%);
+    pointer-events: auto;
+  }
+
+  .drawer {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 2;
+    width: auto;
+    height: min(520px, calc(100dvh - 76px));
+    max-height: none;
+    margin: 0;
+    border: 0;
+    border-top: 1px solid rgba(var(--cave-line-rgb), 0.35);
+    background: rgba(var(--cave-ink-rgb), 0.92);
+    -webkit-backdrop-filter: blur(14px);
+    backdrop-filter: blur(14px);
+  }
+
+  .grip {
+    display: block;
+    flex: none;
+    align-self: center;
+    width: 36px;
+    height: 3px;
+    margin-top: 8px;
+    background: rgba(var(--cave-line-rgb), 0.35);
+  }
+
+  .drawerHead {
+    padding: 0 8px 0 16px;
+    border-bottom: 0;
+  }
+
+  .close {
+    width: 44px;
+    height: 44px;
+    font-size: 18px;
+  }
+
+  .search {
+    padding: 0 16px 10px;
+    border-bottom: 0;
+  }
+
+  .search input {
+    height: 40px;
+    padding: 0 12px;
+    font-size: 12px;
+  }
+
+  .roster {
+    padding-bottom: calc(16px + env(safe-area-inset-bottom));
+  }
+
+  .groupHead {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  /* Every line carries its Mute: a thumb shouldn't need two presses. */
+  .person {
+    align-items: center;
+  }
+
+  .row {
+    grid-column: 1;
+    gap: 12px;
+    height: 44px;
+    padding: 0 16px;
+  }
+
+  .who {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+    line-height: 1.2;
+  }
+
+  .words {
+    font-size: 9px;
+  }
+
+  .mute {
+    grid-row: 1;
+    grid-column: 2;
+    display: inline-flex;
+    align-self: center;
+    height: 30px;
+    margin: 0 16px 0 0;
+  }
+
+  .fullName {
+    grid-column: 1 / -1;
+    padding: 0 16px 10px 34px;
   }
 }
