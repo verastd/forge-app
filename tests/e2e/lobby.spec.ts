@@ -180,8 +180,8 @@ test.describe('the Enter gate', () => {
     await expect(enter).toBeVisible();
     // The gate's line (the drawer's head, behind it, says the same out of sight).
     await expect(page.getByText('1 here · 0 talking', { exact: true }).first()).toBeVisible();
-    // The practice build has no voice: nothing about sound or a mic to promise.
-    await expect(page.getByText(/turns on sound/)).toHaveCount(0);
+    // Under Enter, the way to the 2D lobby instead.
+    await expect(page.getByRole('link', { name: 'Take me to the 2D lobby instead' })).toHaveAttribute('href', '/apps?view=2d');
     // Behind the gate: no dock, no stick, no drawer.
     await expect(peopleCount(page)).toBeHidden();
     // Exit stays, over the gate.
@@ -517,6 +517,39 @@ test.describe('reduced motion', () => {
       await page.emulateMedia({ reducedMotion: 'reduce' });
       await expect(root).toHaveAttribute('data-motion', 'reduced');
     });
+  });
+});
+
+test.describe('the 2D lobby', () => {
+  test("the Enter gate's link goes there: the heading and the tiles, no cave, no voice, the normal nav", async ({ page }) => {
+    test.setTimeout(90_000);
+    await expectWebGL2(page);
+    await gotoLobby(page);
+    const root = lobbyRoot(page);
+    await expect(root).toHaveAttribute('data-gate', 'open', { timeout: 60_000 });
+    await clickThrough(page.getByRole('link', { name: 'Take me to the 2D lobby instead' }), /\/apps\?view=2d$/);
+
+    await expect(root).toHaveAttribute('data-lobby-state', 'flat');
+    await expect(root.locator('canvas')).toHaveCount(0);
+    await expect(root).toHaveAttribute('data-feed', 'none');
+    await expect(peoplePanel(page)).toHaveCount(0);
+    await expect(page.getByRole('link', { name: 'Exit the cave' })).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: 'Apps', level: 1 })).toBeFocused();
+    await expectInSight(headingBlock(page));
+    await expectInSight(directoryBlock(page));
+    await expect(page.locator('header[data-chrome="lobby"]')).toHaveAttribute('data-nav-mode', 'bar');
+    await clickThrough(directoryLink(page), /\/apps\/data$/);
+  });
+
+  test('/apps?view=2d opens straight into it, and never starts the 3D view', async ({ page }) => {
+    await gotoLobby(page, '/apps?view=2d');
+    const root = lobbyRoot(page);
+    await expect(root).toHaveAttribute('data-lobby-state', 'flat');
+    await expect(page.getByRole('button', { name: 'Enter', exact: true })).toHaveCount(0);
+    await page.waitForTimeout(1_500);
+    await expect(root.locator('canvas')).toHaveCount(0);
+    await expect(root).not.toHaveAttribute('data-gate', /.*/);
+    await expect(page.getByRole('link', { name: /Propose the next app/ })).toBeVisible();
   });
 });
 

@@ -10,7 +10,8 @@
 
 import { useSyncExternalStore } from 'react';
 
-export type LobbyState = 'loading' | 'ready' | 'unsupported' | 'lost' | 'off';
+/** `flat`: the visitor chose the 2D lobby (`?view=2d`). */
+export type LobbyState = 'loading' | 'ready' | 'unsupported' | 'lost' | 'off' | 'flat';
 
 /** 'none' while no lobby is mounted. */
 export type PublishedLobbyState = LobbyState | 'none';
@@ -48,7 +49,7 @@ export function useLobbyState(): PublishedLobbyState {
   return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 }
 
-/** No 3D wall to show: the lobby switched off, no WebGL2, or a view that broke. The page is a normal page. */
+/** No 3D wall to show: the 2D lobby chosen, the lobby switched off, no WebGL2, or a view that broke. The page is a normal page. */
 export function isFallback(state: PublishedLobbyState): boolean {
-  return state === 'off' || state === 'unsupported' || state === 'lost';
+  return state === 'flat' || state === 'off' || state === 'unsupported' || state === 'lost';
 }
