@@ -925,10 +925,11 @@ every move costs the browser an HRTF cross-fade. Who is speaking is what
 this client hears: an analyser on each voice's chain, after its dry gain
 and reverb send, read each tick with some hysteresis (and your own, from
 your mic's meter), so "talking" means exactly "heard"; the SFU's own
-room-wide speaker updates are never read (ADR-004 has the limit). Each
-received track keeps one Web Audio source for the whole visit, since
-Chrome never frees one while its context runs; past 32 idle ones the
-engine starts a new context at a quiet moment. The engine runs on its own
+speaker updates, which reach only those subscribed to the speaker, are
+never read. Each received track keeps one Web Audio source for the whole
+visit, since Chrome never frees one while its context runs; LiveKit reuses
+receiver tracks, so these level off at the most voices received at once,
+and past 32 idle ones the engine starts a new context at a quiet moment. The engine runs on its own
 10 Hz timer rather than the scene's frames, so a hidden tab keeps
 evaluating, and keeps its 1 s position heartbeat. Its settings are all in
 `@forge/lobby`'s `voice.ts`.
@@ -946,14 +947,16 @@ because a modified client could otherwise listen from anywhere: while
 someone is in the room, their client tells LiveKit who may receive their mic
 (`setTrackSubscriptionPermissions`), which is every participant whose last
 known position is within 50 m. A list that takes someone off goes out at
-once (when they walk away or leave); one that adds someone, at most every
-500 ms. Someone whose position hasn't arrived is never on it, and neither
+once (when the packet that takes them past 50 m arrives, or the news that
+they left); one that adds someone, at most every 500 ms. Someone whose position hasn't arrived is never on it, and neither
 is a new session of someone who just rejoined (a new participant sid),
 until it says where it is. The list starts empty before the client even
 connects, so LiveKit never hears its default of everyone, and goes back to
 empty during a full reconnect, so what LiveKit resends as it reconnects is
-nobody. A client that lies about its own position still gets in: positions
-are peer to peer.
+nobody. LiveKit keeps the list per identity, so a member back as a new
+session (a reload) inherits the old session's place until the others
+hear of it, under a second in the proof (ADR-004). A client that lies
+about its own position still gets in: positions are peer to peer.
 
 **The people panel** (`VoicePanel.tsx`, the "People nearby" aside) says
 whether voice is on and, when it isn't, why: signed out, the practice
@@ -988,7 +991,7 @@ cleared, a control that goes away under focus hands it on (to Mic, or to
 the next row), and toggles keep their words, with `aria-pressed` carrying
 the state. In development builds the engine also exposes a debug view,
 `window.__forgeVoice` (each voice's graph, the output's level,
-`updateConfig` and `setPeerOcclusion`), and the practice feed takes
+`updateConfig`, `setPeerOcclusion` and `rebuild`), and the practice feed takes
 `?voice-fixture=full`, the panel's fullest state, for the layout e2e;
 production builds compile both out.
 
