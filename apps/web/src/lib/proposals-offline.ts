@@ -15,10 +15,18 @@
  * or edit a proposal of its own (a proposal needs a GitHub member behind it),
  * and it is never an admin.
  *
+ * The house model (Phase 6 contract §10) is simulated too: a sample that has
+ * passed carries a finished house draft, written at once with canned content,
+ * and its timeline says so, so the practice app shows what the house does.
+ * Live, only an admin sees a house draft; here, where nobody is an admin,
+ * the page shows it to everyone and says so.
+ *
  * Pure: the caller (`./proposals`) keeps one {@link PracticeFloor} for the
  * life of the tab and passes it in; every change returns a new one.
  */
 import type {
+  HouseDraft,
+  HouseSpec,
   ProposalCard,
   ProposalComment,
   ProposalCommentPage,
@@ -86,6 +94,8 @@ interface PracticeProposal {
   events: readonly ProposalEvent[];
   /** Members who consent the moment debate opens, so that in practice your consent decides it. */
   quickConsents: readonly string[];
+  /** The house model's draft, once it has passed. */
+  house?: HouseDraft;
 }
 
 /** What the practice floor holds, for the life of the tab. */
@@ -111,12 +121,110 @@ function comment(id: number, atMs: number, author: string, text: string): Propos
   return { id, author, text, at: isoOf(atMs) };
 }
 
+/* --- the house model, simulated ------------------------------------------------------- */
+
+/** The model the practice floor says wrote its house drafts: the API's default. */
+export const PRACTICE_HOUSE_MODEL = 'claude-opus-5-5';
+
+/** The public timeline line the API adds once the house model has drafted the task (Phase 6 contract §1). */
+export const HOUSE_DRAFTED_MESSAGE =
+  "FORGE's house model drafted the task from this proposal. An admin checks it before it goes on the Contribute board.";
+
+/** The canned house drafts, by sample: what the house model might write for each. */
+const HOUSE_SPECS: Readonly<Record<number, HouseSpec>> = {
+  1: {
+    title: 'Show my Upland properties on a map in the Data app',
+    civilianSummary:
+      "The Data app gets a map view: a pin for each of your properties, a tap on a pin to see its row, and the same filters the table has. It works on a phone first, as the debate asked.",
+    acceptanceCriteria: [
+      'The Data app has a Map view beside the table, with one pin for each property in the list.',
+      "Tapping or clicking a pin shows that property's row.",
+      "The table's filters apply to the map: a property filtered out of the table has no pin.",
+      'At 390 px wide, the map, its pins and the filters fit the screen with no sideways scrolling.',
+      'An e2e test opens the map, checks that a pin shows its row, and checks one filter.',
+    ],
+    size: 'M',
+    tierFloor: 'T0',
+    scopeIn: ['apps/web/src/app/apps/data/**', 'tests/e2e/data-app.spec.ts'],
+    scopeOut: ['apps/api/**', '.github/**'],
+    risks: [
+      'A map library would be a new dependency, and a new dependency needs approval first: draw the map without one if it can be done.',
+    ],
+    questions: [],
+    verdict: 'ready',
+    verdictReason:
+      "It is clear and fits one task: the map reuses the table's data and filters, and the debate settled the phone question.",
+  },
+  [WALKTHROUGH_ID]: {
+    title: 'Add a dark and light theme switch',
+    civilianSummary:
+      'FORGE gets a light theme beside the dark one. Dark stays the default; a switch in Settings turns light on, and FORGE remembers the choice on that device.',
+    acceptanceCriteria: [
+      'Settings has a Theme switch with Dark and Light, and Dark is the default.',
+      'Choosing Light changes every page at once, with no reload.',
+      'The choice is still there after a reload on the same device.',
+      'Text on every page the e2e suite opens meets WCAG AA contrast in both themes.',
+    ],
+    size: 'S',
+    tierFloor: 'T0',
+    scopeIn: ['apps/web/src/app/globals.css', 'apps/web/src/app/me/settings/page.tsx', 'tests/e2e/**'],
+    scopeOut: ['apps/api/**'],
+    risks: [
+      'Colours written straight into a page, rather than taken from globals.css, would stay dark: check every page, not only Settings.',
+    ],
+    questions: ["Should FORGE follow the device's own light or dark setting until someone picks a theme?"],
+    verdict: 'needs_clarification',
+    verdictReason:
+      "It is ready to build once the mover says whether FORGE should follow the device's own setting before anyone picks a theme.",
+  },
+};
+
+/** What the house model reads of a sample. */
+interface HouseInput {
+  id: number;
+  title: string;
+  pitch: string;
+}
+
+/** A sample without a canned draft (none passes today): a plain one, from its own title and pitch. */
+function plainSpec(proposal: HouseInput): HouseSpec {
+  const firstParagraph = proposal.pitch.split(/\n\s*\n/)[0] ?? proposal.pitch;
+  return {
+    title: [...proposal.title].slice(0, 100).join(''),
+    civilianSummary: [...firstParagraph.trim()].slice(0, 500).join(''),
+    acceptanceCriteria: ['What the pitch asks for works as it describes, on a phone and on a computer.'],
+    size: 'S',
+    tierFloor: 'T0',
+    scopeIn: [],
+    scopeOut: [],
+    risks: [],
+    questions: ['What has to be true for this to count as done?'],
+    verdict: 'needs_clarification',
+    verdictReason: 'The pitch says what it wants, but not how to check that it is done.',
+  };
+}
+
+/**
+ * The house draft of a sample that has just passed: done at once, and in the
+ * draft task (nobody had saved it), as the API does when the house is on.
+ */
+export function practiceHouse(proposal: HouseInput, nowMs: number): HouseDraft {
+  return {
+    status: 'done',
+    spec: HOUSE_SPECS[proposal.id] ?? plainSpec(proposal),
+    model: PRACTICE_HOUSE_MODEL,
+    draftedAt: isoOf(nowMs),
+    appliedToDraft: true,
+  };
+}
+
 /** The floor as the practice app opens it, timed from `nowMs`. */
 export function practiceFloor(nowMs: number): PracticeFloor {
   const passedMoved = nowMs - 9 * DAY_MS;
   const passedSeconded = passedMoved + 6 * HOUR_MS;
   const passedVoteOpened = passedSeconded + DEBATE_MS;
   const passedClosed = passedVoteOpened + 2 * DAY_MS;
+  const passedHoused = passedClosed + 2 * MINUTE_MS;
 
   const debateMoved = nowMs - 30 * HOUR_MS;
   const debateSeconded = nowMs - 20 * HOUR_MS;
@@ -150,6 +258,7 @@ export function practiceFloor(nowMs: number): PracticeFloor {
       event(passedClosed, 'vote_closed', 'The vote closed: Yes 2, No 1, Abstain 0. Quorum was met.'),
       event(passedClosed, 'passed', 'It passed: more Yes than No.'),
       event(passedClosed, 'task_drafted', 'It became a draft task. An admin will publish it to the Contribute board.'),
+      event(passedHoused, 'house_drafted', HOUSE_DRAFTED_MESSAGE),
     ],
     quickConsents: [],
   };
@@ -198,7 +307,7 @@ export function practiceFloor(nowMs: number): PracticeFloor {
     quickConsents: [MAYA, SAM],
   };
 
-  return { proposals: [passed, inDebate, waiting], nextCommentId: 5 };
+  return { proposals: [{ ...passed, house: practiceHouse(passed, passedHoused) }, inDebate, waiting], nextCommentId: 5 };
 }
 
 function cardOf(proposal: PracticeProposal): ProposalCard {
@@ -253,6 +362,8 @@ function detailOf(proposal: PracticeProposal, signedIn: boolean): ProposalDetail
     ...(proposal.comments.length > COMMENTS_PAGE ? { moreComments: true } : {}),
     events: [...proposal.events],
     ...(signedIn ? { you: youOf(proposal) } : {}),
+    // Live, an admin's only; here nobody is an admin, and the page shows it as practice.
+    ...(proposal.house === undefined ? {} : { house: proposal.house }),
     revision: PRACTICE_REVISION,
   };
 }
@@ -370,6 +481,7 @@ export function practiceConsent(floor: PracticeFloor, id: number, consent: boole
     if (!everyone) {
       return { ...proposal, consented, events };
     }
+    // The house model drafts the task at once (live, it takes a minute or two after the pass).
     return {
       ...proposal,
       state: 'passed',
@@ -379,7 +491,9 @@ export function practiceConsent(floor: PracticeFloor, id: number, consent: boole
         ...events,
         event(nowMs, 'passed', 'Everyone counted at the second consented, so it passed without a vote.'),
         event(nowMs, 'task_drafted', 'It became a draft task. An admin will publish it to the Contribute board.'),
+        event(nowMs, 'house_drafted', HOUSE_DRAFTED_MESSAGE),
       ],
+      house: practiceHouse(proposal, nowMs),
     };
   });
 }

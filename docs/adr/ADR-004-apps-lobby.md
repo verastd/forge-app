@@ -306,7 +306,7 @@ the engine through the feed.
   member never download them, and neither is in the `/apps` first load,
   which the people panel took from 132 kB to 134.5 kB gzipped.
 - The engine has a debug view (`window.__forgeVoice`: each voice's graph,
-  the output's level, `updateConfig` and `setPeerOcclusion`) in development
+  the output's level, `updateConfig`, `setPeerOcclusion` and `rebuild`) in development
   builds only, and the practice feed a fixture of the panel's fullest state
   (`?voice-fixture=full`) for the layout e2e; production builds compile both
   out.
@@ -376,19 +376,27 @@ people and fragile past that, and every fix it asked for was adopted:
   tick with hysteresis (speaking above 0.01 RMS, quiet after 600 ms under
   0.005), and your own speaking comes from your mic's meter. So a row says
   someone is speaking only when you hear them, and nobody you can't hear
-  can claim the cap's exception for speakers. **Known limitation:** the
-  SFU still sends its own active-speaker updates to everyone in the room,
-  heard or not. The lobby never reads them, but a modified client can, and
-  so learns who is talking anywhere in the room, and about how loud,
-  though never what is said. Closing that would need the server to filter
-  speaker updates per listener, as it would the positions (above).
+  can claim the cap's exception for speakers. The SFU's own active-speaker
+  updates aren't read. The review took them for room-wide metadata, a
+  known limitation; measured against livekit-server 1.9.4, they aren't:
+  the server sends a participant speaker updates only about those it is
+  subscribed to, and about itself. In the proof, a talker 60 m away was
+  speaking 30 times out of 30 by its own client's account, and 0 times by
+  the listener's. So they tell a client no more than the audio its
+  permissions already let it receive. LiveKit Cloud runs the same server
+  but wasn't tested.
 - **One audio source per received track.** The engine caches each track's
   `<audio>` element, stream and source (a `WeakMap` keyed by the receiver's
   `MediaStreamTrack`). A let-go disconnects only what follows the source and
-  pauses the element, and taking the voice back reuses all three. Past 32
-  idle cached sources the engine starts a new AudioContext, and renders the
-  impulse response again, at a quiet moment (nobody heard speaking): the
-  only way to free them.
+  pauses the element, and taking the voice back reuses all three. LiveKit
+  reuses receiver tracks from one session to the next, so the cache levels
+  off at the most voices received at once (3 in the proof, over 12
+  sessions). New tracks, after reconnects in a long visit, add to it, and
+  past 32 idle cached sources the engine starts a new AudioContext, and
+  renders the impulse response again, at a quiet moment (nobody heard
+  speaking). Closing the old context stops its sources. Chrome keeps the
+  closed context's objects while the tracks live: the proof still saw them
+  listed two minutes on, no longer pulling audio.
 - **LiveKit's own AudioContext stays.** `livekit-client` opens a context of
   its own when it connects (`acquireAudioContext`), even with its Web Audio
   mix off (`webAudioMix: false`, since the engine plays every voice
@@ -404,9 +412,18 @@ people and fragile past that, and every fix it asked for was adopted:
   session timed out) clears their position, tears their audio down, marks
   them out of range and forgets the list last sent, so the new session
   receives nothing until it says where it is. A list that takes someone off
-  goes out at once, as does one sent because a member left; only a list that
-  adds someone waits out the 500 ms. On a full reconnect the engine sets
-  the list to nobody, so what LiveKit resends as it reconnects is nobody.
+  goes out at once, in the same task as the packet that took them out of
+  range or the news that they left; only a list that adds someone waits
+  out the 500 ms. On a full reconnect the engine sets the list to nobody,
+  so what LiveKit resends as it reconnects is nobody. **Known limitation:**
+  LiveKit keeps permissions per identity, not per session, so someone
+  who comes back as a new session (a reload, say) inherits the old one's
+  place on everyone's list until those clients hear of the new session.
+  In the proof, a session back at once got the speaker's mic about 50 ms
+  after it joined, and lost it 0.7 to 0.95 s later, once the speaker's
+  client had heard of it. Within that window they hear whoever let them
+  hear a moment before. Closing it would need the session in the
+  identity, which the one-seat rule (above) forbids.
 - **One Room per engine.** A leave and a later join reuse the engine's Room
   once its last connect has settled, and every listener comes off it on
   disconnect. `livekit-client`'s Room constructor adds a `devicechange`
@@ -424,17 +441,60 @@ people and fragile past that, and every fix it asked for was adopted:
   away, live regions always in the page, an order that holds still under
   the pointer and in focus, and the wording the review asked for.
 
+**Proved** on 2026-10-05 against the same local LiveKit server
+(livekit-server 1.9.4), with keys made for the proof, on the code merged
+with the `/apps` batch, in real browsers with Chromium's fake mic. V's
+checks passed again. Two members listed each other 1.1 s after load,
+sound stayed blocked until a click, the listener tuned in 0.2 s after the
+speaker's mic went on, and the graph matched the pure maths at 3, 15.5
+and 30 m. At 30 m the reverb carried 79% of the energy. Mute and deafen
+gave 0.000000 RMS. The voice moved to the other ear on a turn. The
+listener let go at 45.4 m, and the speaker withdrew permission at 50.1 m.
+Mic off ended the capture, a tab that had stopped drawing was still
+found, and a refused mic showed its line.
+
+Then the fixes, with a phone-sized listener and a page of scripted peers:
+
+- **Sources.** 12 sessions joining and leaving, and 12 takes and
+  let-goes of one voice, left 3 native MediaStreamAudioSource nodes; the
+  count had stopped growing by the fourth session.
+- **The rebuild.** It was asked for through the debug view, since 32
+  idle sources are never reached here. It ran 0.3 s later at a quiet tick, and
+  the new context and IR came up. The voice was heard again 4.5 s after it
+  was unmuted. The closed context still listed its 3 sources, no longer
+  pulling audio, so that check, which counted every source, failed as
+  written.
+- **Removals.** The list without someone went out with the packet that
+  took them past 50 m, 136 ms after it left their client, and at once on
+  the news that someone left.
+- **The dwell.** A peer flipping between 30 m and 47 m every 1.2 s was
+  asked for or let go 4 times in 14 s, never within 2.19 s of the last.
+  Ten flips a second were dropped as steps no camera could take (37
+  packets), and nothing churned.
+- **The cap.** A phone received the nearest 8 of 11 voices, and the other
+  3 read "too many voices nearby". A walker who came nearest took a
+  place.
+- **Speaking.** It read as speaking 9 times in 12 reads while the voice
+  was heard, and 0 while it was muted or deafened. A talker 60 m away was
+  never speaking here.
+- **Guards and Rooms.** Every bad config was refused whole, and a NaN
+  occlusion counted as none. Two evictions and two rejoins kept one Room.
+- **Page errors:** none.
+
+The one failure the fixes can't remove is the same-identity rejoin
+(above).
+
 **Consequences.**
 
 - The engine's lazy chunk is 7.1 kB gzipped (6 kB before the fixes) and
-  LiveKit's is unchanged at 135 kB; the `/apps` first load is 136.4 kB
+  LiveKit's is unchanged at 135 kB; the `/apps` first load is 136.5 kB
   gzipped (134.5 kB before), for the panel's new states and the rules in
   `@forge/lobby`. Neither LiveKit nor the engine is in it, and production
   builds still carry neither the debug view nor the fixture.
 - A crowd past the cap is heard nearest first, eight or sixteen at a time,
   and the panel says so.
-- Who is talking, though not what they say, still reaches everyone in the
-  room through the SFU's speaker updates.
+- A member back as a new session can hear, for under a second, whoever
+  could hear their old session (above).
 - iOS can't be tested here: a rebuilt AudioContext may come back
   suspended, behind "Turn on sound" again, and LiveKit's second context is
   one more for the audio session and the ringer switch to govern. Both

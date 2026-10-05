@@ -53,7 +53,8 @@ const ROUTES: readonly Route[] = [
   { method: 'GET', path: new RegExp(`^${ID}$`), identity: 'optional' },
   { method: 'PATCH', path: new RegExp(`^${ID}$`), identity: 'required' },
   { method: 'POST', path: new RegExp(`^${ID}/(?:withdraw|second|consent|comments|vote)$`), identity: 'required' },
-  { method: 'POST', path: new RegExp(`^${ID}/admin/(?:end-debate|close-vote|publish-task)$`), identity: 'required' },
+  // `house-draft` is "Draft it again" (Phase 6 contract §1): the house model drafts the task once more. No body.
+  { method: 'POST', path: new RegExp(`^${ID}/admin/(?:end-debate|close-vote|publish-task|house-draft)$`), identity: 'required' },
   { method: 'PUT', path: new RegExp(`^${ID}/admin/draft-task$`), identity: 'required' },
 ];
 

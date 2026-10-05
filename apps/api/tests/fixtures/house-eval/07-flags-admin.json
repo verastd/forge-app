@@ -1,0 +1,23 @@
+{
+  "name": "flags-admin",
+  "kind": "sample",
+  "title": "A screen for admins to switch features on and off",
+  "pitch": "Admins should have a simple screen that lists every feature switch in the app, shows whether each one is on, and lets them flip it. Nobody else should be able to open that screen.",
+  "comments": [
+    {
+      "author": "octo-operator",
+      "text": "It must be impossible for a member who isn't an admin to reach it, even by typing the address."
+    }
+  ],
+  "expect": {
+    "verdict": [
+      "ready",
+      "needs_clarification",
+      "not_feasible"
+    ],
+    "sizes": [
+      "S",
+      "M"
+    ]
+  }
+}

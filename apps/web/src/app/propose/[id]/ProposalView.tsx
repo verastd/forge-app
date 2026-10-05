@@ -31,6 +31,19 @@
  * says why in plain words, next to the part it came from, and focus moves to
  * that line. No answer is not a "no": the proposal is read again, and the
  * page says whether the write went through.
+ *
+ * A signed-in member's own view (with `you`: their part, and an admin's panel
+ * with the draft task being written in it) is never traded for the public
+ * one: when a read through the BFF fails, the page keeps what it shows and
+ * says it may be out of date until a read works again.
+ *
+ * Phase 6: while the house model drafts a passed proposal's task (an admin's
+ * page, `house` queued or running), the page reads the proposal every 5
+ * seconds, one read at a time and only while the tab is visible, and stops
+ * once it is done, failed or off, or the page is left. After 3 failed reads
+ * in a row it reads once a minute, and the house block says so, until one
+ * works. The practice app shows its simulated house draft on a card of its
+ * own.
  */
 
 import Link from 'next/link';
@@ -56,6 +69,7 @@ import {
   mayHaveHappened,
   postComment,
   publishDraftTask,
+  requestHouseDraft,
   saveDraftTask,
   secondProposal,
   withdrawProposal,
@@ -69,9 +83,12 @@ import {
   consentLine,
   describeProposalError,
   didNotGoThrough,
+  houseDraftAsked,
   isActive,
+  isHouseWorking,
   mergeComments,
   nextDeadlineRead,
+  notReadBack,
   standingLine,
   tallyLines,
   turnoutLine,
@@ -86,12 +103,17 @@ import styles from '../propose.module.css';
 import { ActionPanel } from './ActionPanel';
 import type { YouState } from './ActionPanel';
 import { AdminPanel } from './AdminPanel';
+import { PracticeHouse } from './HouseDraft';
 import { OUTCOME_ID } from './problem';
 import type { Outcome, OutcomePart } from './problem';
 import { DebateThread, Timeline } from './Record';
 
 /** How often an open page reads the proposal again, while the tab is visible. */
 const POLL_MS = 60_000;
+/** While the house model drafts (an admin's page), how often the page reads the proposal again. */
+const HOUSE_POLL_MS = 5000;
+/** After this many reads through the BFF fail in a row, the house model's reads slow to POLL_MS, and the block says so. */
+const HOUSE_POLL_FAILURES = 3;
 /** After a deadline, give the API a moment to move the proposal on before reading it. */
 const AFTER_DEADLINE_MS = 1500;
 
@@ -105,12 +127,15 @@ const STALE: ReadonlySet<string> = new Set([
   'own_proposal',
   'proposal_changed',
   'edit_limit',
+  // "Draft it again": the house block shows that it is drafting, or that it is off.
+  'house_busy',
+  'house_off',
 ]);
 
 /** Refusals that may mean the same request already went through (a retry after a lost answer). */
 const ALREADY: ReadonlySet<string> = new Set(['already_seconded', 'already_decided_consent']);
 
-const ADMIN_ACTIONS: ReadonlySet<ProposalAction> = new Set(['end_debate', 'close_vote', 'save_draft', 'publish']);
+const ADMIN_ACTIONS: ReadonlySet<ProposalAction> = new Set(['end_debate', 'close_vote', 'save_draft', 'publish', 'house_draft']);
 
 /** Which part of the page a write's outcome is said in. */
 function partOf(action: ProposalAction): OutcomePart {
@@ -161,9 +186,15 @@ export function ProposalView({ proposalId }: { proposalId: number }) {
   const freshness = useRef(new Freshness());
   const shown = useRef<DisplayDetail | null>(null);
   const working = useRef(false);
+  /** Reads again under way (`refresh`, and the house model's 5 s reads): those never start on top of one. */
+  const reading = useRef(0);
   const focusAfter = useRef<string | null>(null);
   /** Deadlines already read again for, once passed: the 60 s poll covers them from then on. */
   const deadlinesRead = useRef(new Set<string>());
+  /** Reads through the BFF that have failed in a row. */
+  const failedReads = useRef(0);
+  /** HOUSE_POLL_FAILURES of them or more: the house model's reads slow down until one works. */
+  const [readsFailing, setReadsFailing] = useState(false);
 
   /**
    * Put `next` on screen. Once earlier comments are open, the ones the last
@@ -178,18 +209,32 @@ export function ProposalView({ proposalId }: { proposalId: number }) {
     setDetail(next);
   }, []);
 
-  /** What you can do, from the BFF. A failure leaves the page readable. */
+  /**
+   * What you can do, from the BFF; null when it failed. A failure leaves the
+   * page readable, and a member's own view (`you` on screen) as it is: an
+   * answer without `you` (the BFF couldn't vouch for them) is no view to
+   * trade it for, so it counts as a failure too.
+   */
   const readYou = useCallback(async (): Promise<DisplayDetail | null> => {
     const ticket = freshness.current.read();
-    try {
-      const data = await loadProposalAsMember(proposalId);
-      if (freshness.current.accept(ticket)) show(data);
-      setYouState(data.you === undefined ? 'failed' : 'ok');
-      return data;
-    } catch {
+    const failed = (): null => {
+      failedReads.current += 1;
+      if (failedReads.current >= HOUSE_POLL_FAILURES) setReadsFailing(true);
       setYouState('failed');
       return null;
+    };
+    let data: DisplayDetail;
+    try {
+      data = await loadProposalAsMember(proposalId);
+    } catch {
+      return failed();
     }
+    if (data.you === undefined && shown.current?.you !== undefined) return failed();
+    failedReads.current = 0;
+    setReadsFailing(false);
+    if (freshness.current.accept(ticket)) show(data);
+    setYouState(data.you === undefined ? 'failed' : 'ok');
+    return data;
   }, [proposalId, show]);
 
   // The proposal (and "Try again"): in public first, then your part.
@@ -234,25 +279,33 @@ export function ProposalView({ proposalId }: { proposalId: number }) {
 
   /**
    * Read it again now: through the BFF when signed in (with your part), and in
-   * public when that can't answer. A failure leaves the last answer on screen.
-   * Returns what was read, shown or not.
+   * public when that can't answer, unless your own view is on screen: that is
+   * never traded for the public one (an admin's unsaved draft would go with
+   * it). A failure leaves the last answer on screen. Returns what was read,
+   * shown or not, or null when nothing was.
    */
   const refresh = useCallback(async (): Promise<DisplayDetail | null> => {
-    if (identified) {
-      const member = await readYou();
-      if (member !== null) return member;
-    }
-    const ticket = freshness.current.read();
+    reading.current += 1;
     try {
-      const result = await loadProposal(proposalId, signedIn);
-      if (freshness.current.accept(ticket)) {
-        show(result.data);
-        setPractice(result.practice);
+      if (identified) {
+        const member = await readYou();
+        if (member !== null) return member;
+        if (shown.current?.you !== undefined) return null;
       }
-      return result.data;
-    } catch (error: unknown) {
-      if (failureOf(error).code === 'proposals-disabled') setView('disabled');
-      return null;
+      const ticket = freshness.current.read();
+      try {
+        const result = await loadProposal(proposalId, signedIn);
+        if (freshness.current.accept(ticket)) {
+          show(result.data);
+          setPractice(result.practice);
+        }
+        return result.data;
+      } catch (error: unknown) {
+        if (failureOf(error).code === 'proposals-disabled') setView('disabled');
+        return null;
+      }
+    } finally {
+      reading.current -= 1;
     }
   }, [identified, proposalId, readYou, show, signedIn]);
 
@@ -274,17 +327,19 @@ export function ProposalView({ proposalId }: { proposalId: number }) {
   });
 
   // Every 60 s while the tab is visible, and on coming back to it. The practice floor only moves when you do.
+  // Never on top of a write or another read (one of the house model's 5 s ones, say): the next tick catches up.
   useEffect(() => {
     if (view !== 'ready' || practice) {
       return;
     }
     let timer: ReturnType<typeof setTimeout> | undefined;
+    const free = (): boolean => document.visibilityState === 'visible' && !working.current && reading.current === 0;
     const tick = (): void => {
-      if (document.visibilityState === 'visible' && !working.current) void refresh();
+      if (free()) void refresh();
       timer = setTimeout(tick, POLL_MS);
     };
     const onVisibility = (): void => {
-      if (document.visibilityState === 'visible' && !working.current) void refresh();
+      if (free()) void refresh();
     };
     timer = setTimeout(tick, POLL_MS);
     document.addEventListener('visibilitychange', onVisibility);
@@ -293,6 +348,60 @@ export function ProposalView({ proposalId }: { proposalId: number }) {
       document.removeEventListener('visibilitychange', onVisibility);
     };
   }, [view, practice, refresh]);
+
+  // While the house model drafts (queued or running), on an admin's page: every 5 s, one read at a time, only
+  // while the tab is visible, until it is done, failed or off. Leaving the page or the tab stops it; coming
+  // back resumes it. Through the BFF only (the house is an admin's, so the public read has none of it): a read
+  // that fails leaves the page as it is, the draft form an admin may be writing in included. After
+  // HOUSE_POLL_FAILURES failed reads in a row, once a minute instead, until a read works.
+  const isAdmin = detail?.you?.isAdmin === true;
+  const houseWorking = detail?.house !== undefined && isHouseWorking(detail.house.status);
+  useEffect(() => {
+    if (view !== 'ready' || practice || !identified || !isAdmin || !houseWorking) {
+      return;
+    }
+    const every = readsFailing ? POLL_MS : HOUSE_POLL_MS;
+    let stopped = false;
+    let inFlight = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const schedule = (): void => {
+      if (stopped || inFlight || timer !== undefined || document.visibilityState !== 'visible') return;
+      timer = setTimeout(() => {
+        timer = undefined;
+        void tick();
+      }, every);
+    };
+    const tick = async (): Promise<void> => {
+      if (stopped || document.visibilityState !== 'visible') return;
+      // Never on top of another read or a write: the next tick tries again.
+      if (!working.current && reading.current === 0) {
+        inFlight = true;
+        reading.current += 1;
+        try {
+          await readYou();
+        } finally {
+          reading.current -= 1;
+          inFlight = false;
+        }
+      }
+      schedule();
+    };
+    const onVisibility = (): void => {
+      if (document.visibilityState === 'visible') {
+        schedule();
+      } else if (timer !== undefined) {
+        clearTimeout(timer);
+        timer = undefined;
+      }
+    };
+    schedule();
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      stopped = true;
+      if (timer !== undefined) clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [view, practice, identified, isAdmin, houseWorking, readsFailing, readYou]);
 
   // Right after the deadline, on the server's clock: that is when the API moves it on (on its next read).
   const paused = detail?.floorPaused === true;
@@ -314,7 +423,6 @@ export function ProposalView({ proposalId }: { proposalId: number }) {
   }, [detail, practice, paused, refresh]);
 
   // An admin's panel needs to know whether Test timers are on: the API takes its test tools only then.
-  const isAdmin = detail?.you?.isAdmin === true;
   useEffect(() => {
     if (!isAdmin || practice) {
       return;
@@ -382,8 +490,13 @@ export function ProposalView({ proposalId }: { proposalId: number }) {
         const failure = failureOf(failed);
         if (mayHaveHappened(failed)) {
           const after = await refresh();
-          const went = after === null ? null : wentThrough(intent, after, login);
-          if (went === true && after !== null) {
+          if (after === null) {
+            // The read back failed too: the page still shows what it did, so it can't say yet.
+            say(action, 'problem', notReadBack());
+            return false;
+          }
+          const went = wentThrough(intent, after, login);
+          if (went === true) {
             say(action, 'ok', unsure === undefined ? success(after) : unsure(after));
             return true;
           }
@@ -544,6 +657,26 @@ export function ProposalView({ proposalId }: { proposalId: number }) {
     [act, proposalId],
   );
 
+  const onHouseDraft = useCallback(() => {
+    // The house as it was when asked: if the answer is lost, any change to it in the read back means it went through.
+    const house = shown.current?.house;
+    const hadDraft = house?.spec !== undefined;
+    return act(
+      {
+        action: 'house_draft',
+        before: house === undefined ? undefined : { status: house.status, reason: house.reason, draftedAt: house.draftedAt },
+      },
+      async () => {
+        // The API answers with the house's new state (queued): shown in place, with the rest as it was.
+        const asked = await requestHouseDraft(proposalId);
+        const current = shown.current;
+        return asked === null || current === null ? null : { ...current, house: asked };
+      },
+      (after) => houseDraftAsked(hadDraft, after?.house),
+      (after) => houseDraftAsked(hadDraft, after.house),
+    );
+  }, [act, proposalId]);
+
   const onShowEarlier = useCallback(() => {
     const current = shown.current;
     if (loadingEarlier || current === null) return;
@@ -643,6 +776,10 @@ export function ProposalView({ proposalId }: { proposalId: number }) {
     outcome !== null && partOf(outcome.action) === part ? outcome : null;
   const thread = earlier === null ? detail.comments : mergeComments(earlier.comments, detail.comments);
   const moreComments = earlier === null ? detail.moreComments === true : earlier.more;
+  // The practice floor simulates the house model; with its flag off, the practice app shows none of it.
+  const events = practice && !flag.house ? detail.events.filter((entry) => entry.kind !== 'house_drafted') : detail.events;
+  // Your own view is on screen, but the last read of it through the BFF failed: it stays, and says so.
+  const stale = detail.you !== undefined && youState === 'failed';
 
   return (
     <main className="page stack-lg">
@@ -676,6 +813,10 @@ export function ProposalView({ proposalId }: { proposalId: number }) {
 
       {practice && <p className="demo-banner">{PRACTICE_NOTE} This sample lives in this tab only.</p>}
       {paused && <FloorPaused />}
+      {/* Always on the page (empty and out of sight until needed), so a screen reader hears it when it fills. */}
+      <p id="view-stale" aria-live="polite" className={stale ? styles.staleView : 'visually-hidden'}>
+        {stale ? "Couldn't refresh your view just now. What you see may be out of date; it tries again shortly." : ''}
+      </p>
 
       <section className="card stack" aria-labelledby="pitch-title">
         <h2 id="pitch-title" className="section-title">
@@ -738,12 +879,17 @@ export function ProposalView({ proposalId }: { proposalId: number }) {
           testTimers={testTimers}
           busy={busy}
           outcome={outcomeIn('admin')}
+          houseUnchecked={readsFailing}
           onEndDebate={onEndDebate}
           onCloseVote={onCloseVote}
           onSaveDraft={onSaveDraft}
           onPublish={onPublish}
+          onHouseDraft={onHouseDraft}
         />
       )}
+
+      {/* The practice app has no admins: its simulated house draft gets a card of its own, while the flag is on. */}
+      {practice && !isAdmin && flag.house && detail.house !== undefined && <PracticeHouse house={detail.house} />}
 
       <DebateThread
         detail={detail}
@@ -757,7 +903,7 @@ export function ProposalView({ proposalId }: { proposalId: number }) {
         onComment={onComment}
       />
 
-      <Timeline events={detail.events} />
+      <Timeline events={events} />
     </main>
   );
 }

@@ -11,7 +11,9 @@ something, read the vendor's docs again before changing code.
 Each test lists what you need, what to run, what to look at, when it
 passes, and what to switch on afterwards. Tests 1 to 5 are the open
 questions from the 2026-10-01 research; tests 1, 3 and 6 to 9 are the six
-start rails, one each.
+start rails, one each. Test 10 is the house model, which drafts the task
+of a passed proposal ([ADR-007](adr/ADR-007-house-model.md)), against
+Anthropic's real API.
 
 ## Before you start
 
@@ -379,6 +381,126 @@ nothing.
 
 **Passes when** the `--go` run does the task in the fork and the second
 run does nothing. **Then** add `claude-routine` to `FORGE_START_RAILS`.
+
+## 10. House model
+
+**Questions.** With the key on the box, does the house model draft a
+passed proposal's task end to end: does its draft fill the draft task, does
+the timeline say so, and does "Draft it again" bring a new draft without
+replacing one an admin saved? How long does a draft take, what does it
+cost, and how does the eval come out on the two models it compares?
+
+**You need.**
+
+- The runbook's § 6, "The house model", done: `ANTHROPIC_API_KEY` in the
+  API's environment, the API restarted, and the `house_spec` and
+  `proposals` flags on.
+- Your admin account (its GitHub id in `FORGE_ADMIN_IDS`) and the test
+  account, both signed in with GitHub before the test proposal is
+  seconded, so both count.
+- **Test timers** on (the switch on `/propose`), so the proposal passes in
+  minutes.
+- A shell on the API box, for the usage checks and the eval.
+
+**Run.**
+
+1. **Pass a test proposal.** As the test account, bring a proposal with a
+   small, concrete pitch, for example "Show the date each proposal passed
+   on its page". As your admin account, second it and consent. If the two
+   of you are the whole eligible set, that passes it at once; otherwise
+   press **End debate now** and confirm, and with no objection it passes
+   without a vote.
+2. **The draft fills.** As the admin, open the proposal's page. The "House
+   draft" block above the draft task's form says "The house model will
+   draft this task shortly…" while the job waits for the worker (it wakes
+   every 10 seconds), then "The house model is drafting this task…", and
+   the page reads the proposal again every 5 seconds until the draft lands;
+   note how long that took. Don't type in the form meanwhile: the open
+   page's form takes the house's draft only while it is untouched. The
+   block then shows the verdict chip and its reason, the risks, the scope
+   in and out, "Drafted by <model> on <date>." and "Its draft is in the
+   form below. Check every line before you publish." The form holds the
+   house's title, summary, criteria and size; the tier floor is still T0
+   and the reward class still `none`.
+3. **The timeline line appears.** The timeline has "FORGE's house model
+   drafted the task from this proposal. An admin checks it before it goes
+   on the Contribute board." Open the page signed out, or as the test
+   account: the line is there, and the House draft block isn't.
+4. **"Draft it again" works.**
+   - Press **Draft it again**, then **Yes, draft it again**. The line at the
+     top of the Admin panel says "The house model is drafting it again. Its
+     new draft shows below when it's ready.", and the block goes back to
+     drafting. When the new draft lands, "Drafted by … on …" shows the new
+     time and the timeline has a second line. The new draft fills the
+     saved draft task (nobody has saved it), but the form on the open page
+     keeps the first one: the block says "Its draft is saved, but the form
+     below still has the earlier draft." **Use the house draft** puts the
+     new one in the form, and the block says "Its draft is in the form
+     below. Check every line before you publish."
+   - Change one line in the form, press **Save draft**, and ask for a draft
+     again. When it lands, the block says "You had already saved the draft,
+     so it wasn't replaced." and the form still holds your saved text.
+     **Use the house draft** then puts the new draft in the form without
+     saving it, and the line beside the form says "The house draft is in
+     the form below. Nothing is saved until you save or publish."
+   - Don't publish the test proposal's task unless you mean to.
+5. **Usage.** On the box, what each call cost and how long it took, from
+   the state database (as the API's user; the runbook's § 6 has the
+   commands):
+
+   ```sh
+   sqlite3 <FORGE_STATE_DB_PATH> "SELECT called_at, proposal_id, kind, outcome, served_by, input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens, duration_ms, request_id FROM house_calls ORDER BY id DESC LIMIT 10"
+   ```
+
+   Every call is there, failed ones and second tries included: each draft
+   makes a `pick` call, then a `spec` call, each tried once more if its
+   answer was unusable, and when the draft worked the last of each is
+   `ok`. The Claude Console shows the same calls, and is the bill. The
+   API's log has an INFO line for each call that worked ("The house's pick
+   call: request …", with its tokens) and one for each draft stored ("The
+   house drafted proposal <N>'s task"), and should have no warning or
+   error from the house.
+6. **The eval.** On the box, in the API's checkout, with the key loaded
+   from the API's environment as the runbook shows:
+
+   ```sh
+   cd apps/api
+   uv run python -m forge_api.tools.house_eval --model claude-opus-5-5 --out ~/house-eval-opus.md
+   uv run python -m forge_api.tools.house_eval --model claude-opus-5-5 --out ~/house-eval-opus.md --yes
+   uv run python -m forge_api.tools.house_eval --model claude-sonnet-5-5 --out ~/house-eval-sonnet.md --yes
+   ```
+
+   The first prints the estimate and stops, spending nothing. Each run with
+   `--yes` makes 2 calls per case (up to 4 when an answer is unusable) and
+   costs real money: on 2026-10-04's checkout the estimate for the 15 cases
+   was about $3.60 on `claude-opus-5-5` (at most about $50) and about $1.80
+   on `claude-sonnet-5-5` (at most about $25). The "at most" assumes every
+   call is tried twice and each try also runs on a fallback model, every
+   output at 16,000 tokens; both figures are estimates, not a ceiling. The
+   eval's client never retries a request itself, so its report shows every
+   request it sent. The report's header has the calls, their time in all
+   and the longest, the tokens billed (every model's attempt of every call,
+   a fallback's included) and the cost at list price, with cache writes at
+   1.25 and cache reads at 0.1 times the input price; the Console's bill is
+   the real figure.
+
+**Look at.** How long each draft took, and its tokens and cost; whether
+each spec reads like a task an agent could start (criteria a reviewer can
+check, real paths in scope, nothing protected in scope). In each eval
+report, every case's checks (`validates`, `criteria`, `verdict`, `size`,
+`protected`, `obeyed`), above all the adversarial cases', the cost line,
+and how long the calls took: a call is cut off after 600 seconds, and one
+that comes close means the effort is too high.
+
+**Passes when** the draft fills the form, the timeline line shows (to
+members too, with no house block for them), "Draft it again" brings a new
+draft and leaves a saved one alone, and the eval has run on both models
+with no failed `protected` or `obeyed` check. A `verdict` or `size` miss on
+a sample case may be the case's own expectation, which is a first cut: read
+the spec before deciding. **Then** keep both reports, and choose the model
+by ADR-007's bar: if `claude-sonnet-5-5` held it, set
+`FORGE_HOUSE_MODEL=claude-sonnet-5-5` on the API box and restart the API;
+otherwise leave the default. Switch Test timers off before real use.
 
 ## Results
 

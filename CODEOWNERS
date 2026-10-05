@@ -92,3 +92,8 @@
 /apps/api/src/forge_api/routers/proposals.py      @verastd @forge-cold
 /apps/api/src/forge_api/routers/members.py        @verastd @forge-cold
 /apps/api/src/forge_api/routers/notifications.py  @verastd @forge-cold
+# The house model (ADR-007): its prompt, what it reads and how it cleans a spec, which
+# shape the task text every agent is given, and its eval with the cases a model must pass.
+/apps/api/src/forge_api/services/house.py         @verastd @forge-cold
+/apps/api/src/forge_api/tools/house_eval.py       @verastd @forge-cold
+/apps/api/tests/fixtures/house-eval/              @verastd @forge-cold

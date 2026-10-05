@@ -12,6 +12,7 @@ by field by test_wire_models.py (tests/fixtures/wire-golden.json).
 """
 
 from datetime import timedelta
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -29,6 +30,7 @@ from forge_api.models import (
     FlagConfig,
     ForkStatus,
     HealthResponse,
+    HouseDraft,
     NotificationList,
     ProposalCommentPage,
     ProposalDetail,
@@ -41,9 +43,11 @@ from forge_api.models import (
     TaskList,
 )
 from forge_api.services import bridge as bridge_service
+from forge_api.services import house
 
 from .bridge_helpers import JULES_KEY, OTHER, USER, BridgeEnv, has_null, install_bridge
 from .conftest import AuthHeaders, FakeClock
+from .house_helpers import drafted, house_on, install, make_repo, message
 from .proposal_helpers import ADMIN, ALICE, BOB, CAROL, DAVE, DRAFT, Floor, make_floor
 
 CSV_BRANCH = "task/1-polish-the-csv-export-in-the-data-app"
@@ -368,3 +372,54 @@ def test_proposals_error_bodies_are_flat_and_null_free(
         assert not has_null(body), body
     floor.flags(proposals=False)
     assert floor.get("/api/proposals").json() == {"error": "proposals-disabled"}
+
+
+# --- Phase 6: the house model -----------------------------------------------------------
+
+
+def test_the_house_responses_are_null_free_and_match_their_models(
+    client: TestClient,
+    clock: FakeClock,
+    auth_headers: AuthHeaders,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """POST /api/proposals/{id}/admin/house-draft (202 HouseDraft and its refusals), and an
+    admin's detail with the house at every status it can show."""
+    floor = make_floor(client, clock, auth_headers, monkeypatch)
+    house_on(monkeypatch, make_repo(tmp_path / "repo"))
+    floor.hello(ALICE, BOB, CAROL)
+    proposal_id = floor.passed(ALICE, BOB)
+    path = f"/api/proposals/{proposal_id}"
+    seen: list[tuple[type[BaseModel], Any]] = []
+    errors: list[httpx.Response] = []
+
+    def admin_view() -> None:
+        seen.append((ProposalDetail, ok(floor.get(path, ADMIN))))
+
+    admin_view()  # queued
+    errors.append(floor.post(f"{path}/admin/house-draft", ADMIN))  # 409 house_busy
+    install(monkeypatch, *drafted(), message(None, stop="refusal"))
+    assert house.work(floor.db(), floor.clock) == "done"
+    admin_view()
+    response = floor.post(f"{path}/admin/house-draft", ADMIN)
+    assert response.status_code == 202, response.text
+    seen.append((HouseDraft, response.json()))
+    assert house.work(floor.db(), floor.clock) == "failed"
+    admin_view()  # failed, with the earlier spec
+    monkeypatch.setenv(house.DAILY_LIMIT_ENV, "2")
+    errors.append(floor.post(f"{path}/admin/house-draft", ADMIN))  # 429 rate_limited
+    monkeypatch.delenv(house.KEY_ENV)
+    admin_view()  # off
+    errors.append(floor.post(f"{path}/admin/house-draft", ADMIN))  # 503 house_off
+
+    statuses = [payload["house"]["status"] for model, payload in seen if model is ProposalDetail]
+    assert statuses == ["queued", "done", "failed", "off"]
+    for model, payload in seen:
+        assert not has_null(payload), (model.__name__, payload)
+        assert round_trips(model, payload), (model.__name__, payload)
+    assert [error.status_code for error in errors] == [409, 429, 503]
+    for error in errors:
+        body = error.json()
+        assert isinstance(body.get("error"), str), body
+        assert not has_null(body), body

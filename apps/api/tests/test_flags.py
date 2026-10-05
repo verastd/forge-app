@@ -67,6 +67,7 @@ def test_all_flags_false_when_no_source_is_present(
         "mcp_connector": False,
         "agent_start": False,
         "proposals": False,
+        "house_spec": False,
     }
 
 
@@ -107,6 +108,7 @@ def test_env_json_bad_json_fails_closed_even_over_a_valid_earlier_layer(
         "mcp_connector": False,
         "agent_start": False,
         "proposals": False,
+        "house_spec": False,
     }
 
 
@@ -123,6 +125,7 @@ def test_env_path_missing_file_fails_closed(
         "mcp_connector": False,
         "agent_start": False,
         "proposals": False,
+        "house_spec": False,
     }
 
 
@@ -146,6 +149,7 @@ def test_known_flag_non_boolean_fails_closed_even_with_a_valid_sibling_key(
         "mcp_connector": False,
         "agent_start": False,
         "proposals": False,
+        "house_spec": False,
     }
 
 
@@ -163,6 +167,7 @@ def test_non_object_top_level_fails_closed(
         "mcp_connector": False,
         "agent_start": False,
         "proposals": False,
+        "house_spec": False,
     }
 
 
@@ -242,6 +247,29 @@ def test_a_non_boolean_proposals_fails_every_flag_closed(
     assert flags_service.is_enabled("proposals") is False
 
 
+def test_house_spec_is_on_in_the_repo_config_off_by_default_and_can_be_switched_off(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # On in the checked-in file; an unconfigured deploy comes up with the house off.
+    assert flags_service.DEFAULT_FLAGS["house_spec"] is False
+    assert flags_service.is_enabled("house_spec") is True
+    monkeypatch.setenv(flags_service.ENV_JSON, json.dumps({"house_spec": False}))
+    assert flags_service.is_enabled("house_spec") is False
+    assert flags_service.is_enabled("proposals") is True
+    monkeypatch.setattr(flags_service, "find_config_file", lambda start=None: None)
+    monkeypatch.delenv(flags_service.ENV_JSON)
+    assert flags_service.is_enabled("house_spec") is False
+
+
+def test_a_non_boolean_house_spec_fails_every_flag_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(flags_service.ENV_JSON, json.dumps({"house_spec": "true"}))
+    assert flags_service.get_flags().model_dump() == flags_service.DEFAULT_FLAGS
+    assert flags_service.is_enabled("house_spec") is False
+    assert flags_service.is_enabled("proposals") is False
+
+
 def test_default_flags_name_every_flag_in_the_model() -> None:
     assert list(flags_service.DEFAULT_FLAGS) == list(FlagConfig.model_fields)
     assert not any(flags_service.DEFAULT_FLAGS.values())
@@ -258,5 +286,6 @@ def test_flags_endpoint_returns_every_flag(client: TestClient) -> None:
         "mcp_connector",
         "agent_start",
         "proposals",
+        "house_spec",
     }
     assert all(isinstance(value, bool) for value in payload.values())

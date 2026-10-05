@@ -95,6 +95,10 @@ request as merged, the proposal moves to `shipped`. Building stays outside
 FORGE, as PRD v0.2 §6 has it: contributors' own agents take the task like
 any other.
 
+> Amended by [ADR-007](ADR-007-house-model.md): since Phase 6 the house
+> model drafts what done means (the criteria, with the title, summary and
+> size), and the admin checks every line before publishing it.
+
 **An in-app bell.** Members hear about the floor inside FORGE: a bell in
 the site header (and in an app's bar) for members signed in with GitHub,
 with an unread count read every 60 seconds while the tab is visible. It

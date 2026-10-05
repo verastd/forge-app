@@ -76,7 +76,8 @@ plus the agent hand-off and the FORGE connector that ADR-005 adds
 - `apps/api/src/forge_api/services/identity.py` — where the API verifies
   that assertion, and the `FORGE_ADMIN_IDS` operator check, which also
   decides who may switch the Propose floor's Test timers, end a debate or
-  close a vote early, and publish a passed proposal as a Contribute task.
+  close a vote early, publish a passed proposal as a Contribute task, and
+  ask the house model for a new draft of it.
 - `.gitleaksignore` — fingerprints the secret scan skips (known false
   positives only). Core-owned, so no PR can suppress a finding about itself.
 - `AGENTS.md`, `CLAUDE.md` and `.gemini/` — the operating manual coding
@@ -138,6 +139,74 @@ Known and accepted for the pilot, so not worth a report: anyone signed in
 with GitHub takes part, throwaway accounts included; consents and votes are
 public by name; and an admin is trusted with the text of the tasks they
 publish ([ADR-006](docs/adr/ADR-006-proposals.md)).
+
+### The house model is in scope too
+
+When a proposal passes, FORGE's house model drafts its task: the API sends
+the proposal and files from this repository to an Anthropic model and
+cleans the spec it writes ([ADR-007](docs/adr/ADR-007-house-model.md)).
+
+- **It reads untrusted text, and its output is advisory.** What it reads
+  first is what members wrote: a proposal's title, pitch and the debate's
+  newest comments (50 at most, and at most 5 from any one member), which
+  anyone signed in with GitHub can write. The API fences that text as
+  data, in a fence named afresh for every request, one JSON object per
+  line, with every `<`, `>` and `&` in it replaced, so no member text can
+  close the fence or pass itself off as another entry or author; and the
+  system prompt tells the model to ignore any instruction in it and note
+  the attempt as a risk. That makes a pitch harder to steer the house
+  with; it doesn't make it impossible, which is why nothing the house
+  writes is acted on by itself. The API cleans what comes back: a scope
+  entry that reaches a protected path, or isn't a plain repository path,
+  is moved out of scope with a risk line; a key-shaped string is replaced
+  with `[removed]`; and each link, email address, @mention and
+  download-and-run command gets a risk line for the admin.
+- **An admin publishes.** The house never publishes. Its spec fills a draft
+  task nobody has saved yet, and it goes on the Contribute board only when
+  an admin (`FORGE_ADMIN_IDS`) has checked it and pressed Publish to the
+  board. Members never see the house's draft, only a line on the
+  proposal's timeline.
+- **It never sees secrets.** It reads only the files git tracks in the
+  repository checkout the API runs from, so nothing a deploy left beside
+  them, read-only: root-level `*.md`, and `apps/`, `packages/`, `docs/`,
+  `tests/`, `tools/` and `config/`, for source and text extensions only
+  (`.py`, `.ts`, `.tsx`, `.js`, `.mjs`, `.md`, `.json`, `.css`, `.toml`,
+  `.yml`, `.yaml`). The walk skips the directories `node_modules`, `dist`,
+  `build`, `coverage`, `.venv`, `__pycache__`, `public`, `test-results`
+  and `playwright-report`, and every directory whose name starts with a
+  dot (`.git`, `.next*` and the rest). It skips every file whose name
+  starts with `.env` or contains `secret`, in any case, every `*.pem` and
+  `*.key`, every file over 64 KB, and every name that could break the
+  prompt. It opens each file by walking down from the checkout one
+  directory at a time, following no symlink, refuses anything but a
+  regular file and any file with another hard link, and reads nothing
+  outside the checkout. Without the checkout's protected-path list
+  (`.github/forge-protocol.json`'s `protectedPaths`) it drafts nothing.
+  From the state database it reads only the proposal and its comments,
+  and nothing from the API's environment ever reaches a prompt; git,
+  which lists the files, gets none of it but its `PATH`.
+- **The key lives only in the box's env file.** `ANTHROPIC_API_KEY` is
+  pasted by the operator into the API box's environment file, and nowhere
+  else: not this repository, CI, the web app's hosting, a chat or an
+  issue. FORGE sends it only to Anthropic's API. It never logs the key, a
+  prompt or member text: an unexpected error is logged by its kind only,
+  and Anthropic's SDK and its HTTP client are held at WARNING, since at
+  DEBUG they print whole requests. Without the key the house is off.
+
+Its code, its eval and the eval's cases are protected paths,
+cold-account-owned in `CODEOWNERS` and listed in `.github/forge-protocol.json`'s
+`protectedPaths`: `apps/api/src/forge_api/services/house.py` (the prompt,
+what it reads and how it cleans a spec),
+`apps/api/src/forge_api/tools/house_eval.py` and
+`apps/api/tests/fixtures/house-eval/` (the bar a model has to pass). A way
+to make the house read a secret, a file git doesn't track or a file
+outside the checkout, leak its key, get its text onto the board without
+an admin, or run more jobs than its daily cap is worth a report.
+
+Known and accepted, so not worth a report: a pitch can still steer what the
+house writes (the admin, who reads every line before publishing, is the
+control); and what it sends to Anthropic (the proposal, its comments with their authors'
+logins, and files from this public repository) is public already.
 
 ## What is actually enforced today
 

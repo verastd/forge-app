@@ -1,5 +1,5 @@
 """The wire models: Bridge v2 (Phase 4 contract §3), Proposals and notifications (Phase 5
-contract §2).
+contract §2) and the house model (Phase 6 contract §2).
 
 tests/fixtures/wire-golden.json records every model's fields as this file describes
 them, length limits included; packages/shared/src/wire.test.ts describes the zod schemas
@@ -44,6 +44,8 @@ from forge_api.models import (
     FeedbackResponse,
     FlagConfig,
     ForkStatus,
+    HouseDraft,
+    HouseSpec,
     NewProposal,
     Notification,
     NotificationList,
@@ -122,6 +124,8 @@ WIRE_MODELS: list[type[BaseModel]] = [
     NotificationReadRequest,
     ProposalCommentPage,
     SecondRequest,
+    HouseSpec,
+    HouseDraft,
 ]
 
 _SIMPLE = {str: "string", SecretStr: "string", bool: "boolean", int: "integer", float: "number"}

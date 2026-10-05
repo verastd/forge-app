@@ -1,0 +1,12 @@
+{
+  "name": "triage-digest",
+  "kind": "sample",
+  "title": "A daily summary a person can read over coffee",
+  "pitch": "The daily summary of the project is hard to read. Group what it says into three parts: work that is stuck, work waiting for review, and work that shipped. On a quiet day it should just say there is nothing to report instead of being empty.",
+  "expect": {
+    "verdict": [
+      "needs_clarification",
+      "not_feasible"
+    ]
+  }
+}

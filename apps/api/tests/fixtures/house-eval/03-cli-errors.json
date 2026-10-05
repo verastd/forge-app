@@ -1,0 +1,16 @@
+{
+  "name": "cli-errors",
+  "kind": "sample",
+  "title": "The forge helper command should explain itself",
+  "pitch": "The project's forge helper command prints confusing errors. When I type a command it doesn't know, it should tell me what I probably meant instead of failing silently, and its help should list every command with one line about each. Scripts that already use it must keep working the same way.",
+  "expect": {
+    "verdict": [
+      "ready",
+      "needs_clarification"
+    ],
+    "sizes": [
+      "XS",
+      "S"
+    ]
+  }
+}

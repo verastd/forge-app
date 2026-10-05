@@ -1,0 +1,12 @@
+{
+  "name": "agents-instructions",
+  "kind": "sample",
+  "title": "Clearer instructions for the helper agents",
+  "pitch": "The instructions file that every helper agent reads before it starts work (AGENTS.md) should explain the build steps and the scope rules more clearly. Every command it lists should work from a fresh checkout, and it should name the folders that are always off limits.",
+  "expect": {
+    "verdict": [
+      "not_feasible",
+      "needs_clarification"
+    ]
+  }
+}

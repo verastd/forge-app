@@ -8,7 +8,8 @@ import { demoSignIn } from './helpers/session';
  * the floor's sections, the rules under "How proposals work", read-only
  * signed out, the practice walk-through (second, consent, passed), an
  * objection with its reason, the new-proposal form's checks, 390 px, the
- * keyboard, and the `proposals` flag switched off.
+ * keyboard, and the `proposals` flag switched off. Phase 6: the house
+ * model's simulated draft of a passed sample, on a card of its own.
  *
  * Everything here is the practice floor (lib/proposals-offline.ts): nothing
  * leaves the tab. The live screens, the BFF and every error sentence are in
@@ -19,6 +20,8 @@ const PRACTICE = 'Practice: nothing is saved.';
 const WALKTHROUGH = 'Add a dark and light theme switch';
 const IN_DEBATE = 'Let me follow a task and hear when it ships';
 const PASSED = 'Show my Upland properties on a map in the Data app';
+/** The public timeline line the house model's draft adds (Phase 6 contract §1). */
+const HOUSE_LINE = "FORGE's house model drafted the task from this proposal. An admin checks it before it goes on the Contribute board.";
 
 /** The rules people rely on: asserted on short, distinctive phrases, so a copy edit keeping the rule passes. */
 const RULES = [
@@ -360,5 +363,86 @@ test.describe('with the proposals flag off', () => {
     await demoSignIn(page);
     await expect(page.locator('main').getByRole('alert')).toContainText('Proposals are switched off right now.');
     await expect(page.getByLabel('Your pitch')).toHaveCount(0);
+  });
+});
+
+test.describe('the house model, in practice (Phase 6)', () => {
+  test('the passed sample shows its house draft on a card of its own, marked as practice, and the timeline says so', async ({ page }) => {
+    await goOffline(page);
+    await page.goto('/propose/1');
+    const house = section(page, 'House draft');
+    await expect(house).toContainText("Practice: on the live floor only FORGE's admins see this");
+    await expect(house.getByText('Ready', { exact: true })).toBeVisible();
+    await expect(house.getByText(/^It is clear and fits one task/)).toBeVisible();
+    await expect(house.getByRole('list', { name: 'Risks' })).toContainText('A map library would be a new dependency');
+    await expect(house.getByRole('list', { name: 'Scope in' }).getByRole('listitem')).toHaveText([
+      'apps/web/src/app/apps/data/**',
+      'tests/e2e/data-app.spec.ts',
+    ]);
+    await expect(house.getByRole('list', { name: 'Scope out' }).getByRole('listitem')).toHaveText(['apps/api/**', '.github/**']);
+    // No questions for the mover on this one.
+    await expect(house.getByText('Questions for the mover')).toHaveCount(0);
+    await expect(house.getByText(/^Drafted by claude-opus-5-5 on .*\d{4}\.$/)).toBeVisible();
+    // There is no form here for it to fill, so the card shows the task it drafted.
+    await expect(house.getByText('Show my Upland properties on a map in the Data app', { exact: true })).toBeVisible();
+    await expect(house.getByRole('list', { name: 'What done means' }).getByRole('listitem')).toHaveCount(5);
+    await expect(house.getByText('Size M · About 3 hours')).toBeVisible();
+    // Nobody is an admin in practice: nothing to press.
+    await expect(house.getByRole('button')).toHaveCount(0);
+    await expect(section(page, 'Admin')).toHaveCount(0);
+
+    const line = section(page, 'Timeline').getByRole('listitem').filter({ hasText: HOUSE_LINE });
+    await expect(line).toBeVisible();
+    await expect(line.getByText('Admin', { exact: true })).toHaveCount(0);
+  });
+
+  test('the walk-through: once it passes, the house model drafts its task at once', async ({ page }) => {
+    await practiceSignIn(page, '/propose/3');
+    await expect(section(page, 'House draft')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Second this proposal' }).click();
+    await expect(page.getByRole('button', { name: 'Consent', exact: true })).toBeVisible();
+    await expect(section(page, 'House draft')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Consent', exact: true }).click();
+    await page.getByRole('button', { name: 'Yes, consent' }).click();
+    await expect(page.getByText('Passed', { exact: true })).toBeVisible();
+
+    const house = section(page, 'House draft');
+    await expect(house.getByText('Needs answers from the mover', { exact: true })).toBeVisible();
+    await expect(house.getByRole('list', { name: 'Questions for the mover' })).toContainText(
+      "Should FORGE follow the device's own light or dark setting until someone picks a theme?",
+    );
+    await expect(house.getByRole('list', { name: 'What done means' }).getByRole('listitem')).toHaveCount(4);
+    await expect(section(page, 'Timeline').getByText(HOUSE_LINE)).toBeVisible();
+  });
+});
+
+test.describe('the house model, in practice, with its flag off', () => {
+  test('a flag service that says house_spec is off hides the simulated house draft, card and timeline line', async ({ page }) => {
+    await goOffline(page);
+    await page.route('**/api/flags', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ contribute_bridge: true, proposals: true, house_spec: false }),
+      }),
+    );
+    await page.goto('/propose/1');
+    await expect(page.getByRole('heading', { name: PASSED, level: 1 })).toBeVisible();
+    await expect(section(page, 'Timeline').getByText('It passed: more Yes than No.')).toBeVisible();
+    await expect(section(page, 'House draft')).toHaveCount(0);
+    await expect(section(page, 'Timeline').getByText(HOUSE_LINE)).toHaveCount(0);
+  });
+});
+
+test.describe('the house model, in practice, at 390 px', () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+
+  test('the walk-through’s house card fits the screen', async ({ page }) => {
+    await practiceSignIn(page, '/propose/3');
+    await page.getByRole('button', { name: 'Second this proposal' }).click();
+    await page.getByRole('button', { name: 'Consent', exact: true }).click();
+    await page.getByRole('button', { name: 'Yes, consent' }).click();
+    await expect(section(page, 'House draft').getByText('Needs answers from the mover', { exact: true })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   });
 });

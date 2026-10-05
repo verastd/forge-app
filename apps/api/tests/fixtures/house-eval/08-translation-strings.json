@@ -1,0 +1,12 @@
+{
+  "name": "translation-strings",
+  "kind": "sample",
+  "title": "Get the app ready to be translated",
+  "pitch": "I'd like to translate the app into Portuguese one day. Please pull the app's wording out of the screens into one place, so a translator can work on a single file, and stop new wording from being written straight into the screens.",
+  "expect": {
+    "verdict": [
+      "needs_clarification",
+      "not_feasible"
+    ]
+  }
+}

@@ -12,7 +12,9 @@
  * is shown with it, so nothing typed is lost.
  *
  * A timeline line of a kind this build doesn't know yet (the API grew one)
- * is shown as the plain line it is.
+ * is shown as the plain line it is. An admin's own actions carry an "Admin"
+ * label; every other line is plain, the house model's `house_drafted`
+ * included (Phase 6).
  */
 
 import { useState } from 'react';
@@ -23,7 +25,7 @@ import type { ProposalComment } from '@forge/shared';
 import { Chip } from '../../../components/Chip';
 import { formatTimestamp } from '../../../lib/format';
 import type { DisplayDetail, DisplayEvent } from '../../../lib/proposals';
-import { checkComment, eventText, isAdminEvent } from '../../../lib/proposals-format';
+import { checkComment, eventLabel, eventText } from '../../../lib/proposals-format';
 import type { ProposalAction } from '../../../lib/proposals-format';
 import { CountedField } from '../fields';
 import styles from '../propose.module.css';
@@ -162,21 +164,24 @@ export function Timeline({ events }: { events: readonly DisplayEvent[] }) {
         <p className="faint">Nothing has happened yet.</p>
       ) : (
         <ol className={styles.timeline}>
-          {events.map((entry, index) => (
-            <li key={`${entry.at}-${index}`}>
-              <time dateTime={entry.at} className={styles.when}>
-                {formatTimestamp(entry.at)}
-              </time>
-              <span className={styles.what}>
-                {isAdminEvent(entry.kind) && (
-                  <>
-                    <Chip tone="warn">Admin</Chip>{' '}
-                  </>
-                )}
-                {eventText(entry)}
-              </span>
-            </li>
-          ))}
+          {events.map((entry, index) => {
+            const label = eventLabel(entry.kind);
+            return (
+              <li key={`${entry.at}-${index}`}>
+                <time dateTime={entry.at} className={styles.when}>
+                  {formatTimestamp(entry.at)}
+                </time>
+                <span className={styles.what}>
+                  {label !== null && (
+                    <>
+                      <Chip tone="warn">{label}</Chip>{' '}
+                    </>
+                  )}
+                  {eventText(entry)}
+                </span>
+              </li>
+            );
+          })}
         </ol>
       )}
     </section>

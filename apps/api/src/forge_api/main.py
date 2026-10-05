@@ -5,7 +5,9 @@ Every piece of behaviour worth testing lives under services/ (AGENTS.md).
 """
 
 import asyncio
+import logging
 import os
+import sys
 from collections.abc import AsyncIterator, Iterable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from typing import Any
@@ -36,6 +38,7 @@ from forge_api.routers import (
     upland,
     upland_scrape,
 )
+from forge_api.services import house as house_service
 from forge_api.services import proposals as proposals_service
 from forge_api.services.errors import ApiError
 
@@ -153,17 +156,66 @@ def invalid_request(status: int, fields: list[str]) -> JSONResponse:
     return JSONResponse(status_code=status, content={"error": "invalid_request", "fields": fields})
 
 
+#: FORGE's own loggers: their INFO lines go to stderr (journald on the box).
+FORGE_LOGGER = "forge_api"
+#: Loggers held at WARNING whatever the environment says: at DEBUG, Anthropic's SDK and its
+#: HTTP client print each request whole, the house's prompt (members' text) included, and
+#: on one path the key. ANTHROPIC_LOG must never be set on the box.
+QUIET_LOGGERS = ("anthropic", "httpx2", "httpcore2")
+
+
+class StderrHandler(logging.Handler):
+    """FORGE's INFO lines on stderr, under uvicorn, whose logging configuration leaves
+    every logger but its own at WARNING with no handler. It writes to whatever stderr is
+    when a line is logged, and stays quiet while the root logger has a handler of its own
+    (a log configuration that prints everything, or the tests' capture), so no line is
+    ever printed twice."""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if logging.getLogger().handlers:
+            return
+        try:
+            sys.stderr.write(self.format(record) + "\n")
+            sys.stderr.flush()
+        except Exception:
+            self.handleError(record)
+
+
+def configure_logging() -> None:
+    """INFO and above from FORGE's own code reach stderr through one handler, added once
+    however often this runs; the SDK's loggers stay at WARNING. Nothing turns DEBUG on."""
+    forge = logging.getLogger(FORGE_LOGGER)
+    forge.setLevel(logging.INFO)
+    if not any(isinstance(handler, StderrHandler) for handler in forge.handlers):
+        handler = StderrHandler()
+        handler.setFormatter(logging.Formatter("%(levelname)s: %(name)s: %(message)s"))
+        forge.addHandler(handler)
+    for name in QUIET_LOGGERS:
+        logging.getLogger(name).setLevel(logging.WARNING)
+
+
+configure_logging()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """The proposals ticker runs for the app's lifetime: every 60 s it applies the
-    proposal deadlines that have passed (services/proposals.py `run_ticker`; a failing
-    beat is logged and the next one tries again). Cancelled cleanly on shutdown."""
-    ticker = asyncio.create_task(proposals_service.run_ticker(), name="proposals-ticker")
+    """Two loops run for the app's lifetime: the proposals ticker, which every 60 s applies
+    the proposal deadlines that have passed (services/proposals.py `run_ticker`), and the
+    house worker, which every 10 s runs the house model's next due job
+    (services/house.py `run_worker`), unless FORGE_HOUSE_WORKER is off (the tests switch
+    it off). A failing beat of either is logged and the next one tries again. Both are
+    cancelled cleanly on shutdown, and the worker hands back the job it was running. The
+    house assumes one worker per database: run the API as one process, never with
+    `--workers N`."""
+    loops = [asyncio.create_task(proposals_service.run_ticker(), name="proposals-ticker")]
+    if house_service.worker_enabled():
+        loops.append(asyncio.create_task(house_service.run_worker(), name="house-worker"))
     try:
         yield
     finally:
-        ticker.cancel()
-        await asyncio.gather(ticker, return_exceptions=True)
+        for loop in loops:
+            loop.cancel()
+        await asyncio.gather(*loops, return_exceptions=True)
 
 
 app = FastAPI(title="FORGE API", version=__version__, lifespan=lifespan)

@@ -25,6 +25,7 @@ export const FLAG_NAMES = [
   'mcp_connector',
   'agent_start',
   'proposals',
+  'house_spec',
 ] as const;
 export type FlagName = (typeof FLAG_NAMES)[number];
 
@@ -40,6 +41,12 @@ export const FlagConfigSchema = z.object({
   agent_start: z.boolean(),
   /** Proposals: /propose, /api/proposals* and the bell's proposal notifications. */
   proposals: z.boolean(),
+  /**
+   * The house model: FORGE's own model drafts the task of every passed proposal
+   * (ProposalDetail.house). It also needs `proposals` on, and ANTHROPIC_API_KEY
+   * set on the API.
+   */
+  house_spec: z.boolean(),
 });
 export type FlagConfig = z.infer<typeof FlagConfigSchema>;
 
@@ -501,6 +508,9 @@ export const PROPOSAL_EVENT_KINDS = [
   // it was closed.
   'floor_paused',
   'floor_resumed',
+  // The house model drafted the task of a passed proposal (HouseDraft). Public;
+  // its failures are not.
+  'house_drafted',
 ] as const;
 export const ProposalEventKindSchema = z.enum(PROPOSAL_EVENT_KINDS);
 export type ProposalEventKind = z.infer<typeof ProposalEventKindSchema>;
@@ -635,6 +645,117 @@ export const DraftTaskSchema = z.object({
 });
 export type DraftTask = z.infer<typeof DraftTaskSchema>;
 
+// ---------------------------------------------------------------------------
+// The house model (Phase 6 contract §2), behind the `house_spec` flag: FORGE's
+// own model drafts the task of every passed proposal, and an admin checks it
+// before it goes on the Contribute board. A spec is model output, cleaned:
+// render every string in it as text. Unlike the rest of what the API answers,
+// it carries limits, because the API holds the model's output to them.
+// ---------------------------------------------------------------------------
+
+/** What the house makes of a request. */
+export const HOUSE_VERDICTS = ['ready', 'needs_clarification', 'not_feasible'] as const;
+export const HouseVerdictSchema = z.enum(HOUSE_VERDICTS);
+export type HouseVerdict = z.infer<typeof HouseVerdictSchema>;
+
+/** Where the house stands on one proposal. */
+export const HOUSE_STATUSES = ['off', 'queued', 'running', 'done', 'failed'] as const;
+export const HouseStatusSchema = z.enum(HOUSE_STATUSES);
+export type HouseStatus = z.infer<typeof HouseStatusSchema>;
+
+/** Why the house is `off`: no ANTHROPIC_API_KEY on the API, or its flag is off. */
+export const HOUSE_OFF_REASONS = ['not_configured', 'switched_off'] as const;
+/** Why the latest job `failed`. */
+export const HOUSE_FAILURE_REASONS = [
+  'refused',
+  'invalid_output',
+  'unavailable',
+  'too_large',
+  'bad_request',
+  'daily_limit',
+] as const;
+/** Every HouseDraft.reason: the off reasons, then the failure reasons. */
+export const HOUSE_REASONS = [...HOUSE_OFF_REASONS, ...HOUSE_FAILURE_REASONS] as const;
+export const HouseReasonSchema = z.enum(HOUSE_REASONS);
+export type HouseReason = z.infer<typeof HouseReasonSchema>;
+
+/**
+ * The most characters (textLength) each text in a house spec may have, and the
+ * most entries each list may hold. Every text needs at least one character and
+ * every spec at least one acceptance criterion; the other lists may be empty.
+ * The title, summary and criteria limits are the draft task's (PROPOSAL_LIMITS),
+ * so a spec always fits the draft it fills.
+ */
+export const HOUSE_SPEC_LIMITS = {
+  title: PROPOSAL_LIMITS.title,
+  /** civilianSummary. */
+  summary: PROPOSAL_LIMITS.summary,
+  /** Acceptance criteria per spec. */
+  criteria: PROPOSAL_LIMITS.criteria,
+  /** Characters per acceptance criterion. */
+  criterion: PROPOSAL_LIMITS.criterion,
+  /** Entries in scopeIn, and in scopeOut. */
+  scope: 20,
+  /** Characters per scope entry: a repo path or glob. */
+  path: 200,
+  /** Entries in risks. */
+  risks: 10,
+  /** Characters per risk. */
+  risk: 300,
+  /** Entries in questions. */
+  questions: 10,
+  /** Characters per question. */
+  question: 300,
+  verdictReason: 500,
+} as const;
+
+/**
+ * What the house model writes for one passed proposal, once cleaned. Its title,
+ * summary, criteria and size fill the draft task unless an admin has saved the
+ * draft already; tierFloor is only a suggestion (the draft's floor stays T0).
+ * The title must also show a visible character: the API's cleaner checks that,
+ * as it does for Proposals, while the schemas count characters only.
+ */
+export const HouseSpecSchema = z.object({
+  title: characters(1, HOUSE_SPEC_LIMITS.title),
+  /** Plain English, for members. */
+  civilianSummary: characters(1, HOUSE_SPEC_LIMITS.summary),
+  /** Each one checkable by a test, a CI check or a behaviour a reviewer can see. */
+  acceptanceCriteria: z
+    .array(characters(1, HOUSE_SPEC_LIMITS.criterion))
+    .min(1)
+    .max(HOUSE_SPEC_LIMITS.criteria),
+  size: z.enum(SIZES),
+  /** A suggestion. */
+  tierFloor: z.enum(TIER_FLOORS),
+  /** Repo paths or globs the task expects to change. */
+  scopeIn: z.array(characters(1, HOUSE_SPEC_LIMITS.path)).max(HOUSE_SPEC_LIMITS.scope),
+  /** Repo paths or globs it must not touch. */
+  scopeOut: z.array(characters(1, HOUSE_SPEC_LIMITS.path)).max(HOUSE_SPEC_LIMITS.scope),
+  risks: z.array(characters(1, HOUSE_SPEC_LIMITS.risk)).max(HOUSE_SPEC_LIMITS.risks),
+  /** What the mover should answer. */
+  questions: z.array(characters(1, HOUSE_SPEC_LIMITS.question)).max(HOUSE_SPEC_LIMITS.questions),
+  verdict: HouseVerdictSchema,
+  verdictReason: characters(1, HOUSE_SPEC_LIMITS.verdictReason),
+});
+export type HouseSpec = z.infer<typeof HouseSpecSchema>;
+
+/** The house's work on one proposal, as an admin sees it (ProposalDetail.house). */
+export const HouseDraftSchema = z.object({
+  status: HouseStatusSchema,
+  /** Why it is `off` (HOUSE_OFF_REASONS), or why the latest job `failed` (HOUSE_FAILURE_REASONS). */
+  reason: HouseReasonSchema.optional(),
+  /** The latest spec that succeeded, kept while a new draft is queued or running. */
+  spec: HouseSpecSchema.optional(),
+  /** The model that wrote `spec`. */
+  model: z.string().optional(),
+  /** When `spec` was written (ISO 8601). */
+  draftedAt: z.string().optional(),
+  /** Whether `spec` filled the draft task: not when an admin had saved the draft first. */
+  appliedToDraft: z.boolean().optional(),
+});
+export type HouseDraft = z.infer<typeof HouseDraftSchema>;
+
 /** GET /api/proposals/{id}. */
 export const ProposalDetailSchema = z.object({
   proposal: ProposalCardSchema,
@@ -653,6 +774,8 @@ export const ProposalDetailSchema = z.object({
   you: ProposalYouSchema.optional(),
   /** Admins only. */
   draft: DraftTaskSchema.optional(),
+  /** Admins only, like `draft`: from the moment it passes, so also once building or shipped. */
+  house: HouseDraftSchema.optional(),
   /** The Contribute task, once published. */
   taskId: z.number().int().optional(),
   /**

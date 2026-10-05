@@ -1,0 +1,15 @@
+{
+  "name": "vague-more-data",
+  "kind": "vague",
+  "title": "More in the Data app",
+  "pitch": "Add more stuff to the Data app so it's more useful.",
+  "comments": [
+    {
+      "author": "sam-uplands",
+      "text": "Agreed, it could do a lot more."
+    }
+  ],
+  "expect": {
+    "verdict": "needs_clarification"
+  }
+}

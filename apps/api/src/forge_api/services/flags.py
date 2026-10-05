@@ -52,6 +52,7 @@ DEFAULT_FLAGS: dict[str, bool] = {
     "mcp_connector": False,
     "agent_start": False,
     "proposals": False,
+    "house_spec": False,
 }
 
 logger = logging.getLogger(__name__)

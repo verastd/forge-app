@@ -1,5 +1,5 @@
 """Shared fixtures. Every test gets its own lease store and its own empty state database,
-so nothing leaks between tests."""
+so nothing leaks between tests, and no test reaches Anthropic (`house_offline`)."""
 
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
@@ -10,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from forge_api.main import app
-from forge_api.services import identity, state
+from forge_api.services import house, identity, state
 from forge_api.services.bridge import LeaseStore, get_lease_store
 
 #: As long as the real FORGE_API_ASSERTION_SECRET must be (32+ chars). Tests only.
@@ -32,6 +32,29 @@ def state_db_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[P
     state.reset_state_db()
     yield path
     state.reset_state_db()
+
+
+def _no_client() -> Any:
+    raise AssertionError("A test asked for the real Anthropic client: give it a fake one.")
+
+
+@pytest.fixture(autouse=True)
+def house_offline(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No test reaches Anthropic, whatever the developer's environment holds: the house's
+    key and settings start unset (so the house is off until a test turns it on), and its
+    client factory fails the test unless the test gives it a fake (tests/house_helpers.py).
+    The app starts with no house worker (FORGE_HOUSE_WORKER off): the real one, on the
+    real clock, would race the tests' own beats."""
+    for name in (
+        house.KEY_ENV,
+        house.MODEL_ENV,
+        house.EFFORT_ENV,
+        house.DAILY_LIMIT_ENV,
+        house.ROOT_ENV,
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv(house.WORKER_ENV, "off")
+    monkeypatch.setattr(house, "client_factory", _no_client)
 
 
 class FakeClock:

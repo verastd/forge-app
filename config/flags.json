@@ -6,5 +6,6 @@
   "apps_lobby": true,
   "mcp_connector": true,
   "agent_start": false,
-  "proposals": true
+  "proposals": true,
+  "house_spec": true
 }

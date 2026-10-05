@@ -46,6 +46,15 @@ proposal_eligible, proposal_consents, proposal_votes, proposal_comments, proposa
 Contribute task it was published as), proposal_settings (the Test timers switch),
 proposal_floor (when the floor closed, while it is paused) and proposal_writes (each
 member's recent writes, for the hourly write limit).
+
+Phase 6: while the house model is on (services/house.py), the passed step also queues a
+house job in its transaction; the house's spec then fills a draft nobody has saved yet
+(`apply_house_spec`) and adds a public `house_drafted` line. An admin sees the house's work
+on a proposal from the moment it passes (ProposalDetail.house), can ask for a new draft
+(`request_house_draft`), and saving a draft that is a spec word for word makes that spec
+the draft's source. Publishing closes a job still queued, so it never calls the model, and
+records how the task differs from the spec its draft came from. A timeline event of a kind
+this version doesn't know is left out of the page, not an error.
 """
 
 import asyncio
@@ -65,6 +74,7 @@ from pydantic import BaseModel, ValidationError
 from forge_api.models import (
     ACTIVE_PROPOSAL_STATES,
     ELIGIBLE_ACTIVITY_DAYS,
+    PROPOSAL_EVENT_KINDS,
     PROPOSAL_LIMITS,
     PROPOSAL_STATES,
     CommentRequest,
@@ -72,6 +82,8 @@ from forge_api.models import (
     ConsentRequest,
     DraftTask,
     DraftTaskRequest,
+    HouseDraft,
+    HouseSpec,
     NewProposal,
     NotificationKind,
     ProposalCard,
@@ -94,6 +106,7 @@ from forge_api.models import (
 )
 from forge_api.services import bridge as bridge_service
 from forge_api.services import flags as flags_service
+from forge_api.services import house as house_service
 from forge_api.services.bridge import clean_text, iso
 from forge_api.services.brief import slugify
 from forge_api.services.errors import ApiError
@@ -159,9 +172,30 @@ DRAFT_REWARD_CLASS: RewardClass = "none"
 OPEN_TIER_FLOORS: tuple[TierFloor, ...] = ("T0",)
 #: The label every task published from a proposal carries (contract §3).
 FROM_PROPOSAL_LABEL = "from-proposal"
+#: The states of a proposal that has a draft task: from the pass on. An admin sees the
+#: house model's work on it in these (ProposalDetail.house).
+DRAFTED_STATES: tuple[ProposalState, ...] = ("passed", "building", "shipped")
+#: The public line the house model's spec adds to the timeline (Phase 6).
+HOUSE_DRAFTED = (
+    "FORGE's house model drafted the task from this proposal. An admin checks it before it "
+    "goes on the Contribute board."
+)
 #: The most characters of a title a notification quotes.
 NOTIFICATION_TITLE_CHARS = 80
 _TEST_TIMERS_SETTING = "test_timers"
+#: The timeline's event kinds this version doesn't know and has said so about.
+_unknown_kinds: set[str] = set()
+
+
+def _skip_unknown_kind(kind: str) -> None:
+    """A timeline event of a kind this version doesn't know is left out: logged the first
+    time only."""
+    if kind not in _unknown_kinds:
+        _unknown_kinds.add(kind)
+        logger.warning(
+            "Timeline events of a kind this version doesn't know (%r) are left out.", kind[:40]
+        )
+
 
 #: How each state reads after "this proposal" in a wrong_state message.
 STATE_WORDS: Mapping[ProposalState, str] = {
@@ -1040,6 +1074,7 @@ class Proposals:
             )
         elif step.kind == "passed":
             self._draft_task(row, step.at)
+            house_service.queue_on_pass(self.db, proposal_id, step.at, self.now)
             self._notify(
                 self._involved(proposal_id),
                 "proposal_passed",
@@ -1158,6 +1193,7 @@ class Proposals:
             events=self._events(proposal_id),
             you=self._you(row, viewer, is_admin) if viewer is not None else None,
             draft=self._draft(proposal_id, task_id) if is_admin else None,
+            house=self._house(proposal_id, row["state"]) if is_admin else None,
             taskId=task_id,
             revision=self._revision(proposal_id),
             moreComments=more_comments or None,
@@ -1192,15 +1228,25 @@ class Proposals:
         return comments, len(rows) > COMMENTS_PAGE
 
     def _events(self, proposal_id: int) -> list[ProposalEvent]:
+        """The timeline, oldest first. A kind this version doesn't know (one a newer version
+        wrote, before a revert) is left out, so it can't break the page."""
         rows = self.db.query_all(
             "SELECT * FROM proposal_events WHERE proposal_id = ? ORDER BY at, id", (proposal_id,)
         )
-        return [
-            ProposalEvent(
-                at=_iso(row["at"]), kind=row["kind"], actor=row["actor"], message=row["message"]
+        events: list[ProposalEvent] = []
+        for row in rows:
+            if row["kind"] not in PROPOSAL_EVENT_KINDS:
+                _skip_unknown_kind(str(row["kind"]))
+                continue
+            events.append(
+                ProposalEvent(
+                    at=_iso(row["at"]),
+                    kind=row["kind"],
+                    actor=row["actor"],
+                    message=row["message"],
+                )
             )
-            for row in rows
-        ]
+        return events
 
     def _draft(self, proposal_id: int, task_id: int | None) -> DraftTask | None:
         row = self.db.query_one(
@@ -1217,6 +1263,13 @@ class Proposals:
             rewardClass=row["reward_class"],
             taskId=task_id,
         )
+
+    def _house(self, proposal_id: int, state: ProposalState) -> HouseDraft | None:
+        """The house model's work on it, for an admin: from the moment it passed (and not
+        once it is published, if the house never touched it)."""
+        if state not in DRAFTED_STATES:
+            return None
+        return house_service.draft_view(self.db, proposal_id, state)
 
     def _you(self, row: Row, viewer: Identity, is_admin: bool) -> ProposalYou:
         state: ProposalState = row["state"]
@@ -1640,6 +1693,10 @@ class Proposals:
                     admin.login,
                 ),
             )
+            saved = request.model_copy(
+                update={"title": title, "civilianSummary": summary, "acceptanceCriteria": criteria}
+            )
+            house_service.note_saved_draft(self.db, proposal_id, saved)
         return self.detail(proposal_id, admin)
 
     def publish(self, admin: Identity, proposal_id: int) -> ProposalDetail:
@@ -1691,6 +1748,8 @@ class Proposals:
                 "VALUES (?, ?, ?, ?)",
                 (proposal_id, task.id, to_db(self.now), admin.login),
             )
+            house_service.record_publish(self.db, proposal_id, ready, self.now)
+            house_service.cancel_queued(self.db, proposal_id)  # no call for a published task
             self._update(row, "state = 'building'")
             self._event(
                 proposal_id,
@@ -1706,6 +1765,40 @@ class Proposals:
                 proposal_id,
             )
         return self.detail(proposal_id, admin)
+
+    def request_house_draft(self, admin: Identity, proposal_id: int) -> HouseDraft:
+        """The "Draft it again" button: ask the house model for a new draft of a passed
+        proposal's task (409 wrong_state once published, or before it passes). The house
+        refuses the rest (services/house.py `request_draft`): 503 house_off, 409 house_busy
+        and 429 rate_limited. The new spec fills the draft only if nobody has saved it."""
+        with self.db.transaction():
+            row = self._current(proposal_id)
+            if row["state"] != "passed":
+                raise wrong_state(row["state"])
+            return house_service.request_draft(self.db, proposal_id, admin.sub, self.now)
+
+    def apply_house_spec(self, proposal_id: int, spec: HouseSpec) -> bool:
+        """The house model's spec landed (services/house.py, inside its transaction). While
+        the proposal waits to be published, the timeline says so, and a draft nobody has
+        saved yet takes the spec's title, summary, criteria and size; its tier floor stays
+        T0 and its reward class as it was. Returns whether it filled the draft."""
+        row = self._load(proposal_id)
+        if row is None or row["state"] != "passed":
+            return False
+        written = self.db.execute(
+            "UPDATE proposal_drafts SET title = ?, civilian_summary = ?, acceptance_criteria = ?, "
+            "size = ?, updated_at = ? WHERE proposal_id = ? AND updated_by IS NULL",
+            (
+                spec.title,
+                spec.civilianSummary,
+                json.dumps(spec.acceptanceCriteria),
+                spec.size,
+                to_db(self.now),
+                proposal_id,
+            ),
+        )
+        self._event(proposal_id, "house_drafted", HOUSE_DRAFTED)
+        return written.rowcount == 1
 
     # the Bridge's word
 

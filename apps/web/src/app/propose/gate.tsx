@@ -21,11 +21,17 @@ export interface ProposalsFlag {
   on: boolean;
   /** Still waiting on the flag service, with nothing on yet. */
   loading: boolean;
+  /**
+   * The house model's flag (`house_spec`, Phase 6). Only the practice app reads
+   * it, to show or hide its simulated house drafts: live, the API decides, and
+   * says so itself (a house that is `off`, `switched_off`).
+   */
+  house: boolean;
 }
 
 export function useProposalsFlag(): ProposalsFlag {
   const { flags, loading } = useFlags(demoFlagFallback());
-  return { on: flags.proposals, loading: loading && !flags.proposals };
+  return { on: flags.proposals, loading: loading && !flags.proposals, house: flags.house_spec };
 }
 
 /** The fail-closed message (contract §4). */

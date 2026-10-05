@@ -167,6 +167,39 @@ finishes and publishes to the Contribute board.
 rules as built, every limit and the API, and
 [ADR-006](docs/adr/ADR-006-proposals.md) why.
 
+### The house model
+
+When a proposal passes, FORGE's house model drafts its task: the API asks
+an Anthropic model to read the proposal and this repository and write a
+title, a plain summary, acceptance criteria and a size, with advice for the
+admin (scope, risks, questions for the mover, and a verdict). Its draft
+fills the draft task, and an admin checks every line before publishing it:
+the house never publishes, and members see only a line on the proposal's
+timeline. An admin can ask for a new draft with **Draft it again**.
+
+- **The settings.** The house needs `ANTHROPIC_API_KEY` on the API, and
+  the `house_spec` and `proposals` flags, which `config/flags.json` has on.
+  Without the key it stays off, and the admin writes the draft as before.
+  `FORGE_HOUSE_MODEL` (default `claude-opus-5-5`), `FORGE_HOUSE_EFFORT`
+  (default `high`), `FORGE_HOUSE_DAILY_LIMIT` (default 30 jobs a UTC day
+  across the floor, at most 500) and `FORGE_HOUSE_REPO_ROOT` (default: the
+  checkout the API runs from) are optional; an effort or a limit the API
+  can't read lowers the spend, never raises it.
+- **What it reads.** Only the files git tracks in that checkout, so
+  nothing a deploy left beside them. Without the checkout's protected-path
+  list (`.github/forge-protocol.json`) it drafts nothing.
+- **Where it runs.** Its worker runs inside the API, which must run as
+  one process, never with `--workers N`. Every call it makes is logged in
+  the state database (`house_calls`), with its tokens and how long it
+  took.
+- **The eval.** `uv run python -m forge_api.tools.house_eval`, in
+  `apps/api`, runs the house on 15 cases with the real model, so it costs
+  money: it prints an estimate first and runs only with `--yes`. CI never
+  runs it.
+
+[`docs/architecture.md`](docs/architecture.md#the-house-model) has the
+rules as built, and [ADR-007](docs/adr/ADR-007-house-model.md) why.
+
 ## Repo map
 
 | Path | What's there |

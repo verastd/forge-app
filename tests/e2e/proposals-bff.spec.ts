@@ -48,6 +48,7 @@ test.describe('the Proposals and notifications BFFs refuse before they forward',
       ['POST', '/bff/proposals/7/second', {}],
       ['POST', '/bff/proposals/7/vote', { choice: 'yes' }],
       ['PUT', '/bff/proposals/7/admin/draft-task', DRAFT],
+      ['POST', '/bff/proposals/7/admin/house-draft', undefined],
       ['GET', '/bff/notifications', undefined],
       ['POST', '/bff/notifications/read', {}],
     ] as const) {
@@ -107,6 +108,8 @@ test.describe('the Proposals and notifications BFFs refuse before they forward',
       ['PUT', '/bff/proposals/7'],
       ['POST', '/bff/proposals/7/admin/draft-task'],
       ['PUT', '/bff/proposals/7/admin/publish-task'],
+      ['GET', '/bff/proposals/7/admin/house-draft'],
+      ['PUT', '/bff/proposals/7/admin/house-draft'],
       ['GET', '/bff/notifications/read'],
       ['POST', '/bff/notifications'],
     ] as const) {
@@ -121,6 +124,7 @@ test.describe('the Proposals and notifications BFFs refuse before they forward',
       ['POST', '/bff/proposals/7/second'],
       ['PATCH', '/bff/proposals/7'],
       ['PUT', '/bff/proposals/settings'],
+      ['POST', '/bff/proposals/7/admin/house-draft'],
       ['POST', '/bff/notifications/read'],
     ] as const) {
       const foreign = await context.request.fetch(path, {
@@ -282,6 +286,45 @@ test.describe('with a stand-in API on the demo server’s API port', () => {
         const off = await context.request.get('/bff/proposals/9');
         expect(off.status()).toBe(404);
         expect(await off.json()).toEqual({ error: 'proposals-disabled' });
+      },
+    );
+  });
+
+  test('Phase 6: "Draft it again" goes up as you with no body, and its 202 and refusals come back as they are', async ({
+    context,
+    baseURL,
+  }) => {
+    const base = baseURL ?? '';
+    await signInAs(context, base, { sub: '4200206', login: 'house-admin' });
+    let reply = json(202, { status: 'queued' });
+    await withStandIn(
+      (request) => (request.method === 'POST' && request.path === '/api/proposals/7/admin/house-draft' ? reply : undefined),
+      async (seen) => {
+        // As the page sends it: a same-origin POST with no body at all.
+        const drafting = await context.request.fetch('/bff/proposals/7/admin/house-draft', { method: 'POST', headers: { origin: base } });
+        expect(drafting.status()).toBe(202);
+        expect(drafting.headers()['cache-control']).toBe('no-store');
+        expect(await drafting.json()).toEqual({ status: 'queued' });
+        expect(seen).toHaveLength(1);
+        expect(seen[0]?.body).toBe('');
+        expect(seen[0]?.headers['content-type']).toBeUndefined();
+        expect(seen[0]?.headers.cookie).toBeUndefined();
+        expect(assertionClaims(seen[0]?.authorization)).toMatchObject({ sub: '4200206', login: 'house-admin' });
+
+        for (const [status, body, headers] of [
+          [409, { error: 'house_busy', message: 'Busy.' }, {}],
+          [409, { error: 'wrong_state', state: 'building', message: 'No.' }, {}],
+          [503, { error: 'house_off', reason: 'not_configured', message: 'Off.' }, {}],
+          // Which limit it hit (`scope`, F6a) comes back too: the page words the two limits apart by it.
+          [429, { error: 'rate_limited', retryAfter: 3600, limit: 5, scope: 'proposal', message: 'Later.' }, { 'retry-after': '3600' }],
+          [429, { error: 'rate_limited', retryAfter: 600, limit: 30, scope: 'daily', message: 'Later.' }, { 'retry-after': '600' }],
+        ] as const) {
+          reply = json(status, body, headers);
+          const refused = await context.request.fetch('/bff/proposals/7/admin/house-draft', { method: 'POST', headers: { origin: base } });
+          expect(refused.status(), body.error).toBe(status);
+          expect(await refused.json(), body.error).toEqual(body);
+          if (status === 429) expect(refused.headers()['retry-after']).toBe(headers['retry-after']);
+        }
       },
     );
   });

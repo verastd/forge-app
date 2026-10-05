@@ -1,0 +1,16 @@
+{
+  "name": "leaderboard",
+  "kind": "sample",
+  "title": "A page that thanks the people who build FORGE",
+  "pitch": "I'd love a page that lists everyone who has helped build the app, with how much each person has shipped and how much of it is still in the app. Sort it by who has shipped the most, and show something friendly when nobody has shipped anything yet.",
+  "expect": {
+    "verdict": [
+      "ready",
+      "needs_clarification"
+    ],
+    "sizes": [
+      "S",
+      "M"
+    ]
+  }
+}

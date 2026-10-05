@@ -152,6 +152,7 @@ describe('proposal vocabularies', () => {
       'test_timers_off',
       'floor_paused',
       'floor_resumed',
+      'house_drafted',
     ]);
     expect(ProposalEventKindSchema.options).toEqual([...PROPOSAL_EVENT_KINDS]);
   });

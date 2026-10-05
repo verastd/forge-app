@@ -3,7 +3,8 @@
  * section each state belongs to, the words for states, deadlines, consent,
  * turnout and the tally, the plain sentence for every API error code, the
  * checks on what a member sends before it goes, and the guard on the links
- * the bell shows.
+ * the bell shows. Phase 6 (contract §10) adds the words for the house
+ * model's draft, which an admin sees above the draft task.
  *
  * No React, no fetch: everything here is unit-tested on its own
  * (tests/e2e/propose-helpers.spec.ts).
@@ -13,6 +14,12 @@ import type {
   ConsentChoice,
   DraftTask,
   DraftTaskRequest,
+  HOUSE_FAILURE_REASONS,
+  HOUSE_OFF_REASONS,
+  HouseDraft,
+  HouseSpec,
+  HouseStatus,
+  HouseVerdict,
   NewProposal,
   ProposalCard,
   ProposalComment,
@@ -30,6 +37,7 @@ import type {
 } from '@forge/shared';
 
 import type { ChipTone } from '../components/Chip';
+import { formatDate } from './format';
 
 /* --- states and the floor's sections --------------------------------------------- */
 
@@ -346,19 +354,51 @@ export const VOTE_LABEL: Readonly<Record<VoteChoice, string>> = { yes: 'Yes', no
 
 /* --- the timeline -------------------------------------------------------------------- */
 
-const ADMIN_EVENTS: ReadonlySet<string> = new Set<ProposalEventKind>([
-  'admin_ended_debate',
-  'admin_closed_vote',
-  'test_timers_on',
-  'test_timers_off',
-]);
+/**
+ * The label the timeline marks each kind of line with, or null for a plain
+ * line. The admins' own actions are marked "Admin"; everything else is plain,
+ * the house model's `house_drafted` included (Phase 6 contract §10: no
+ * special styling). Every kind in the contract has an entry, so a kind added
+ * there needs a decision here before the web typechecks.
+ */
+const EVENT_LABEL: Readonly<Record<ProposalEventKind, 'Admin' | null>> = {
+  moved: null,
+  edited: null,
+  seconded: null,
+  consented: null,
+  objected: null,
+  commented: null,
+  debate_ended: null,
+  vote_opened: null,
+  voted: null,
+  vote_closed: null,
+  passed: null,
+  failed: null,
+  lapsed: null,
+  withdrawn: null,
+  task_drafted: null,
+  task_published: null,
+  shipped: null,
+  admin_ended_debate: 'Admin',
+  admin_closed_vote: 'Admin',
+  test_timers_on: 'Admin',
+  test_timers_off: 'Admin',
+  floor_paused: null,
+  floor_resumed: null,
+  house_drafted: null,
+};
 
 /**
- * Timeline lines an admin caused, which the page marks as such. Any string:
- * a kind this build doesn't know yet (the API grew one first) is a plain line.
+ * A timeline line's label, or null for a plain line. Any string: a kind this
+ * build doesn't know yet (the API grew one first) is a plain line.
  */
+export function eventLabel(kind: string): 'Admin' | null {
+  return Object.hasOwn(EVENT_LABEL, kind) ? EVENT_LABEL[kind as ProposalEventKind] : null;
+}
+
+/** Timeline lines an admin caused, which the page marks as such. */
 export function isAdminEvent(kind: string): boolean {
-  return ADMIN_EVENTS.has(kind);
+  return eventLabel(kind) === 'Admin';
 }
 
 /**
@@ -388,6 +428,7 @@ export type ProposalAction =
   | 'close_vote'
   | 'save_draft'
   | 'publish'
+  | 'house_draft'
   | 'settings'
   | 'notifications';
 
@@ -406,7 +447,14 @@ export interface ProposalFailure {
   revision?: number;
   /** `rate_limited`'s and `edit_limit`'s limit. */
   limit?: number;
+  /** `house_off`'s reason (`not_configured` or `switched_off`). */
+  reason?: string;
+  /** "Draft it again"'s `rate_limited`: the limit of one proposal's drafts, or the floor's daily one. */
+  scope?: HouseLimitScope;
 }
+
+/** Which of the house model's two limits a "Draft it again" refusal hit (the API's `scope`). */
+export type HouseLimitScope = 'proposal' | 'daily';
 
 /** Every code the Propose screens put in words (contract §3, plus the BFF's own). */
 export const PROPOSAL_ERROR_CODES = [
@@ -434,6 +482,9 @@ export const PROPOSAL_ERROR_CODES = [
   'edit_limit',
   'tier_not_open',
   'task_title_needs_letters',
+  // Phase 6: "Draft it again" (POST .../admin/house-draft).
+  'house_busy',
+  'house_off',
 ] as const;
 
 function retryWords(seconds: number | undefined): string {
@@ -508,6 +559,8 @@ function wrongState(action: ProposalAction, state: string | undefined): string {
     case 'save_draft':
     case 'publish':
       return `Its draft task can't change any more${where}. Nothing changed.`;
+    case 'house_draft':
+      return `It can't be drafted again${where}: the house model drafts a task only after it passes and before it is published. Nothing changed.`;
     default:
       return `It has moved on${where}, so nothing changed. The page shows where it stands now.`;
   }
@@ -517,17 +570,53 @@ function wrongState(action: ProposalAction, state: string | undefined): string {
 const WRITE_LIMIT = 60;
 
 /**
+ * Drafts the house model makes of one proposal in 24 hours (Phase 6 contract
+ * §1). Its other limit, the drafts it makes in a day across the floor, is the
+ * API's setting (FORGE_HOUSE_DAILY_LIMIT, 30 unless set).
+ */
+export const HOUSE_DRAFTS_PER_PROPOSAL = 5;
+
+/**
+ * Which of "Draft it again"'s two limits was hit: the API says so (`scope`);
+ * an API from before it did is read by its `limit`, where 5 is one proposal's
+ * (which a daily limit set to 5 would be mistaken for).
+ */
+function houseLimitScope(scope: HouseLimitScope | undefined, limit: number | undefined): HouseLimitScope | undefined {
+  if (scope !== undefined) return scope;
+  if (limit === undefined) return undefined;
+  return limit === HOUSE_DRAFTS_PER_PROPOSAL ? 'proposal' : 'daily';
+}
+
+/**
  * Which limit was hit, in the words of that limit. The API names the limit
  * (`limit`): a day's proposals (3), an hour's comments on one proposal (10),
- * an hour's edits to one proposal (10), or an hour's moves on the floor (60).
+ * an hour's edits to one proposal (10), or an hour's moves on the floor (60);
+ * for "Draft it again", a proposal's drafts in a day (5) or the house model's
+ * drafts in a day across the floor, which its `scope` tells apart.
  */
-function rateLimited(action: ProposalAction, retryAfterSeconds: number | undefined, limit: number | undefined): string {
+function rateLimited(
+  action: ProposalAction,
+  retryAfterSeconds: number | undefined,
+  limit: number | undefined,
+  scope: HouseLimitScope | undefined,
+): string {
   const wait = retryWords(retryAfterSeconds);
+  const count = limit === undefined ? '' : ` (${limit})`;
   switch (action) {
     case 'create':
       return `You've brought as many proposals as FORGE allows in a day (${limit ?? 3}). ${wait}`;
     case 'comment':
       return `You've commented on this proposal as often as FORGE allows in an hour (${limit ?? 10}). ${wait}`;
+    case 'house_draft': {
+      const which = houseLimitScope(scope, limit);
+      if (which === 'proposal') {
+        return `The house model has drafted this proposal as often as FORGE allows in a day${count}. ${wait}`;
+      }
+      if (which === 'daily') {
+        return `The house model has made as many drafts today as FORGE allows across the floor${count}. ${wait}`;
+      }
+      return `The house model has drafted as often as FORGE allows just now. ${wait}`;
+    }
     case 'edit':
       if (limit !== undefined && limit < WRITE_LIMIT) {
         return `You've edited this proposal as often as FORGE allows in an hour (${limit}). ${wait}`;
@@ -547,7 +636,8 @@ function rateLimited(action: ProposalAction, retryAfterSeconds: number | undefin
 
 /** The sentence for any failure on the Propose screens. Every code in {@link PROPOSAL_ERROR_CODES} has its own. */
 export function describeProposalError(failure: string | ProposalFailure, action: ProposalAction = 'load'): string {
-  const { code, retryAfterSeconds, state, fields, limit } = typeof failure === 'string' ? { code: failure } : failure;
+  const { code, retryAfterSeconds, state, fields, limit, reason, scope } =
+    typeof failure === 'string' ? { code: failure } : failure;
   switch (code) {
     case 'proposal_not_found':
       return "That proposal isn't there. The link may have a typo in it.";
@@ -566,7 +656,7 @@ export function describeProposalError(failure: string | ProposalFailure, action:
     case 'own_proposal':
       return "You can't second your own proposal: another member has to.";
     case 'rate_limited':
-      return rateLimited(action, retryAfterSeconds, limit);
+      return rateLimited(action, retryAfterSeconds, limit, scope);
     case 'proposal_changed':
       return 'The proposal changed since you opened it. Read it again, then second it.';
     case 'test_mode_off':
@@ -577,6 +667,14 @@ export function describeProposalError(failure: string | ProposalFailure, action:
       return "Tiers above T0 aren't open yet, so publish it as T0. Nothing changed.";
     case 'task_title_needs_letters':
       return 'Give the task a title with a letter or a digit from A to Z or 0 to 9: its branch on GitHub is named after it. Nothing was published.';
+    case 'house_busy':
+      return "The house model is already drafting this task, so nothing changed. Its new draft shows here when it's ready.";
+    case 'house_off': {
+      const why = houseOffWords(reason);
+      return why === null
+        ? 'The house model is off, so nothing changed. Write the draft yourself.'
+        : `The house model is off (${why}), so nothing changed. Write the draft yourself.`;
+    }
     case 'invalid_request': {
       const words = fieldWords(fields);
       if (action === 'publish') {
@@ -746,6 +844,215 @@ export function publishTitleProblem(title: string): string | null {
     : null;
 }
 
+/**
+ * The form as it would be sent: two forms with the same key say the same
+ * thing, whatever spaces or blank lines they differ by. The page uses it to
+ * tell whether the form has unsaved changes.
+ */
+export function draftFormKey(form: DraftForm): string {
+  return JSON.stringify([
+    form.title.trim(),
+    form.civilianSummary.trim(),
+    criteriaLines(form.criteria),
+    form.size,
+    form.rewardClass,
+  ]);
+}
+
+/* --- the house model's draft (Phase 6 contract §10) ------------------------------------ */
+
+type HouseOffReason = (typeof HOUSE_OFF_REASONS)[number];
+type HouseFailureReason = (typeof HOUSE_FAILURE_REASONS)[number];
+
+/** Why the house model is off, as it reads after "The house model is off: ". */
+const HOUSE_OFF_WORDS: Readonly<Record<HouseOffReason, string>> = {
+  not_configured: "FORGE's server has no key for it yet",
+  switched_off: "it is switched off on FORGE's server",
+};
+
+/** Why its latest draft failed: one sentence for each reason. */
+const HOUSE_FAILED_WORDS: Readonly<Record<HouseFailureReason, string>> = {
+  refused: 'The house model declined to draft this task. Write the draft yourself.',
+  invalid_output: "The house model's draft didn't hold together, twice in a row. Draft it again, or write it yourself.",
+  unavailable: "The house model couldn't be reached, even after four tries. Draft it again later, or write it yourself.",
+  too_large: 'This proposal and its debate are too long for the house model. Write the draft yourself.',
+  bad_request:
+    "FORGE's request to the house model was refused, so its setup on the server needs checking. Write the draft yourself.",
+  // The limit counts a UTC day (the API's), so "tomorrow" would be wrong for half the world.
+  daily_limit:
+    'The house model reached its daily limit before it got to this task. Draft it again after midnight UTC, or write it yourself.',
+};
+
+function houseOffWords(reason: string | undefined): string | null {
+  return reason !== undefined && Object.hasOwn(HOUSE_OFF_WORDS, reason) ? HOUSE_OFF_WORDS[reason as HouseOffReason] : null;
+}
+
+/** The house's verdict, as its chip says it. */
+export const HOUSE_VERDICT_LABEL: Readonly<Record<HouseVerdict, string>> = {
+  ready: 'Ready',
+  needs_clarification: 'Needs answers from the mover',
+  not_feasible: 'Not feasible',
+};
+
+export const HOUSE_VERDICT_TONE: Readonly<Record<HouseVerdict, ChipTone>> = {
+  ready: 'ok',
+  needs_clarification: 'warn',
+  not_feasible: 'danger',
+};
+
+/** The house model is at work on it: the page reads the proposal again every few seconds until it isn't. */
+export function isHouseWorking(status: HouseStatus): boolean {
+  return status === 'queued' || status === 'running';
+}
+
+/**
+ * The house block's first line: why the house model is off, that it will draft
+ * the task (queued: it may be waiting to try again after a failure) or is
+ * drafting it, or why its latest draft failed. Null once it is done: the draft
+ * itself says the rest. A reason that doesn't go with the status (the schema
+ * doesn't pair them) is left out. `failed` with no reason is how the API shows
+ * a proposal the house never drafted (it passed while the house was off), so
+ * that line asks for a draft rather than saying one failed.
+ */
+export function houseStatusLine(house: Pick<HouseDraft, 'status' | 'reason'>): string | null {
+  switch (house.status) {
+    case 'off': {
+      const why = houseOffWords(house.reason);
+      return why === null ? 'The house model is off. Write the draft yourself.' : `The house model is off: ${why}. Write the draft yourself.`;
+    }
+    case 'queued':
+      return 'The house model will draft this task shortly…';
+    case 'running':
+      return 'The house model is drafting this task…';
+    case 'failed':
+      return house.reason !== undefined && Object.hasOwn(HOUSE_FAILED_WORDS, house.reason)
+        ? HOUSE_FAILED_WORDS[house.reason as HouseFailureReason]
+        : "The house model hasn't drafted this task yet. Ask for a draft with Draft it again, or write it yourself.";
+    case 'done':
+      return null;
+  }
+}
+
+/** The most characters of a model's name the house block shows: the API doesn't limit it. */
+export const HOUSE_MODEL_SHOWN = 100;
+
+/** `model`, trimmed, cut to {@link HOUSE_MODEL_SHOWN} characters (an ellipsis included); null when empty. */
+function shownModel(model: string | undefined): string | null {
+  const name = model?.trim() ?? '';
+  if (name === '') return null;
+  const characters = Array.from(name);
+  return characters.length <= HOUSE_MODEL_SHOWN ? name : `${characters.slice(0, HOUSE_MODEL_SHOWN - 1).join('')}…`;
+}
+
+/**
+ * "Drafted by <model> on Oct 04, 2026.", from what the API says of the
+ * draft: the model's name cut to {@link HOUSE_MODEL_SHOWN} characters, and the
+ * date only when it is one.
+ */
+export function houseDraftedLine(house: Pick<HouseDraft, 'model' | 'draftedAt'>): string | null {
+  const model = shownModel(house.model);
+  const date =
+    house.draftedAt === undefined || Number.isNaN(new Date(house.draftedAt).getTime()) ? null : formatDate(house.draftedAt);
+  if (model === null && date === null) return null;
+  if (date === null) return `Drafted by ${model ?? 'the house model'}.`;
+  return `Drafted by ${model ?? 'the house model'} on ${date}.`;
+}
+
+/**
+ * What "Use the house draft" puts in the draft task's form: the spec's title,
+ * summary, criteria (one a line) and size. The reward stays the admin's, and
+ * the tier stays T0. The spec's limits are the form's, so nothing is cut.
+ */
+export function houseFormOf(spec: HouseSpec): Pick<DraftForm, 'title' | 'civilianSummary' | 'criteria' | 'size'> {
+  return {
+    title: spec.title,
+    civilianSummary: spec.civilianSummary,
+    criteria: spec.acceptanceCriteria.join('\n'),
+    size: spec.size,
+  };
+}
+
+/**
+ * Where the house's draft is beside the draft task's form: whether the form
+ * holds it, and whether the saved draft does, the reward aside (the house
+ * doesn't decide rewards) and whatever spaces or blank lines they differ by.
+ * Worked out from the texts themselves, never from `appliedToDraft`, which
+ * only says what happened when the draft landed.
+ */
+export interface HousePlace {
+  inForm: boolean;
+  inSaved: boolean;
+}
+
+export function housePlace(spec: HouseSpec, form: DraftForm, saved: DraftTask): HousePlace {
+  const house = houseFormOf(spec);
+  const savedForm = draftFormOf(saved);
+  return {
+    inForm: draftFormKey(form) === draftFormKey({ ...form, ...house }),
+    inSaved: draftFormKey(savedForm) === draftFormKey({ ...savedForm, ...house }),
+  };
+}
+
+/** What the house block says of the draft task's form, by where its draft is. */
+export const HOUSE_FORM_LINE = {
+  /** In the form and saved. */
+  inBoth: 'Its draft is in the form below. Check every line before you publish.',
+  /** In the form, not saved: said in the block's status line, which focus moves to after "Use the house draft". */
+  inFormOnly: 'The house draft is in the form below. Nothing is saved until you save or publish.',
+  /** Saved, while the form has the admin's own unsaved changes. */
+  savedOverEdits: 'Its draft is saved, but the form below still has the changes you were making.',
+  /** Saved, while the form still has what it held before (a re-draft landed, say): the form never changes under the admin. */
+  savedOverEarlier: 'Its draft is saved, but the form below still has the earlier draft.',
+  /** It filled the draft task when it landed, and an admin has saved other text since. */
+  changedSince: 'Its draft filled the draft task, but changes have been saved since.',
+  /** An admin had saved the draft before it landed. */
+  notReplaced: "You had already saved the draft, so it wasn't replaced.",
+} as const;
+
+/** The house block beside the form: its line, its status line, and whether it offers "Use the house draft". */
+export interface HouseFormWords {
+  /** A plain line about the form; null when the status line says it. */
+  line: string | null;
+  /** The status line's words: empty unless the form holds the house's draft, unsaved. */
+  status: string;
+  /** "Use the house draft" is offered whenever the form doesn't hold it. */
+  offerUse: boolean;
+}
+
+/**
+ * What the house block says of the form (`place`), and whether it offers
+ * "Use the house draft". `applied`: the draft filled the draft task when it
+ * landed. `edited`: the admin has changed the form since it was last filled.
+ */
+export function houseFormWords(place: HousePlace, applied: boolean, edited: boolean): HouseFormWords {
+  if (place.inForm) {
+    return place.inSaved
+      ? { line: HOUSE_FORM_LINE.inBoth, status: '', offerUse: false }
+      : { line: null, status: HOUSE_FORM_LINE.inFormOnly, offerUse: false };
+  }
+  let line: string;
+  if (place.inSaved) {
+    line = edited ? HOUSE_FORM_LINE.savedOverEdits : HOUSE_FORM_LINE.savedOverEarlier;
+  } else {
+    line = applied ? HOUSE_FORM_LINE.changedSince : HOUSE_FORM_LINE.notReplaced;
+  }
+  return { line, status: '', offerUse: true };
+}
+
+/**
+ * The admin's outcome line once "Draft it again" went through: drafting it
+ * ("again" only when it had drafted the task before), or, when a lost answer
+ * was read back after the house had already finished, that it has.
+ */
+export function houseDraftAsked(hadDraft: boolean, house: Pick<HouseDraft, 'status'> | undefined): string {
+  if (house !== undefined && !isHouseWorking(house.status)) {
+    return 'It went through, and the house model has already finished. The house draft below shows how it went.';
+  }
+  return hadDraft
+    ? "The house model is drafting it again. Its new draft shows below when it's ready."
+    : "The house model is drafting this task. Its draft shows below when it's ready.";
+}
+
 /* --- links ----------------------------------------------------------------------------- */
 
 /** Whitespace, backslashes and control characters: none belongs in a link FORGE shows. */
@@ -850,7 +1157,12 @@ export type Intent =
   | { action: 'vote'; choice: VoteChoice }
   | { action: 'comment'; text: string; postedBefore: number }
   | { action: 'edit'; title: string; pitch: string }
-  | { action: 'save_draft'; draft: DraftTaskRequest };
+  | { action: 'save_draft'; draft: DraftTaskRequest }
+  /** "Draft it again": `before` is the house as the page showed it when it was asked. */
+  | { action: 'house_draft'; before: HouseBefore | undefined };
+
+/** What the house showed when "Draft it again" was asked: any change to it means the request went through. */
+export type HouseBefore = Pick<HouseDraft, 'status' | 'reason' | 'draftedAt'>;
 
 /** What a proposal read back after a write says about it (enough of a ProposalDetail). */
 export interface ReadBack {
@@ -860,6 +1172,7 @@ export interface ReadBack {
   you?: Pick<ProposalYou, 'consent' | 'vote'> | undefined;
   taskId?: number | undefined;
   draft?: (Omit<DraftTask, 'taskId'> & { taskId?: number | undefined }) | undefined;
+  house?: { status: HouseStatus; reason?: string | undefined; draftedAt?: string | undefined } | undefined;
 }
 
 /** How many comments `login` has in `comments` with exactly `text`: a comment went through if this grew. */
@@ -911,6 +1224,19 @@ export function wentThrough(intent: Intent, after: ReadBack, login: string | nul
       return after.draft === undefined ? null : sameDraft(after.draft, intent.draft);
     case 'publish':
       return after.taskId !== undefined || after.draft?.taskId !== undefined;
+    case 'house_draft': {
+      // Asked for: it is drafting now, or the house is not as it was when asked (a new draft has landed
+      // already, or the new job has already failed). A refusal changes nothing in the house.
+      const now = after.house;
+      const before = intent.before;
+      if (now === undefined || before === undefined) return null;
+      return (
+        isHouseWorking(now.status) ||
+        now.status !== before.status ||
+        now.reason !== before.reason ||
+        now.draftedAt !== before.draftedAt
+      );
+    }
   }
 }
 
@@ -919,4 +1245,12 @@ export function didNotGoThrough(action: ProposalAction): string {
   return action === 'comment'
     ? "It didn't go through: your comment wasn't posted. It's still in the box, so you can send it again."
     : "It didn't go through, so nothing changed. Please try again.";
+}
+
+/**
+ * After a lost answer, when the proposal couldn't be read back either: the
+ * page keeps what it showed, which may be out of date, so it can't say yet.
+ */
+export function notReadBack(): string {
+  return "FORGE didn't hear back in time, so it may have gone through. The page couldn't check just now; it tries again shortly.";
 }

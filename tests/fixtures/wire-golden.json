@@ -24,6 +24,9 @@
       },
       "proposals": {
         "type": "boolean"
+      },
+      "house_spec": {
+        "type": "boolean"
       }
     },
     "TaskCard": {
@@ -813,7 +816,8 @@
           "test_timers_on",
           "test_timers_off",
           "floor_paused",
-          "floor_resumed"
+          "floor_resumed",
+          "house_drafted"
         ]
       },
       "actor": {
@@ -972,6 +976,11 @@
       "draft": {
         "type": "object",
         "ref": "DraftTask",
+        "optional": true
+      },
+      "house": {
+        "type": "object",
+        "ref": "HouseDraft",
         "optional": true
       },
       "taskId": {
@@ -1155,6 +1164,136 @@
     "SecondRequest": {
       "revision": {
         "type": "integer"
+      }
+    },
+    "HouseSpec": {
+      "title": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 100
+      },
+      "civilianSummary": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 500
+      },
+      "acceptanceCriteria": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "minItems": 1,
+        "maxItems": 10
+      },
+      "size": {
+        "type": "enum",
+        "values": [
+          "XS",
+          "S",
+          "M"
+        ]
+      },
+      "tierFloor": {
+        "type": "enum",
+        "values": [
+          "T0",
+          "T1",
+          "T2"
+        ]
+      },
+      "scopeIn": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "maxItems": 20
+      },
+      "scopeOut": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "maxItems": 20
+      },
+      "risks": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "maxItems": 10
+      },
+      "questions": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "maxItems": 10
+      },
+      "verdict": {
+        "type": "enum",
+        "values": [
+          "ready",
+          "needs_clarification",
+          "not_feasible"
+        ]
+      },
+      "verdictReason": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 500
+      }
+    },
+    "HouseDraft": {
+      "status": {
+        "type": "enum",
+        "values": [
+          "off",
+          "queued",
+          "running",
+          "done",
+          "failed"
+        ]
+      },
+      "reason": {
+        "type": "enum",
+        "values": [
+          "not_configured",
+          "switched_off",
+          "refused",
+          "invalid_output",
+          "unavailable",
+          "too_large",
+          "bad_request",
+          "daily_limit"
+        ],
+        "optional": true
+      },
+      "spec": {
+        "type": "object",
+        "ref": "HouseSpec",
+        "optional": true
+      },
+      "model": {
+        "type": "string",
+        "optional": true
+      },
+      "draftedAt": {
+        "type": "string",
+        "optional": true
+      },
+      "appliedToDraft": {
+        "type": "boolean",
+        "optional": true
       }
     }
   }
