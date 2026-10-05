@@ -393,6 +393,8 @@ export class ProximityVoiceEngine {
   private readonly samples = new Float32Array(HEARD_SAMPLES);
   /** Packets dropped as steps no camera could take, for the debug view. */
   private implausible = 0;
+  /** Ticks run, for the debug view (10 a second, less in a hidden tab or on a busy main thread). */
+  private ticks = 0;
 
   constructor(config: Partial<ProximityConfig>, fetchToken: TokenFetcher) {
     this.config = { ...DEFAULT_PROXIMITY_CONFIG, ...config };
@@ -1026,6 +1028,12 @@ export class ProximityVoiceEngine {
         p.position = v;
         p.heardAt = at;
         p.lastSeenAt = Date.now();
+        // FORGE: a packet that takes someone who may hear us out of range takes
+        // them off the list in this same task, not at the next tick, which a
+        // hidden tab or a busy main thread can hold back (review M1).
+        if (this.localKnown && this.permittedList.includes(rp.identity) && !permitted(distance(this.localPosition, v))) {
+          this.updatePermissions(room, at);
+        }
       });
   }
 
@@ -1193,6 +1201,7 @@ export class ProximityVoiceEngine {
     const room = this.room;
     if (!room || room.state !== ConnectionState.Connected) return;
     const now = performance.now();
+    this.ticks += 1;
     // FORGE: who may receive our mic comes first, so nothing below can hold it
     // back; a record now speaking for a new session is dealt with before that.
     for (const p of this.peers.values()) this.checkSession(p);
@@ -1623,6 +1632,7 @@ export class ProximityVoiceEngine {
         rebuilds: this.rebuilds,
         rooms: this.roomsMade,
         implausible: this.implausible,
+        ticks: this.ticks,
         error: this.error,
         peers: [...this.peers.entries()].map(([identity, p]) => ({
           identity,
@@ -1670,6 +1680,10 @@ export class ProximityVoiceEngine {
       },
       updateConfig: (patch: Partial<ProximityConfig>) => this.updateConfig(patch),
       setPeerOcclusion: (identity: string, occlusion: number) => this.setPeerOcclusion(identity, occlusion),
+      // For the proof: ask for the rebuild the idle sources would (at the next quiet tick).
+      rebuild: () => {
+        this.rebuildWanted = true;
+      },
     };
     (window as unknown as Record<string, unknown>)[DEBUG_GLOBAL] = view;
     this.debugView = view;
