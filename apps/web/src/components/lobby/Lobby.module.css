@@ -341,15 +341,24 @@
   cursor: progress;
 }
 
-.gateNote {
-  max-width: 36ch;
-  margin: 0;
-  font-size: 10px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  text-wrap: balance;
-  /* 0.62: AA on the veil. */
+.gateFlat {
+  padding: 6px 4px;
   color: rgba(var(--cave-text-rgb), 0.62);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-decoration: underline;
+  text-decoration-color: rgba(var(--cave-line-rgb), 0.35);
+  text-underline-offset: 4px;
+}
+
+.gateFlat:hover {
+  color: var(--cave-text);
+  text-decoration-color: var(--cave-line);
+}
+
+.gateFlat:focus-visible {
+  outline: 2px solid var(--cave-accent);
+  outline-offset: 2px;
 }
 
 /* The HUD, the stick and the lift wait for the gate to go. */

@@ -21,6 +21,9 @@
  *   that talks to it: the mic, deafen, per-person mute, "Turn on sound",
  *   "Try again" after a join that failed in this browser, and "Rejoin here"
  *   after the lobby was opened in another tab or device.
+ * - `?view=2d`, the 2D lobby: the heading and the app tiles, no cave and no
+ *   voice, linked from under the Enter gate's button for anyone who'd
+ *   rather not go in.
  * - The Enter gate, over the view while it builds: who's here and one Enter
  *   button. That press is the browser's gesture for sound, so the room is
  *   heard from the first step, and it asks for the mic. Pressed before the
@@ -242,6 +245,18 @@ function ArrivalFocus({ root, fallback }: { root: RefObject<HTMLDivElement | nul
   return null;
 }
 
+/** `?view=2d`, read inside its own Suspense boundary (as `?from=` is) and handed up. */
+function ViewParam({ onFlat }: { onFlat(flat: boolean): void }) {
+  const flat = useSearchParams().get('view') === '2d';
+  useEffect(() => {
+    onFlat(flat);
+  }, [flat, onFlat]);
+  return null;
+}
+
+/** The 2D lobby: the same page with no cave, and nothing about voice. */
+export const FLAT_LOBBY_HREF = '/apps?view=2d';
+
 // ---------- the Enter gate ----------
 
 /** Entered once in this page load: the browser has had its gesture, so the gate doesn't come back. */
@@ -257,12 +272,10 @@ type GatePhase = 'open' | 'entering' | 'gone';
 function EnterGate({
   feed,
   phase,
-  practice,
   onEnter,
 }: {
   feed: PresenceFeed | null;
   phase: GatePhase;
-  practice: boolean;
   onEnter(): void;
 }) {
   const room = roomCount(useFeedState(feed));
@@ -303,8 +316,9 @@ function EnterGate({
           'Enter'
         )}
       </button>
-      {/* The practice build has no voice: nothing to turn on. */}
-      {!practice && <p className={styles.gateNote}>Entering turns on sound and asks for your mic.</p>}
+      <Link href={FLAT_LOBBY_HREF} className={styles.gateFlat}>
+        Take me to the 2D lobby instead
+      </Link>
     </div>
   );
 }
@@ -325,6 +339,8 @@ export function Lobby({ heading, directory }: { heading: ReactNode; directory: R
   const [feed, setFeed] = useState<PresenceFeed | null>(null);
   const [toast, setToast] = useState({ text: '', on: false, id: 0 });
   const [entered, setEntered] = useState(() => enteredThisLoad);
+  /** The 2D lobby chosen (`?view=2d`): the 3D view never starts. */
+  const [flat, setFlat] = useState(false);
 
   /** The same feed, for the scene, which reads it every frame. */
   const feedRef = useRef<PresenceFeed | null>(null);
@@ -335,7 +351,7 @@ export function Lobby({ heading, directory }: { heading: ReactNode; directory: R
   const riseRef = useRef<HTMLButtonElement>(null);
   const fallRef = useRef<HTMLButtonElement>(null);
 
-  const enabled = !loading && flags.apps_lobby;
+  const enabled = !loading && flags.apps_lobby && !flat;
   const live = enabled && webgl === 'yes' && !broken;
 
   useEffect(() => {
@@ -450,17 +466,19 @@ export function Lobby({ heading, directory }: { heading: ReactNode; directory: R
     void feedRef.current?.resumeAudio();
   };
 
-  const state: LobbyState = loading
-    ? 'loading'
-    : !flags.apps_lobby
-      ? 'off'
-      : webgl === 'no'
-        ? 'unsupported'
-        : broken
-          ? 'lost'
-          : ready && webgl === 'yes'
-            ? 'ready'
-            : 'loading';
+  const state: LobbyState = flat
+    ? 'flat'
+    : loading
+      ? 'loading'
+      : !flags.apps_lobby
+        ? 'off'
+        : webgl === 'no'
+          ? 'unsupported'
+          : broken
+            ? 'lost'
+            : ready && webgl === 'yes'
+              ? 'ready'
+              : 'loading';
   useEffect(() => {
     publishLobbyState(state);
   }, [state]);
@@ -468,6 +486,18 @@ export function Lobby({ heading, directory }: { heading: ReactNode; directory: R
   /** No wall to show: the heading, the message and the directory are the page. */
   const fallback = isFallback(state);
   const gate: GatePhase = !entered ? 'open' : ready ? 'gone' : 'entering';
+
+  // Into the 2D lobby from the gate's link: focus to the page's h1, now the page, not left on the link that went.
+  useEffect(() => {
+    const h1 = rootRef.current?.querySelector<HTMLElement>('h1');
+    if (state !== 'flat' || !h1 || !focusUntouched()) {
+      return;
+    }
+    if (!h1.hasAttribute('tabindex')) {
+      h1.setAttribute('tabindex', '-1');
+    }
+    h1.focus({ preventScroll: true });
+  }, [state]);
 
   // The gate going with focus on its button (a keyboard press of Enter):
   // focus to the page's h1, as on any arrival, not left on something gone.
@@ -515,7 +545,10 @@ export function Lobby({ heading, directory }: { heading: ReactNode; directory: R
           </Suspense>
         </SceneBoundary>
       )}
-      {live && <EnterGate feed={feed} phase={gate} practice={practice} onEnter={enter} />}
+      {live && <EnterGate feed={feed} phase={gate} onEnter={enter} />}
+      <Suspense fallback={null}>
+        <ViewParam onFlat={setFlat} />
+      </Suspense>
 
       <Suspense fallback={null}>
         <ArrivalFocus root={rootRef} fallback={fallback} />
