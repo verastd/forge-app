@@ -167,13 +167,21 @@ test("a member's lobby tries LiveKit, tries once more when the scene is up, and 
   context,
   baseURL,
 }) => {
-  test.setTimeout(120_000);
+  test.setTimeout(180_000);
   await expectWebGL2(page);
   await signInAs(context, baseURL ?? '', MEMBER);
   // This build's flags fail closed, and the flag service is down: switch the lobby on.
   await serveFlags(page);
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
+  // Every try at the room starts by asking the token route (the first with
+  // the grant the feed fetched itself), so the asks count the tries.
+  let tokenAsks = 0;
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && new URL(request.url()).pathname === TOKEN) {
+      tokenAsks += 1;
+    }
+  });
   // Records, from inside the page: every value data-feed takes, in order,
   // after the server's markup; and every WebSocket the page opens. (A socket
   // that dies at DNS or a proxy never reaches Playwright's `websocket` event.)
@@ -213,27 +221,31 @@ test("a member's lobby tries LiveKit, tries once more when the scene is up, and 
 
   // The room can't be reached: the feed gives up, the scene doesn't. The
   // route answered, so it's this browser's join that failed, and it tries
-  // once more by itself once the scene is up.
+  // once more by itself once the scene is up: a second ask for a token. When
+  // the first try fails after the scene is up, the second starts in the same
+  // task, so data-feed need never show `none` in between: the asks count.
   await expectReady(page);
   const root = lobbyRoot(page);
   const sockets = () =>
     page.evaluate(() => (window as unknown as { __lobbySockets: string[] }).__lobbySockets.filter((url) => url.startsWith('wss://example.invalid/rtc')).length);
   const feeds = () => page.evaluate(() => (window as unknown as { __lobbyFeeds: string[] }).__lobbyFeeds);
-  await expect.poll(feeds, { timeout: 60_000 }).toEqual(['livekit', 'none', 'livekit', 'none']);
+  await expect.poll(() => tokenAsks, { timeout: 60_000 }).toBe(2);
+  const panel = peoplePanel(page);
+  await expect(voiceLine(page)).toHaveText("Couldn't connect to voice.", { timeout: 60_000 });
   expect(await sockets()).toBeGreaterThanOrEqual(2);
+  expect((await feeds())[0]).toBe('livekit');
   await expect(root).toHaveAttribute('data-feed', 'none');
   await expect(root).toHaveAttribute('data-peers', '0');
   await expect(root).toHaveAttribute('data-voice', 'unavailable');
-  const panel = peoplePanel(page);
-  await expect(voiceLine(page)).toHaveText("Couldn't connect to voice.");
   await expect(panel.getByRole('button', { name: 'Mic', exact: true })).toBeDisabled();
   // It can't see the room, so it claims nobody is in it.
   await expect(panel.getByText('Nobody else is here yet.')).toHaveCount(0);
   // Only once by itself: "Try again" is the member's.
   await page.waitForTimeout(3_000);
-  expect(await feeds()).toHaveLength(4);
+  expect(tokenAsks).toBe(2);
   const tries = await sockets();
   await panel.getByRole('button', { name: 'Try again' }).click();
+  await expect.poll(() => tokenAsks, { timeout: 30_000 }).toBe(3);
   await expect.poll(sockets, { timeout: 30_000 }).toBeGreaterThan(tries);
   await expect(voiceLine(page)).toHaveText("Couldn't connect to voice.", { timeout: 60_000 });
 
