@@ -27,6 +27,9 @@
       },
       "house_spec": {
         "type": "boolean"
+      },
+      "lobby_avatars": {
+        "type": "boolean"
       }
     },
     "TaskCard": {

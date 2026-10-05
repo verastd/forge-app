@@ -198,7 +198,7 @@ test.describe('on a desktop', () => {
   });
 
   test.describe('with no reduced-motion preference', () => {
-    // Opts out of the suite-wide default; never visits `/`, whose splash would then play.
+    // Opts out of the suite-wide default.
     test.use({ contextOptions: { reducedMotion: 'no-preference' } });
 
     test('it slides', async ({ page }) => {

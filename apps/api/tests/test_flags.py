@@ -68,6 +68,7 @@ def test_all_flags_false_when_no_source_is_present(
         "agent_start": False,
         "proposals": False,
         "house_spec": False,
+        "lobby_avatars": False,
     }
 
 
@@ -109,6 +110,7 @@ def test_env_json_bad_json_fails_closed_even_over_a_valid_earlier_layer(
         "agent_start": False,
         "proposals": False,
         "house_spec": False,
+        "lobby_avatars": False,
     }
 
 
@@ -126,6 +128,7 @@ def test_env_path_missing_file_fails_closed(
         "agent_start": False,
         "proposals": False,
         "house_spec": False,
+        "lobby_avatars": False,
     }
 
 
@@ -150,6 +153,7 @@ def test_known_flag_non_boolean_fails_closed_even_with_a_valid_sibling_key(
         "agent_start": False,
         "proposals": False,
         "house_spec": False,
+        "lobby_avatars": False,
     }
 
 
@@ -168,6 +172,7 @@ def test_non_object_top_level_fails_closed(
         "agent_start": False,
         "proposals": False,
         "house_spec": False,
+        "lobby_avatars": False,
     }
 
 
@@ -270,6 +275,25 @@ def test_a_non_boolean_house_spec_fails_every_flag_closed(
     assert flags_service.is_enabled("proposals") is False
 
 
+def test_lobby_avatars_is_on_in_the_repo_config_off_by_default_and_can_be_switched_off(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # On in the checked-in file; an unconfigured deploy keeps the lobby's orbs.
+    assert flags_service.DEFAULT_FLAGS["lobby_avatars"] is False
+    assert flags_service.is_enabled("lobby_avatars") is True
+    monkeypatch.setenv(flags_service.ENV_JSON, json.dumps({"lobby_avatars": False}))
+    assert flags_service.is_enabled("lobby_avatars") is False
+    assert flags_service.is_enabled("apps_lobby") is True
+
+
+def test_a_non_boolean_lobby_avatars_fails_every_flag_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(flags_service.ENV_JSON, json.dumps({"lobby_avatars": "true"}))
+    assert flags_service.get_flags().model_dump() == flags_service.DEFAULT_FLAGS
+    assert flags_service.is_enabled("apps_lobby") is False
+
+
 def test_default_flags_name_every_flag_in_the_model() -> None:
     assert list(flags_service.DEFAULT_FLAGS) == list(FlagConfig.model_fields)
     assert not any(flags_service.DEFAULT_FLAGS.values())
@@ -287,5 +311,6 @@ def test_flags_endpoint_returns_every_flag(client: TestClient) -> None:
         "agent_start",
         "proposals",
         "house_spec",
+        "lobby_avatars",
     }
     assert all(isinstance(value, bool) for value in payload.values())

@@ -56,9 +56,9 @@ import { demoSignIn, signInAs } from './helpers/session';
  * `apps_lobby` flag off, or a view that broke. Those paths are tested as
  * carefully as the scene.
  *
- * playwright.config.ts asks every test for reduced motion (for the landing
- * page's splash), so the lobby runs with `data-motion=reduced` here unless a
- * test opts out, as the full-motion block below does (it never visits `/`).
+ * playwright.config.ts asks every test for reduced motion, so the lobby runs
+ * with `data-motion=reduced` here unless a test opts out, as the full-motion
+ * block below does.
  *
  * Presence on the practice build is the local feed: tabs of one browser
  * over a BroadcastChannel, no server and no voice. The HUD ("People
@@ -506,7 +506,7 @@ test.describe('reduced motion', () => {
   });
 
   test.describe('with no reduced-motion preference', () => {
-    // Opts out of the suite-wide default; never visits `/`, whose splash would then play.
+    // Opts out of the suite-wide default.
     test.use({ contextOptions: { reducedMotion: 'no-preference' } });
 
     test('data-motion is full, and turns reduced when the preference does', async ({ page }) => {

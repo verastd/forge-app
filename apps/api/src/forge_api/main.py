@@ -27,6 +27,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from forge_api import __version__
 from forge_api.routers import (
+    avatars,
     bridge,
     flags,
     health,
@@ -275,3 +276,4 @@ app.include_router(mcp.router)
 app.include_router(members.router)
 app.include_router(proposals.router)
 app.include_router(notifications.router)
+app.include_router(avatars.router)

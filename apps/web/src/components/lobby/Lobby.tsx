@@ -505,7 +505,13 @@ export function Lobby({ heading, directory }: { heading: ReactNode; directory: R
       {live && (
         <SceneBoundary onError={() => setBroken(true)}>
           <Suspense fallback={null}>
-            <SceneHost reducedMotion={reducedMotion} feed={feedRef} hud={hud} events={events} />
+            <SceneHost
+              reducedMotion={reducedMotion}
+              avatars={flags.lobby_avatars}
+              feed={feedRef}
+              hud={hud}
+              events={events}
+            />
           </Suspense>
         </SceneBoundary>
       )}

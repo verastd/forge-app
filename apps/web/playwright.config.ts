@@ -55,11 +55,10 @@ export default defineConfig({
   expect: { timeout: 10_000 },
   use: {
     trace: 'on-first-retry',
-    // The landing page opens with a modal intro (src/components/Splash.tsx)
-    // that covers the app for its first few seconds. Asking for reduced motion
-    // is the app's own documented way to opt out of it, so the specs meet the
-    // page in its settled state instead of waiting the intro out on every
-    // `goto('/')` — and it holds for any motion added later.
+    // Reduced motion is the app's own documented way to settle its motion:
+    // the home hero (src/components/hero) draws one still frame instead of
+    // animating, and the lobby eases faster. Specs meet every page settled,
+    // and it holds for any motion added later.
     contextOptions: { reducedMotion: 'reduce' },
   },
   projects: [

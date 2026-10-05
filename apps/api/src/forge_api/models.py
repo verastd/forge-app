@@ -227,6 +227,8 @@ class FlagConfig(BaseModel):
     # The house model drafts every passed proposal's task (also needs `proposals` and
     # ANTHROPIC_API_KEY).
     house_spec: bool
+    # Robot avatars in the Apps lobby (in place of the orbs), and the admin's avatar editor.
+    lobby_avatars: bool
 
 
 class TaskCard(BaseModel):
@@ -919,3 +921,93 @@ class GcsStatus(BaseModel):
     configured: bool
     running: bool
     lastResult: GcsSyncResult | None = None
+
+
+# ---------------------------------------------------------------------------
+# Lobby avatars (behind `lobby_avatars`): every member is a robot in the Apps lobby.
+# Mirrors the "Lobby avatars" block of packages/shared/src/index.ts; the logic is in
+# services/avatars.py. Pinned field for field by tests/test_avatars.py, which reads the
+# zod side's field lists from the source (the hex colours keep these out of
+# wire-golden.json, whose describer probes strings with plain letters).
+# ---------------------------------------------------------------------------
+
+AVATAR_MEMBER_ID: Final = r"^gh:[0-9]{1,20}$"
+AVATAR_HEAD_ID: Final = r"^[a-z0-9][a-z0-9-]{0,39}$"
+AVATAR_SHA256: Final = r"^[0-9a-f]{64}$"
+AVATAR_HEAD_NAME_MAX: Final = 40
+AVATAR_CHEST_MAX_BYTES: Final = 1024 * 1024
+AVATAR_CHEST_MAX_PIXELS: Final = 2048
+AVATAR_HEAD_MAX_BYTES: Final = 3 * 1024 * 1024
+AvatarChestType = Literal["image/png", "image/jpeg", "image/webp"]
+AVATAR_EYE_NODES: Final = ("EyeL", "EyeR")
+#: replace: the robot's own head is hidden; accessory: a face accessory worn over it (a
+#: mask, a visor, a helmet), the eyes staying where they always are.
+AvatarHeadFit = Literal["replace", "accessory"]
+
+_HexColor = Annotated[str, Field(pattern=r"^#[0-9a-f]{6}$")]
+_AvatarHeadId = Annotated[str, Field(pattern=AVATAR_HEAD_ID)]
+_AvatarMemberId = Annotated[str, Field(pattern=AVATAR_MEMBER_ID)]
+_Sha256 = Annotated[str, Field(pattern=AVATAR_SHA256)]
+
+
+class AvatarColors(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    shell: _HexColor
+    trim: _HexColor
+    accent: _HexColor
+    eye: _HexColor
+
+
+class Avatar(BaseModel):
+    memberId: _AvatarMemberId
+    colors: AvatarColors
+    head: _AvatarHeadId | None = None
+    chest: _Sha256 | None = None
+    updatedAt: str
+
+
+class AvatarHead(BaseModel):
+    id: _AvatarHeadId
+    name: Annotated[str, Field(min_length=1, max_length=AVATAR_HEAD_NAME_MAX)]
+    sha256: _Sha256
+    bytes: int
+    fit: AvatarHeadFit
+    eyes: bool
+    updatedAt: str
+
+
+class AvatarList(BaseModel):
+    avatars: list[Avatar]
+    heads: list[AvatarHead]
+
+
+class AvatarUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    colors: AvatarColors
+    head: _AvatarHeadId | None = None
+
+
+class AvatarChestUpload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    contentType: AvatarChestType
+    data: Annotated[str, Field(min_length=1)]
+
+
+class AvatarHeadUpload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: Annotated[str, Field(min_length=1, max_length=AVATAR_HEAD_NAME_MAX)]
+    fit: AvatarHeadFit
+    data: Annotated[str, Field(min_length=1)]
+
+
+class AvatarMember(BaseModel):
+    memberId: _AvatarMemberId
+    login: str
+
+
+class AvatarMemberList(BaseModel):
+    members: list[AvatarMember]

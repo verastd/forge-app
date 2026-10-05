@@ -24,7 +24,8 @@
  * focus, peer count and picks as they change. Position is written straight
  * onto the lobby root as `data-x/y/z/yaw`, ten times a second, and the
  * readout's slot as `data-hover-slot` (empty when none) and its light as
- * `data-hover-glow` (on or off) whenever they change.
+ * `data-hover-glow` (on or off) whenever they change, and how many people
+ * are robots (with avatars on) as `data-robots`.
  */
 
 import * as THREE from 'three';
@@ -36,6 +37,8 @@ import { createControls, createPicker } from './controls';
 import type { Hit, Motion } from './controls';
 import { CAVE_PALETTE, shaderColor } from './palette';
 import { createPeers } from './peers';
+import { createRobotAssets } from './robot/assets';
+import { createAvatarDirectory } from './robot/directory';
 import type { PeerClasses } from './peers';
 import { READOUT_TAP_MS, createSlotReadout } from './readout';
 import { SCREEN_INSET, applyTV, createEmbers, createScreenPanel, createTvLight } from './screen';
@@ -253,6 +256,8 @@ export interface CaveOptions {
   /** Where the camera starts (already clamped into the cave). */
   initial: CameraState;
   reducedMotion: boolean;
+  /** People as robot avatars (robot/), not orbs: the `lobby_avatars` flag. */
+  avatars?: boolean;
   /** The presence feed, read every frame; null while there is none. */
   feed(): PresenceFeed | null;
   hud: CaveHud;
@@ -436,7 +441,17 @@ export function createCave(canvas: HTMLCanvasElement, opts: CaveOptions): Cave {
   scene.add(mirror);
 
   // ---------- people ----------
-  const peers = createPeers(scene, opts.hud.people, opts.classes);
+  // Robots, when avatars are on: the body loads in the background, and
+  // everyone is an orb until it is in (or for good, if it never comes).
+  const robotAssets = opts.avatars ? createRobotAssets(renderer) : null;
+  const avatarDirectory = opts.avatars ? createAvatarDirectory() : null;
+  const peers = createPeers(
+    scene,
+    opts.hud.people,
+    opts.classes,
+    robotAssets && avatarDirectory ? { assets: robotAssets, directory: avatarDirectory } : null,
+  );
+  let robotCount = -1;
 
   // ---------- controls ----------
   const { initial } = opts;
@@ -687,6 +702,11 @@ export function createCave(canvas: HTMLCanvasElement, opts: CaveOptions): Cave {
         peerCount = others.size;
         opts.onPeers(peerCount);
       }
+      const robotsNow = peers.robotCount();
+      if (robotsNow !== robotCount) {
+        robotCount = robotsNow;
+        root.dataset.robots = String(robotCount);
+      }
       const level = feed ? feed.micLevel() : 0;
       if (opts.hud.mic && Math.abs(level - micLevel) > 0.004) {
         micLevel = level;
@@ -801,6 +821,9 @@ export function createCave(canvas: HTMLCanvasElement, opts: CaveOptions): Cave {
       canvas.removeEventListener('webglcontextlost', onContextLost);
       controls.dispose();
       peers.dispose();
+      avatarDirectory?.dispose();
+      robotAssets?.dispose();
+      delete root.dataset.robots;
       readout.dispose();
       delete root.dataset.hoverSlot;
       delete root.dataset.hoverGlow;

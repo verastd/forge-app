@@ -26,6 +26,7 @@ export const FLAG_NAMES = [
   'agent_start',
   'proposals',
   'house_spec',
+  'lobby_avatars',
 ] as const;
 export type FlagName = (typeof FLAG_NAMES)[number];
 
@@ -47,6 +48,8 @@ export const FlagConfigSchema = z.object({
    * set on the API.
    */
   house_spec: z.boolean(),
+  /** Robot avatars in the Apps lobby (in place of the orbs), and the admin's avatar editor. */
+  lobby_avatars: z.boolean(),
 });
 export type FlagConfig = z.infer<typeof FlagConfigSchema>;
 
@@ -1121,6 +1124,124 @@ export const ContributorProfileSchema = z.object({
   ),
 });
 export type ContributorProfile = z.infer<typeof ContributorProfileSchema>;
+
+// ---------------------------------------------------------------------------
+// Lobby avatars (behind `lobby_avatars`): every member is a robot in the Apps
+// lobby. Admins paint it, give it a chestplate image and pick its head from a
+// library of GLB heads they upload. Uploads travel as JSON (base64), the way
+// every BFF body does; the files themselves are served by their sha256.
+// Mirrored in apps/api/src/forge_api/models.py.
+// ---------------------------------------------------------------------------
+
+/** A member's id in the lobby: `gh:` and their numeric GitHub user id (the LiveKit identity). */
+export const AVATAR_MEMBER_ID = /^gh:[0-9]{1,20}$/;
+/** A library head's id: lower-case letters, digits and dashes. */
+export const AVATAR_HEAD_ID = /^[a-z0-9][a-z0-9-]{0,39}$/;
+/** A lower-case sha256, hex. */
+export const AVATAR_SHA256 = /^[0-9a-f]{64}$/;
+export const AVATAR_HEAD_NAME_MAX = 40;
+/** The most a chestplate image may weigh, decoded. */
+export const AVATAR_CHEST_MAX_BYTES = 1024 * 1024;
+/** The widest or tallest a chestplate image may be, in pixels. */
+export const AVATAR_CHEST_MAX_PIXELS = 2048;
+/** The most a head may weigh, decoded: its base64 stays under a 4.5 MB request. */
+export const AVATAR_HEAD_MAX_BYTES = 3 * 1024 * 1024;
+export const AVATAR_CHEST_TYPES = ['image/png', 'image/jpeg', 'image/webp'] as const;
+export type AvatarChestType = (typeof AVATAR_CHEST_TYPES)[number];
+/** The two empties a replacing head may carry to place the shared blinking eyes. */
+export const AVATAR_EYE_NODES = ['EyeL', 'EyeR'] as const;
+/**
+ * How a library head sits on the robot. `replace`: the robot's own head is
+ * hidden, and the eyes go on the head's EyeL/EyeR (none without them).
+ * `accessory`: a face accessory, worn over the robot's own head (a mask, a
+ * visor, a helmet, a hat): the face screen and the blinking eyes stay where
+ * they always are, and whatever the accessory puts in front of them covers
+ * them.
+ */
+export const AVATAR_HEAD_FITS = ['replace', 'accessory'] as const;
+export type AvatarHeadFit = (typeof AVATAR_HEAD_FITS)[number];
+
+const hexColor = z.string().regex(/^#[0-9a-f]{6}$/);
+
+export const AvatarColorsSchema = z.object({
+  /** Armour and the torso. */
+  shell: hexColor,
+  /** Secondary panels. */
+  trim: hexColor,
+  /** The chestplate's frame and the face screen's rim. */
+  accent: hexColor,
+  /** The eyes and the thruster. */
+  eye: hexColor,
+});
+export type AvatarColors = z.infer<typeof AvatarColorsSchema>;
+
+/** One member's robot, as an admin set it. A member with none wears their default. */
+export const AvatarSchema = z.object({
+  memberId: z.string().regex(AVATAR_MEMBER_ID),
+  colors: AvatarColorsSchema,
+  /** A library head's id; absent: the robot's own head. */
+  head: z.string().regex(AVATAR_HEAD_ID).optional(),
+  /** The chestplate image's sha256; absent: a generated emblem. */
+  chest: z.string().regex(AVATAR_SHA256).optional(),
+  updatedAt: z.string(),
+});
+export type Avatar = z.infer<typeof AvatarSchema>;
+
+/** A head in the library. */
+export const AvatarHeadSchema = z.object({
+  id: z.string().regex(AVATAR_HEAD_ID),
+  name: z.string().min(1).max(AVATAR_HEAD_NAME_MAX),
+  /** The GLB's sha256: where it is served from. */
+  sha256: z.string().regex(AVATAR_SHA256),
+  bytes: z.number().int(),
+  fit: z.enum(AVATAR_HEAD_FITS),
+  /** Whether it carries EyeL and EyeR, where a replacing head's eyes go. */
+  eyes: z.boolean(),
+  updatedAt: z.string(),
+});
+export type AvatarHead = z.infer<typeof AvatarHeadSchema>;
+
+/** `GET /api/avatars`: every customised robot and the head library. */
+export const AvatarListSchema = z.object({
+  avatars: z.array(AvatarSchema),
+  heads: z.array(AvatarHeadSchema),
+});
+export type AvatarList = z.infer<typeof AvatarListSchema>;
+
+/** `PUT /api/avatars/members/{memberId}` (admins). */
+export const AvatarUpdateSchema = z.object({
+  colors: AvatarColorsSchema,
+  head: z.string().regex(AVATAR_HEAD_ID).optional(),
+});
+export type AvatarUpdate = z.infer<typeof AvatarUpdateSchema>;
+
+/** `PUT /api/avatars/members/{memberId}/chest` (admins): the image, base64. */
+export const AvatarChestUploadSchema = z.object({
+  contentType: z.enum(AVATAR_CHEST_TYPES),
+  data: z.string().min(1),
+});
+export type AvatarChestUpload = z.infer<typeof AvatarChestUploadSchema>;
+
+/** `PUT /api/avatars/heads/{headId}` (admins): the GLB, base64. */
+export const AvatarHeadUploadSchema = z.object({
+  name: z.string().min(1).max(AVATAR_HEAD_NAME_MAX),
+  fit: z.enum(AVATAR_HEAD_FITS),
+  data: z.string().min(1),
+});
+export type AvatarHeadUpload = z.infer<typeof AvatarHeadUploadSchema>;
+
+/** A member an admin can dress, for the editor's list. */
+export const AvatarMemberSchema = z.object({
+  memberId: z.string().regex(AVATAR_MEMBER_ID),
+  login: z.string(),
+});
+export type AvatarMember = z.infer<typeof AvatarMemberSchema>;
+
+/** `GET /api/avatars/members` (admins). */
+export const AvatarMemberListSchema = z.object({
+  members: z.array(AvatarMemberSchema),
+});
+export type AvatarMemberList = z.infer<typeof AvatarMemberListSchema>;
 
 // ---------------------------------------------------------------------------
 // The rail registry and the brief, mirrored in apps/api (services/rails.py,
