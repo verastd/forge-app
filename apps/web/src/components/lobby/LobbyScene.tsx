@@ -53,8 +53,6 @@ const PEER_CLASSES = {
   peer: cls('peer'),
   tag: cls('tag'),
   talking: cls('talking'),
-  none: cls('none'),
-  joining: cls('joining'),
 };
 
 export default function LobbyScene({ initial, reducedMotion, feed, hud, events }: LobbySceneProps) {

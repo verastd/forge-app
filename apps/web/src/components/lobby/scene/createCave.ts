@@ -50,7 +50,6 @@ const WALL_H = 300;
 const MEDIA_RANGE = 40;
 const WARM = 0xff6a24;
 const NO_PEERS: ReadonlyMap<string, PeerState> = new Map();
-const NOBODY_JOINING: ReadonlyMap<string, string> = new Map();
 
 /** The visitor's browser asked for less data (Save-Data; Chromium's `navigator.connection.saveData`). */
 function savesData(): boolean {
@@ -240,8 +239,6 @@ export interface CaveHud {
   root: HTMLElement;
   /** The layer the peers' name tags live in, laid exactly over the canvas. */
   people: HTMLElement;
-  /** The people panel's list: everyone in the room, or "nobody in range". */
-  near: HTMLElement | null;
   /** The mic button, whose `--lvl` shows the mic level. */
   mic: HTMLElement | null;
   stick: HTMLElement | null;
@@ -439,7 +436,7 @@ export function createCave(canvas: HTMLCanvasElement, opts: CaveOptions): Cave {
   scene.add(mirror);
 
   // ---------- people ----------
-  const peers = createPeers(scene, opts.hud.people, opts.hud.near, opts.classes);
+  const peers = createPeers(scene, opts.hud.people, opts.classes);
 
   // ---------- controls ----------
   const { initial } = opts;
@@ -670,21 +667,22 @@ export function createCave(canvas: HTMLCanvasElement, opts: CaveOptions): Cave {
       camera.rotation.set(-motion.pitch, -motion.yaw, 0);
       camera.updateMatrixWorld();
 
-      // Presence: publish where we are, hear from where we are, draw everyone else.
+      // Presence: publish where we are, hear from where we are, draw everyone
+      // else. The feed only records the state here; when to send it, and the
+      // voices, run on the feed's own timer, so a hidden tab (no frames) still
+      // hears and is heard.
       const feed = opts.feed();
       self.x = motion.pos.x;
       self.y = motion.pos.y;
       self.z = motion.pos.z;
       self.yaw = normalizeYaw(motion.yaw);
       let others = NO_PEERS;
-      let joining = NOBODY_JOINING;
       if (feed) {
         feed.publish(self);
         feed.setListener(self);
         others = feed.peers();
-        joining = feed.joining();
       }
-      peers.update(dt, t, camera, others, joining, reducedMotion);
+      peers.update(dt, t, camera, others, reducedMotion);
       if (others.size !== peerCount) {
         peerCount = others.size;
         opts.onPeers(peerCount);

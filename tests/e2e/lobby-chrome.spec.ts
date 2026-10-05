@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import type { Locator, Page } from '@playwright/test';
 
 import {
-  EMPTY_ABOVE_DATA,
+  emptySlotInView,
   expectReady,
   expectWebGL2,
   gotoLobby,
@@ -10,7 +10,6 @@ import {
   lobbyRoot,
   openLobby,
   serveFlags,
-  slotOnScreen,
   tapScene,
 } from './helpers/lobby';
 
@@ -28,6 +27,10 @@ import {
  * - Exit is on screen while the wall is the page, by keyboard too, goes
  *   home and leaves nothing of the cave running; it and the menu button
  *   keep clear of the HUD on a desktop and a phone either way up.
+ * - The people panel, at its fullest (the practice feed's development-only
+ *   `?voice-fixture=full`), keeps clear of all of that too, on a desktop, a
+ *   touch tablet and phones either way up, and every control in it can be
+ *   pressed where it shows.
  *
  * playwright.config.ts asks every test for reduced motion, so the bar
  * appears and disappears without sliding here unless a test opts out.
@@ -361,45 +364,90 @@ test.describe('Exit', () => {
   });
 
   for (const { width, height, touch } of [
+    { width: 1440, height: 900, touch: false },
     { width: 1280, height: 720, touch: false },
+    { width: 1024, height: 768, touch: true },
     { width: 390, height: 844, touch: true },
+    { width: 360, height: 640, touch: true },
     { width: 844, height: 390, touch: true },
   ]) {
     test.describe(`at ${width}×${height}${touch ? ', touch' : ''}`, () => {
       test.use({ viewport: { width, height }, hasTouch: touch, isMobile: touch });
 
-      test('Exit and the menu button keep clear of the stick, the lift buttons, the people panel and the toast', async ({
+      test('Exit, the menu button and the people panel at its fullest keep clear of the stick, the lift buttons, the toast and each other', async ({
         page,
       }) => {
-        test.setTimeout(90_000);
-        await openLobby(page);
-        // The toast, as a tap on an empty slot brings it.
-        await tapScene(page, await slotOnScreen(page, EMPTY_ABOVE_DATA), { touch });
+        test.setTimeout(120_000);
+        await openLobby(page, '/apps?voice-fixture=full');
+        const panel = page.getByRole('complementary', { name: 'People nearby' });
+        // The fullest panel: sound held back, the cave sound failed, the mic refused, eight people.
+        await expect(panel.getByRole('button', { name: 'Turn on sound' })).toBeVisible();
+        await expect(panel.locator('li[data-person-id]')).toHaveCount(8);
+        // The toast, as a tap on an empty slot brings it: one the 3D view shows here, clear of the panel.
+        await tapScene(page, await emptySlotInView(page), { touch });
         const toast = page.getByRole('status').filter({ hasText: 'Empty slot' });
         await expect(toast).toBeVisible();
 
-        const corner: Record<string, Box> = { Exit: await boxOf(exit(page), 'Exit') };
-        const hud: Record<string, Box> = {
-          'the people panel': await boxOf(page.getByRole('complementary', { name: 'People nearby' }), 'the people panel'),
-          'the toast': await boxOf(toast, 'the toast'),
+        const corner: Record<string, Box> = {
+          Exit: await boxOf(exit(page), 'Exit'),
+          'the people panel': await boxOf(panel, 'the people panel'),
         };
-        if (touch) {
+        const hud: Record<string, Box> = { 'the toast': await boxOf(toast, 'the toast') };
+        if (touch || width <= 640) {
           corner['the menu button'] = await boxOf(page.getByRole('button', { name: 'Menu', exact: true }), 'the menu button');
-          hud['the stick'] = await boxOf(lobbyRoot(page).locator('[class*="stick"]'), 'the stick');
-          hud['Rise'] = await boxOf(page.getByRole('button', { name: 'Rise' }), 'Rise');
-          hud['Fall'] = await boxOf(page.getByRole('button', { name: 'Fall' }), 'Fall');
-          expect(overlap(corner.Exit as Box, corner['the menu button'] as Box), 'Exit overlaps the menu button').toBe(false);
         } else {
           await expect(page.getByRole('button', { name: 'Menu', exact: true })).toBeHidden();
         }
-        for (const [name, box] of Object.entries(corner)) {
+        if (touch) {
+          hud['the stick'] = await boxOf(lobbyRoot(page).locator('[class*="stick"]'), 'the stick');
+          hud['Rise'] = await boxOf(page.getByRole('button', { name: 'Rise' }), 'Rise');
+          hud['Fall'] = await boxOf(page.getByRole('button', { name: 'Fall' }), 'Fall');
+        }
+        const named = Object.entries(corner);
+        for (const [i, [name, box]] of named.entries()) {
           expect(box.x >= 0 && box.y >= 0 && box.x + box.width <= width && box.y + box.height <= height, `${name} is on screen`).toBe(
             true,
           );
-          for (const [other, otherBox] of Object.entries(hud)) {
+          for (const [other, otherBox] of [...Object.entries(hud), ...named.slice(i + 1)]) {
             expect(overlap(box, otherBox), `${name} overlaps ${other}`).toBe(false);
           }
         }
+        expect(await page.evaluate(() => document.documentElement.scrollWidth), 'nothing scrolls sideways').toBeLessThanOrEqual(width);
+
+        // Every control in the panel answers where it shows: what the browser
+        // finds at its centre is the control itself, not the nav, the lift
+        // buttons or the 3D view. Rows a phone keeps folded away are opened
+        // first; the list (or the panel) scrolls each one into view.
+        const more = panel.getByRole('button', { name: /^and \d+ more$/ });
+        if (await more.isVisible()) {
+          await more.click();
+          // Opening the list focuses its first new row, whose tooltip would sit over its neighbours.
+          await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+        }
+        // In the page, all at once: SwiftShader draws about a frame a second,
+        // and a Playwright scroll waits for two still frames per control.
+        const hits = await panel.evaluate((aside) =>
+          [...aside.querySelectorAll('button')]
+            .filter((button) => button.checkVisibility({ visibilityProperty: true }))
+            .map((button) => {
+              button.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
+              const box = button.getBoundingClientRect();
+              const x = box.left + box.width / 2;
+              const y = box.top + box.height / 2;
+              const found = document.elementFromPoint(x, y);
+              const onScreen = x >= 0 && y >= 0 && x <= window.innerWidth && y <= window.innerHeight;
+              const answeredBy =
+                onScreen && found !== null && button.contains(found)
+                  ? 'itself'
+                  : found === null
+                    ? 'nothing'
+                    : `${found.tagName}.${String(found.className).slice(0, 40)}`;
+              return { name: button.getAttribute('aria-label') ?? button.textContent ?? '', answeredBy };
+            }),
+        );
+        // Turn on sound, Retry, Mic, Deafen, and each of the eight rows' level bar and Mute.
+        expect(hits.length).toBeGreaterThanOrEqual(4 + 2 * 8);
+        expect(hits.filter((hit) => hit.answeredBy !== 'itself')).toEqual([]);
       });
     });
   }

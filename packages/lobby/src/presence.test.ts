@@ -1,26 +1,24 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  AUDIBLE_RANGE,
   HEARTBEAT_MS,
   MAX_PACKETS_PER_SECOND,
   NAME_MAX_LENGTH,
   POSITION_BYTES,
   POSITION_VERSION,
   SEND_INTERVAL_MS,
-  SUBSCRIBE_RANGE,
+  STEP_SLACK,
   acceptPacket,
   createPacketLimiter,
   decodePosition,
   encodePosition,
   forgetSender,
-  gainFor,
-  near,
+  plausibleStep,
   sanitizeName,
   sendPolicy,
 } from './presence.js';
 import type { SelfState } from './presence.js';
-import { CAMERA_LIMITS } from './camera.js';
+import { CAMERA_LIMITS, CAMERA_SPEED } from './camera.js';
 
 /** mulberry32: the lobby package allows no unseeded randomness, tests included. */
 function seeded(seed: number): () => number {
@@ -331,52 +329,6 @@ describe('sendPolicy', () => {
   });
 });
 
-describe('near and gainFor', () => {
-  it('uses the contract’s ranges', () => {
-    expect(AUDIBLE_RANGE).toBe(9);
-    expect(SUBSCRIBE_RANGE).toBe(14);
-    expect(SUBSCRIBE_RANGE).toBeGreaterThan(AUDIBLE_RANGE);
-  });
-
-  it('is the contract’s clamp(1 − (dist − 2) / (9 − 2), 0, 1)', () => {
-    for (let dist = -5; dist <= 30; dist += 0.25) {
-      const expected = Math.min(1, Math.max(0, 1 - (dist - 2) / (9 - 2)));
-      expect(near(dist)).toBeCloseTo(expected, 12);
-    }
-    expect(near(0)).toBe(1);
-    expect(near(2)).toBe(1);
-    expect(near(5.5)).toBe(0.5);
-    expect(near(AUDIBLE_RANGE)).toBe(0);
-    expect(near(SUBSCRIBE_RANGE)).toBe(0);
-  });
-
-  it('is 0 for a distance that is not a number, and handles infinities', () => {
-    expect(near(Number.NaN)).toBe(0);
-    expect(near(Infinity)).toBe(0);
-    expect(near(-Infinity)).toBe(1);
-  });
-
-  it('never grows with distance', () => {
-    let previous = near(0);
-    for (let dist = 0; dist <= 20; dist += 0.1) {
-      expect(near(dist)).toBeLessThanOrEqual(previous);
-      previous = near(dist);
-    }
-  });
-
-  it('maps nearness to a volume in [0, 1], silent at the edge of earshot', () => {
-    expect(gainFor(0)).toBe(0);
-    expect(gainFor(0.25)).toBe(0.25);
-    expect(gainFor(1)).toBe(1);
-    expect(gainFor(1.5)).toBe(1);
-    expect(gainFor(-0.5)).toBe(0);
-    expect(gainFor(Number.NaN)).toBe(0);
-    expect(gainFor(near(2))).toBe(1);
-    expect(gainFor(near(AUDIBLE_RANGE))).toBe(0);
-    expect(gainFor(near(AUDIBLE_RANGE - 0.5))).toBeGreaterThan(0);
-  });
-});
-
 describe('sanitizeName', () => {
   it('keeps ordinary names', () => {
     for (const name of ['octocat', 'mara', 'devon-kit', 'a', 'José', 'Zoë 🦊', 'the practice account']) {
@@ -407,10 +359,11 @@ describe('sanitizeName', () => {
     expect(sanitizeName('a'.repeat(39))).toBe('a'.repeat(39));
     expect(sanitizeName('a'.repeat(40))).toBe('a'.repeat(39));
     expect(sanitizeName('b'.repeat(5000))).toBe('b'.repeat(39));
-    const foxes = sanitizeName('🦊'.repeat(40));
-    expect(foxes).toBe('🦊'.repeat(39));
-    expect([...foxes]).toHaveLength(39);
-    expect(foxes).toHaveLength(78);
+    // U+1D49C, a letter outside the Basic Multilingual Plane: two UTF-16 units each.
+    const scripted = sanitizeName('\u{1D49C}'.repeat(40));
+    expect(scripted).toBe('\u{1D49C}'.repeat(39));
+    expect([...scripted]).toHaveLength(39);
+    expect(scripted).toHaveLength(78);
     // Clamping never leaves trailing whitespace behind.
     expect(sanitizeName(`${'a'.repeat(38)} b`)).toBe('a'.repeat(38));
   });
@@ -419,6 +372,37 @@ describe('sanitizeName', () => {
     for (const name of ['', '   ', '\u0000\u0001', '\u202E', '\u200B  ', null, undefined, 42, {}, [], ['mara']]) {
       expect(sanitizeName(name)).toBe('member');
     }
+  });
+
+  it('counts the Hangul fillers and the Braille blank as spaces, so a name of them is "member"', () => {
+    for (const blank of ['\u3164', '\u115F', '\u1160', '\uFFA0', '\u2800']) {
+      expect(sanitizeName(blank.repeat(3))).toBe('member');
+      expect(sanitizeName(`${blank}mara${blank}`)).toBe('mara');
+      expect(sanitizeName(`ma${blank}ra`)).toBe('ma ra');
+    }
+    // Real Hangul, beside a filler, is kept.
+    expect(sanitizeName('\u3164\uD55C\uAE00')).toBe('\uD55C\uAE00');
+  });
+
+  it('falls back to "member" when no letter or number is left to see', () => {
+    for (const name of ['🦊🦊', '---', '\u0301\u0302', '\u2800 \u3164 . !', '\u{1F98A}\u0301']) {
+      expect(sanitizeName(name)).toBe('member');
+    }
+    for (const name of ['Zoë 🦊', '🦊 7', '名前', '٣']) {
+      expect(sanitizeName(name)).toBe(name);
+    }
+  });
+
+  it('keeps at most two combining marks on any one character', () => {
+    // e, then three marks: the third goes.
+    expect(sanitizeName('e\u0301\u0302\u0303x')).toBe('e\u0301\u0302x');
+    expect(sanitizeName(`Z${'\u0336'.repeat(40)}algo`)).toBe('Z\u0336\u0336algo');
+    // Each base gets its own two.
+    expect(sanitizeName('a\u0301\u0302b\u0303\u0304\u0305')).toBe('a\u0301\u0302b\u0303\u0304');
+    // Vietnamese stacks two on one vowel, decomposed: kept whole.
+    expect(sanitizeName('Vie\u0323\u0302t')).toBe('Vie\u0323\u0302t');
+    // Dropped marks don't count toward the 39.
+    expect([...sanitizeName('a\u0300\u0301\u0302\u0303'.repeat(13))]).toHaveLength(39);
   });
 });
 
@@ -511,5 +495,52 @@ describe('acceptPacket', () => {
     expect(limiter.recent.has('gh:1')).toBe(false);
     expect(limiter.recent.has('gh:2')).toBe(true);
     expect(acceptPacket(limiter, 'gh:1', 0)).toBe(true);
+  });
+});
+
+describe('plausibleStep', () => {
+  const at = (x: number, y: number, z: number): SelfState => ({ x, y, z, yaw: 0 });
+
+  it("takes a peer's first position as it comes", () => {
+    expect(plausibleStep(null, 0, at(20, 200, -20), 0)).toBe(true);
+  });
+
+  it('allows the slack at once, and the camera speed on top of it over time', () => {
+    expect(STEP_SLACK).toBe(3);
+    const from = at(0, 1.7, 0);
+    // Packets arriving together: the slack alone.
+    expect(plausibleStep(from, 1000, at(3, 1.7, 0), 1000)).toBe(true);
+    expect(plausibleStep(from, 1000, at(3.1, 1.7, 0), 1000)).toBe(false);
+    expect(plausibleStep(from, 1000, at(0, 4.7, 0), 1000)).toBe(true);
+    expect(plausibleStep(from, 1000, at(0, 4.8, 0), 1000)).toBe(false);
+    // A second later: a walk of 16 m and a rise of 24 m more.
+    expect(plausibleStep(from, 1000, at(0, 1.7, CAMERA_SPEED.walk + STEP_SLACK), 2000)).toBe(true);
+    expect(plausibleStep(from, 1000, at(0, 1.7, CAMERA_SPEED.walk + STEP_SLACK + 0.1), 2000)).toBe(false);
+    expect(plausibleStep(from, 1000, at(0, 1.7 + CAMERA_SPEED.rise + STEP_SLACK, 0), 2000)).toBe(true);
+    expect(plausibleStep(from, 1000, at(0, 1.8 + CAMERA_SPEED.rise + STEP_SLACK, 0), 2000)).toBe(false);
+    // Across the floor is measured on the floor: a diagonal counts once.
+    expect(plausibleStep(from, 0, at(2, 1.7, 2), 0)).toBe(true);
+    expect(plausibleStep(from, 0, at(2.2, 1.7, 2.2), 0)).toBe(false);
+  });
+
+  it('refuses a peer flipping between 30 m and 47 m every tenth of a second', () => {
+    const near = at(0, 31.7, 0);
+    const far = at(0, 48.7, 0);
+    expect(plausibleStep(near, 0, far, 100)).toBe(false);
+    expect(plausibleStep(far, 0, near, 100)).toBe(false);
+    // Once a second, it could be climbing: that is the dwell's to slow down (voice.ts).
+    expect(plausibleStep(near, 0, far, 1000)).toBe(true);
+  });
+
+  it('allows only the slack for a clock that went backwards or is not a number', () => {
+    const from = at(0, 1.7, 0);
+    expect(plausibleStep(from, 2000, at(2.9, 1.7, 0), 1000)).toBe(true);
+    expect(plausibleStep(from, 2000, at(5, 1.7, 0), 1000)).toBe(false);
+    expect(plausibleStep(from, Number.NaN, at(5, 1.7, 0), 1000)).toBe(false);
+  });
+
+  it('never takes a position that is not a number', () => {
+    expect(plausibleStep(at(0, 1.7, 0), 0, at(Number.NaN, 1.7, 0), 1000)).toBe(false);
+    expect(plausibleStep(at(0, 1.7, 0), 0, at(0, Number.NaN, 0), 1000)).toBe(false);
   });
 });

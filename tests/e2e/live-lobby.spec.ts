@@ -1,6 +1,16 @@
 import { expect, test } from '@playwright/test';
 
-import { DATA_LINK, expectReady, expectWebGL2, holdKey, lobbyRoot, readCamera, serveFlags } from './helpers/lobby';
+import {
+  DATA_LINK,
+  expectReady,
+  expectWebGL2,
+  holdKey,
+  lobbyRoot,
+  peoplePanel,
+  readCamera,
+  serveFlags,
+  voiceLine,
+} from './helpers/lobby';
 import { plantPracticeSession, signInAs } from './helpers/session';
 
 /**
@@ -23,7 +33,12 @@ import { plantPracticeSession, signInAs } from './helpers/session';
  *
  * One test stands in for LiveKit's signal server itself (Playwright's
  * WebSocket routing, on the unreachable room URL), to make the room evict a
- * member the way it does when they open the lobby in a second tab.
+ * member the way it does when they open the lobby in a second tab. Another
+ * stands in for the token route's refusals, to check the people panel says
+ * why there's no voice, and that a refused lobby never downloads LiveKit.
+ *
+ * Two members hearing each other needs a LiveKit server: that proof runs by
+ * hand against a local one (ADR-004, "Voice v2").
  */
 
 const MEMBER = { sub: '583231', login: 'octocat' };
@@ -68,7 +83,7 @@ function jwtClaims(token: string): Record<string, unknown> {
 }
 
 test('with the API down the flags fail closed: no 3D view, just the directory', async ({ page, context, baseURL }) => {
-  // The lobby needs a sign-in; this build's is GitHub's, sealed directly.
+  // The lobby needs a sign-in; this build's is GitHub's, sealed directly, so nothing calls the API.
   await signInAs(context, baseURL ?? '', MEMBER);
   await page.route('**/api/**', (route) => route.abort());
   await page.goto('/apps');
@@ -147,18 +162,26 @@ test.describe('POST /api/lobby/token', () => {
   });
 });
 
-test("a member's lobby tries LiveKit, and with the room out of reach carries on alone", async ({
+test("a member's lobby tries LiveKit, tries once more when the scene is up, and with the room out of reach carries on alone", async ({
   page,
   context,
   baseURL,
 }) => {
-  test.setTimeout(120_000);
+  test.setTimeout(180_000);
   await expectWebGL2(page);
   await signInAs(context, baseURL ?? '', MEMBER);
   // This build's flags fail closed, and the flag service is down: switch the lobby on.
   await serveFlags(page);
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
+  // Every try at the room starts by asking the token route (the first with
+  // the grant the feed fetched itself), so the asks count the tries.
+  let tokenAsks = 0;
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && new URL(request.url()).pathname === TOKEN) {
+      tokenAsks += 1;
+    }
+  });
   // Records, from inside the page: every value data-feed takes, in order,
   // after the server's markup; and every WebSocket the page opens. (A socket
   // that dies at DNS or a proxy never reaches Playwright's `websocket` event.)
@@ -196,23 +219,76 @@ test("a member's lobby tries LiveKit, and with the room out of reach carries on 
     })
     .toContainEqual(expect.stringMatching(/^wss:\/\/example\.invalid\/rtc/));
 
-  // The room can't be reached: the feed gives up, the scene doesn't.
+  // The room can't be reached: the feed gives up, the scene doesn't. The
+  // route answered, so it's this browser's join that failed, and it tries
+  // once more by itself once the scene is up: a second ask for a token. When
+  // the first try fails after the scene is up, the second starts in the same
+  // task, so data-feed need never show `none` in between: the asks count.
   await expectReady(page);
   const root = lobbyRoot(page);
+  const sockets = () =>
+    page.evaluate(() => (window as unknown as { __lobbySockets: string[] }).__lobbySockets.filter((url) => url.startsWith('wss://example.invalid/rtc')).length);
+  const feeds = () => page.evaluate(() => (window as unknown as { __lobbyFeeds: string[] }).__lobbyFeeds);
+  await expect.poll(() => tokenAsks, { timeout: 60_000 }).toBe(2);
+  const panel = peoplePanel(page);
+  await expect(voiceLine(page)).toHaveText("Couldn't connect to voice.", { timeout: 60_000 });
+  expect(await sockets()).toBeGreaterThanOrEqual(2);
+  expect((await feeds())[0]).toBe('livekit');
   await expect(root).toHaveAttribute('data-feed', 'none');
-  expect(await page.evaluate(() => (window as unknown as { __lobbyFeeds: string[] }).__lobbyFeeds)).toEqual([
-    'livekit',
-    'none',
-  ]);
   await expect(root).toHaveAttribute('data-peers', '0');
   await expect(root).toHaveAttribute('data-voice', 'unavailable');
-  await expect(page.getByRole('button', { name: 'Voice unavailable' })).toBeDisabled();
+  await expect(panel.getByRole('button', { name: 'Mic', exact: true })).toBeDisabled();
+  // It can't see the room, so it claims nobody is in it.
+  await expect(panel.getByText('Nobody else is here yet.')).toHaveCount(0);
+  // Only once by itself: "Try again" is the member's.
+  await page.waitForTimeout(3_000);
+  expect(tokenAsks).toBe(2);
+  const tries = await sockets();
+  await panel.getByRole('button', { name: 'Try again' }).click();
+  await expect.poll(() => tokenAsks, { timeout: 30_000 }).toBe(3);
+  await expect.poll(sockets, { timeout: 30_000 }).toBeGreaterThan(tries);
+  await expect(voiceLine(page)).toHaveText("Couldn't connect to voice.", { timeout: 60_000 });
 
   // Still running: it walks, and nothing threw.
   const start = await readCamera(page);
   await holdKey(page, 'KeyW', 200, (camera) => camera.z < start.z);
   await expect(root).toHaveAttribute('data-lobby-state', 'ready');
   expect(errors).toEqual([]);
+});
+
+test("refused a token, the lobby says why there's no voice, and never downloads LiveKit", async ({ page, context, baseURL }) => {
+  test.setTimeout(120_000);
+  await expectWebGL2(page);
+  await signInAs(context, baseURL ?? '', MEMBER);
+  await serveFlags(page);
+  // In development, the engine and livekit-client arrive as their own chunks, named for their modules.
+  const voiceChunks: string[] = [];
+  page.on('request', (request) => {
+    if (/livekit|voice_engine/i.test(new URL(request.url()).pathname)) {
+      voiceChunks.push(new URL(request.url()).pathname);
+    }
+  });
+  const panel = peoplePanel(page);
+  for (const [status, error, says] of [
+    [401, 'unauthenticated', 'Sign in with GitHub to hear and talk to people here.'],
+    [403, 'practice_session', 'The practice account has no voice. Sign in with GitHub to talk.'],
+    [503, 'voice_unavailable', "Voice isn't set up on this site yet."],
+  ] as const) {
+    await page.unroute(`**${TOKEN}`);
+    await page.route(`**${TOKEN}`, (route) =>
+      route.fulfill({ status, contentType: 'application/json', body: JSON.stringify({ error }) }),
+    );
+    await page.goto('/apps');
+    // The panel is up as soon as the view is, before the scene has finished building.
+    await expect(voiceLine(page), `after a ${status}`).toHaveText(says, { timeout: 60_000 });
+    await expect(lobbyRoot(page)).toHaveAttribute('data-feed', 'none');
+    await expect(lobbyRoot(page)).toHaveAttribute('data-voice', 'unavailable');
+    await expect(panel.getByRole('button', { name: 'Mic', exact: true })).toBeDisabled();
+    // No room to see, so no claim that nobody is in it, and the route's refusal is not one to try again.
+    await expect(panel.getByText('Nobody else is here yet.')).toHaveCount(0);
+    await expect(panel.getByRole('button', { name: 'Try again' })).toHaveCount(0);
+  }
+  expect(voiceChunks).toEqual([]);
 });
 
 test('opened in another tab or device, the lobby gives up its seat, says so, and "Rejoin here" takes it back', async ({
@@ -248,9 +324,16 @@ test('opened in another tab or device, the lobby gives up its seat, says so, and
   await expect(root).toHaveAttribute('data-voice', 'unavailable');
   expect(joins).toBe(1);
 
-  await people.getByRole('button', { name: 'Rejoin here' }).click();
+  await expect(voiceLine(page, 'elsewhere')).toHaveText(ELSEWHERE);
+  // By keyboard: the button goes once pressed, and hands focus to Mic.
+  await people.getByRole('button', { name: 'Rejoin here' }).focus();
+  await page.keyboard.press('Enter');
   await expect.poll(() => joins, { timeout: 30_000 }).toBe(2);
   await expect(people.getByText(ELSEWHERE, { exact: true })).toHaveCount(0);
+  await expect(voiceLine(page, 'elsewhere')).toHaveText('');
   await expect(people.getByRole('button', { name: 'Rejoin here' })).toHaveCount(0);
+  await expect(people.getByRole('button', { name: 'Mic', exact: true })).toBeFocused();
   await expect(root).toHaveAttribute('data-feed', 'livekit');
+  // The stand-in never completes the media connection, so the rejoin is still connecting.
+  await expect(voiceLine(page)).toHaveText('Connecting…');
 });

@@ -10,6 +10,10 @@ Source: FORGE v0.2 Phase 3 (the Apps lobby), decided with the operator on
 
 Accepted (Phase 3). Replaces the fixed-centre lobby design in the
 2026-09-28 Phase 3 plan, of which only the pure-logic package was built.
+Amended 2026-10-04 by [Voice v2](#addendum-voice-v2-2026-10-04), which
+replaces the voice: its ranges, its audio path, the mic and the people
+panel; and the same day by [its review fixes](#addendum-voice-v2-review-fixes-2026-10-04),
+which cap the voices and harden the engine. The rest stands.
 
 ## Context
 
@@ -196,3 +200,242 @@ parsed as untrusted input all the same.
   agent hand-off, ADR-005; `connectSources` in `apps/web/next.config.mjs`)
   allows the LiveKit host from `LIVEKIT_URL`, read at build time, so that
   variable must be set when the app is built.
+
+## Addendum: Voice v2, 2026-10-04
+
+The operator, on the first voice: "Proximity chat is trash. Rework it." It
+was. A voice played at full volume within 2 m and faded linearly to nothing
+at 9 m, in a cave 51 m across, so two steps apart you lost someone. iOS
+ignores an `<audio>` element's volume, so there voices switched on and off
+at the edge instead of fading. Sound waited for a `pointerdown` or a key,
+and a phone's `pointerdown` isn't a user activation, so phones heard nothing
+until the mic button, and nothing said sound was blocked. Gains and the
+position heartbeat ran on the scene's animation frame, which stops in a
+hidden tab, so someone who joined while your tab was hidden never got your
+position and couldn't hear you. Every remote mic was auto-subscribed and
+dropped by hand, and nothing said who you could hear, how loud, or why not.
+"Mic off" muted without stopping the capture, so the browser's recording
+indicator stayed on; a reconnect forced the mic off mid-sentence; the panel
+said "Voice unavailable" without saying why, with no deafen and no
+per-person mute; and the voices were dry, in a cave.
+
+**Decision.** Port Fable's proximity voice engine (its second drop, which
+adds cave acoustics) into the lobby as a close port, so later drops apply
+as diffs: the class, its methods, its peer shapes and its config names are
+Fable's, and every FORGE change is marked in the code and logged. Its
+attenuation and acoustics maths live in `@forge/lobby`, pure and
+unit-tested; the cave's numbers are in one place there (`voice.ts`).
+
+- **Range.** Full volume within 5 m, then Unreal's natural-sound curve down
+  to −40 dB at 35 m, silent past it. A listener receives a voice from 40 m
+  and keeps it until 45 m (hysteresis, so someone on the edge doesn't
+  flicker), and the sender's own check lets nobody past 50 m receive it.
+- **Audio.** Selective subscription (LiveKit's `autoSubscribe` off, and the
+  engine subscribes by distance), and every voice through Web Audio:
+  source → HRTF panner (positioned in the listener's own frame, since the
+  cave has a heading) → lowpass → dry gain, plus a send to one shared
+  convolver. The gains are Web Audio's, so iOS fades too.
+- **The cave's sound.** The convolver's impulse response is synthesized,
+  not downloaded, and deterministic, so every client hears the same cave:
+  3.4 s to −60 dB, 28 ms pre-delay, early reflections, a tail that darkens.
+  The send is 0.3 (Fable's 0.4 is thick for speech at 8 to 12 m), and it
+  fades slower than the direct path, so a far voice is mostly echo; the
+  lowpass closes from 18 kHz to 1.8 kHz with distance.
+- **The mic.** Nobody's mic is on at join: members join to listen, and the
+  first press of "Mic" asks the browser for it (the press is the gesture
+  the permission prompt needs). Off stops the capture
+  (`stopMicTrackOnMute`), so the recording indicator goes out. A reconnect
+  leaves the mic as the room has it, and the panel says "Reconnecting…".
+- **Sound unlock.** The first tap, click or key anywhere (`pointerup`,
+  `touchend`, `click`, `keydown`) starts sound, and while the browser holds
+  it back the panel shows "Turn on sound".
+- **Hidden tabs.** The engine runs on its own 10 Hz timer, not the scene's
+  frames, and a member's position never goes stale while they're in the
+  room, so a hidden tab keeps its heartbeat and its voices.
+- **The panel** says whether voice is on and, if not, why (signed out, the
+  practice account, not set up, the server out of reach, disconnected);
+  has "Mic", "Deafen" and a per-person "Mute"; and lists everyone nearest
+  first with their distance and what they can't be heard for ("mic off",
+  "out of range", "too many voices nearby", "muted by you"). The technical
+  detail of what you hear
+  (direct and reverb levels, the lowpass) stays behind a tooltip on each
+  row's level bar, the operator's standing preference for technical
+  numbers.
+
+**The sender's range check, and its limit.** While a member is in the room,
+their client tells LiveKit who may receive their mic: everyone whose last
+known position is within 50 m, and nobody whose position hasn't arrived;
+set to nobody before the client connects (so LiveKit's own first word on it
+is "nobody", not its default of everyone), then sent as that set changes:
+a list that takes someone off at once, one that adds someone at most every
+500 ms (see [the review fixes](#addendum-voice-v2-review-fixes-2026-10-04)). LiveKit
+refuses the audio to anyone else, whatever
+their client asks. This holds against a client that skips its own fading
+and subscription, but not against one that lies about where it is:
+positions are peer to peer, so a modified client that fakes a nearby
+position still gets in. Closing that needs positions on a server (below).
+
+**Occlusion.** The engine can muffle a voice that something stands in front
+of (`setPeerOcclusion`), but nothing in the cave can: the walking disk sits
+inside a convex rock cylinder, and every screen stands on the wall's ring,
+2.5 m beyond the disk, so a line between two members never meets anything.
+It is left unwired. When interior geometry arrives (the planned GLB bake),
+it hooks in from the scene: one raycast from the listener to each speaker
+every 4 frames, smoothed over 150 ms so a doorway doesn't strobe, handed to
+the engine through the feed.
+
+**Not now.**
+
+- Server-authoritative subscriptions (Fable's reconcile route): they need
+  positions on a server, and the lobby's are peer to peer.
+- Moderation (server mute, kick) and voice reports: they need an admin
+  surface and a queue; FORGE's admins are GitHub ids on the API side.
+- Fable's settings sliders, environment select, custom impulse responses
+  and test arena: the lobby is a cave, tuned in one place.
+- A crossfade between two convolvers: the lobby never swaps presets while
+  connected, so the click Fable warns of never happens.
+
+**Consequences.**
+
+- One convolver for the room and one HRTF panner per voice received, and
+  at most 8 voices on a phone or a tablet, 16 elsewhere, plus anyone being
+  heard speaking (see the review fixes).
+- `livekit-client` and the engine ship in two lazy chunks of their own
+  (135 kB and 6 kB gzipped), loaded by `import()` only after the token route
+  grants a room, so the practice build, a signed-out visitor and a refused
+  member never download them, and neither is in the `/apps` first load,
+  which the people panel took from 132 kB to 134.5 kB gzipped.
+- The engine has a debug view (`window.__forgeVoice`: each voice's graph,
+  the output's level, `updateConfig` and `setPeerOcclusion`) in development
+  builds only, and the practice feed a fixture of the panel's fullest state
+  (`?voice-fixture=full`) for the layout e2e; production builds compile both
+  out.
+- iOS can't be tested here: the voice path on an iPhone (Web Audio fades,
+  the sound unlock, the mic indicator, the ringer switch) is checked by hand.
+- Proved end to end on 2026-10-04 against a local LiveKit server, with keys
+  made for the proof, in real browsers with Chromium's fake mic: two
+  members, and a third joining late. They listed each other within half a
+  second. Sound stayed blocked until a click. The cave's response rendered
+  at 2 channels × 151,174 frames at 44.1 kHz. The listener tuned in 0.5 s
+  after the speaker's mic went on. The audio graph matched the pure maths
+  at 3 m (dry 1.00, send 0.30, 18 kHz), 15 m (0.21, 0.24, 8.2 kHz) and 30 m
+  (0.02, 0.12, 2.6 kHz). At 30 m the reverb carried 78% of the output's
+  energy, and switching it off dropped the output by 11 dB. Mute and deafen
+  silenced the voice completely (0.000000 RMS, against −21.4 dBFS at 3 m).
+  The voice moved to the other ear when the listener turned round. The
+  listener let go at 45.4 m, and the sender withdrew permission at 50.1 m.
+  Mic off ended the capture. A member whose tab had stopped drawing was
+  still found by the newcomer 0.5 s after it joined. A refused mic showed
+  the line about it. The sender's first permission frame said nobody.
+
+## Addendum: Voice v2 review fixes, 2026-10-04
+
+A review of Voice v2 before it shipped found it sound for two or three
+people and fragile past that, and every fix it asked for was adopted:
+
+- **Chrome kept every voice's audio source.** A `MediaStreamAudioSourceNode`
+  lives as long as its AudioContext runs, so each take and let-go of a
+  voice left one behind, and a long visit's audio graph grew without end.
+- **Nothing capped the voices.** A phone in a crowd decoded, panned and
+  filtered every voice within 40 m.
+- **The edges churned.** Someone pacing on the 40 m line, or a client
+  sending positions that flip, made listeners subscribe and unsubscribe
+  tick after tick.
+- **Sessions mixed.** The same member back from a new tab took the old
+  session's place on everyone's permission list before saying where it
+  stood; taking someone off a list waited on the same 500 ms as adding
+  them; and a reconnect resent whatever list was current.
+- **"Speaking" was the SFU's word**, which is room-wide, so it lit the row
+  of someone you couldn't hear.
+- **A NaN reached the gains**, from a position or a setting.
+- **The panel** had no height cap, ran under the touch controls on short
+  screens, dropped focus when a control vanished, and said little to a
+  screen reader.
+
+**Decision.**
+
+- **A cap on voices.** A listener receives the nearest 8 voices on a touch
+  screen (`(pointer: coarse)`: phones and tablets) and 16 elsewhere, plus
+  anyone it already hears speaking, so a conversation isn't cut off when
+  someone else walks nearer. The cap is applied before subscribing, and the
+  rest are listed as "too many voices nearby". Each voice costs a decoder,
+  an HRTF panner and a lowpass, and a phone's audio thread runs out first.
+  A panner is re-aimed only once its speaker has turned more than 3° around
+  the listener or come more than 0.25 m nearer or farther, since every move
+  costs the browser an HRTF cross-fade.
+- **A dwell, and steps a camera could take.** Once the engine has taken or
+  let go of a voice it holds that for 2 s, either way. A position packet
+  that moves its sender faster than a camera can go (16 m/s across the
+  floor, 24 m/s up or down: `CAMERA_SPEED` in `@forge/lobby`, which the
+  scene's controls now hold the camera to) plus 3 m of slack is dropped; a
+  session's first packet is exempt. A subscription the SFU refuses is asked
+  for again after 1 s, doubling to 30 s, and the wait starts over when its
+  speaker publishes again.
+- **Speaking is what this client hears.** An analyser on each voice's
+  chain, after its dry gain and its reverb send, is read on every 10 Hz
+  tick with hysteresis (speaking above 0.01 RMS, quiet after 600 ms under
+  0.005), and your own speaking comes from your mic's meter. So a row says
+  someone is speaking only when you hear them, and nobody you can't hear
+  can claim the cap's exception for speakers. **Known limitation:** the
+  SFU still sends its own active-speaker updates to everyone in the room,
+  heard or not. The lobby never reads them, but a modified client can, and
+  so learns who is talking anywhere in the room, and about how loud,
+  though never what is said. Closing that would need the server to filter
+  speaker updates per listener, as it would the positions (above).
+- **One audio source per received track.** The engine caches each track's
+  `<audio>` element, stream and source (a `WeakMap` keyed by the receiver's
+  `MediaStreamTrack`). A let-go disconnects only what follows the source and
+  pauses the element, and taking the voice back reuses all three. Past 32
+  idle cached sources the engine starts a new AudioContext, and renders the
+  impulse response again, at a quiet moment (nobody heard speaking): the
+  only way to free them.
+- **LiveKit's own AudioContext stays.** `livekit-client` opens a context of
+  its own when it connects (`acquireAudioContext`), even with its Web Audio
+  mix off (`webAudioMix: false`, since the engine plays every voice
+  itself), for the local mic track's processing and to judge whether the
+  page may play sound. So a member in the room has two, and LiveKit's
+  mostly sits idle. Handing LiveKit the engine's context
+  (`webAudioMix: { audioContext }`) would switch its mix on and tie it to a
+  context the engine closes and rebuilds (above). Two contexts are the
+  smaller cost; whether iOS minds the second is on the list checked by
+  hand.
+- **Sessions, by participant sid.** The engine keeps each peer's LiveKit
+  session id. A new one (a member back from another tab before the old
+  session timed out) clears their position, tears their audio down, marks
+  them out of range and forgets the list last sent, so the new session
+  receives nothing until it says where it is. A list that takes someone off
+  goes out at once, as does one sent because a member left; only a list that
+  adds someone waits out the 500 ms. On a full reconnect the engine sets
+  the list to nobody, so what LiveKit resends as it reconnects is nobody.
+- **One Room per engine.** A leave and a later join reuse the engine's Room
+  once its last connect has settled, and every listener comes off it on
+  disconnect. `livekit-client`'s Room constructor adds a `devicechange`
+  listener it never removes, so every Room ever made stays reachable;
+  reusing one bounds that.
+- **Guards.** NaN counts as 0 in the attenuation and acoustics maths;
+  `updateConfig` refuses a change that isn't a finite number, makes a
+  distance, the margin or the rate negative, puts the falloff before full
+  volume, or the reverb outside 0..1; and every tick updates permissions
+  before anything that could throw, and carries on past a throw in the
+  evaluation.
+- **The panel**, as `architecture.md` sets out: capped in height on every
+  screen with only the list scrolling, its own place on a short touch
+  screen, "and N more" on a phone, focus handed on when a control goes
+  away, live regions always in the page, an order that holds still under
+  the pointer and in focus, and the wording the review asked for.
+
+**Consequences.**
+
+- The engine's lazy chunk is 7.1 kB gzipped (6 kB before the fixes) and
+  LiveKit's is unchanged at 135 kB; the `/apps` first load is 136.4 kB
+  gzipped (134.5 kB before), for the panel's new states and the rules in
+  `@forge/lobby`. Neither LiveKit nor the engine is in it, and production
+  builds still carry neither the debug view nor the fixture.
+- A crowd past the cap is heard nearest first, eight or sixteen at a time,
+  and the panel says so.
+- Who is talking, though not what they say, still reaches everyone in the
+  room through the SFU's speaker updates.
+- iOS can't be tested here: a rebuilt AudioContext may come back
+  suspended, behind "Turn on sound" again, and LiveKit's second context is
+  one more for the audio session and the ringer switch to govern. Both
+  are on the list checked by hand.

@@ -12,6 +12,15 @@
  * Messages come from other tabs, so they are parsed as untrusted input: the
  * shape is checked, names are sanitised, positions must decode, and each
  * sender is rate limited.
+ *
+ * The people panel lists the same people from `voice()`: their distance and
+ * nearness, and nothing voice-related (zero, or null where the type allows),
+ * since nothing here carries sound. It is checked five times a second while
+ * the channel is open, and a change notifies `onVoice` listeners.
+ *
+ * Development builds only (next build compiles it out): `/apps?voice-fixture=full`
+ * makes `voice()` the people panel's fullest state instead, so e2e can lay it
+ * out on any screen without a LiveKit server (see `fullVoiceFixture`).
  */
 import {
   acceptPacket,
@@ -19,11 +28,13 @@ import {
   decodePosition,
   encodePosition,
   forgetSender,
+  nearness,
   sanitizeName,
   sendPolicy,
 } from '@forge/lobby';
 
-import type { FeedIdentity, FeedStatus, PeerState, PresenceFeed, SelfState } from './types';
+import { NO_VOICE, sortPeople } from './noneFeed';
+import type { FeedIdentity, FeedStatus, PeerState, Person, PresenceFeed, SelfState, VoiceSnapshot } from './types';
 
 /** The channel every practice tab on this origin shares. */
 export const LOCAL_CHANNEL = 'forge.lobby';
@@ -31,6 +42,8 @@ const HELLO_INTERVAL_MS = 1000;
 /** A peer silent for this long has gone (closed without a `bye`, or frozen). */
 const PEER_TIMEOUT_MS = 3000;
 const ID_PATTERN = /^practice-[0-9a-f]{6}$/;
+/** How often the people panel's snapshot is checked for a change. */
+const VOICE_INTERVAL_MS = 200;
 
 type Message =
   | { type: 'hello'; id: string; name: string; pos?: Uint8Array }
@@ -57,6 +70,34 @@ export function localFeed(me: FeedIdentity): PresenceFeed {
   let latest: SelfState | null = null;
   let lastSent: SelfState | null = null;
   let lastSentAt = 0;
+  const listeners = new Set<() => void>();
+  let voice: VoiceSnapshot = NO_VOICE;
+  let voiceKey = JSON.stringify([status, NO_VOICE]);
+  let voiceTimer: ReturnType<typeof setInterval> | undefined;
+  /** The panel's fullest state, standing in for `voice()` (development builds only). */
+  let fixture: VoiceSnapshot | null = null;
+
+  /** One person per peer and per tab still joining; distances from where we last published. */
+  const people = (): Person[] => {
+    const list: Person[] = [];
+    for (const peer of peers.values()) {
+      const metres = latest === null ? null : Math.hypot(peer.x - latest.x, peer.y - latest.y, peer.z - latest.z);
+      list.push(person(peer.id, peer.name, metres));
+    }
+    for (const [peerId, peerName] of joining) list.push(person(peerId, peerName, null));
+    return sortPeople(list);
+  };
+
+  /** A new snapshot, and a notification, only when something in it changed. */
+  const refreshVoice = (): void => {
+    expire(performance.now());
+    const next: VoiceSnapshot = fixture ?? { ...NO_VOICE, people: people() };
+    const key = JSON.stringify([status, next]);
+    if (key === voiceKey) return;
+    voiceKey = key;
+    voice = next;
+    for (const listener of [...listeners]) listener();
+  };
 
   const post = (message: Message): void => {
     try {
@@ -123,16 +164,22 @@ export function localFeed(me: FeedIdentity): PresenceFeed {
       if (channel !== null) return Promise.resolve();
       if (typeof BroadcastChannel === 'undefined') {
         status = { kind: 'local', state: 'closed' };
+        refreshVoice();
         return Promise.resolve();
+      }
+      if (process.env.NODE_ENV !== 'production') {
+        fixture = new URLSearchParams(window.location.search).get('voice-fixture') === 'full' ? fullVoiceFixture() : null;
       }
       id = `practice-${randomHex(3)}`;
       channel = new BroadcastChannel(LOCAL_CHANNEL);
       channel.addEventListener('message', onMessage);
       window.addEventListener('pagehide', onPageHide);
       helloTimer = setInterval(hello, HELLO_INTERVAL_MS);
+      voiceTimer = setInterval(refreshVoice, VOICE_INTERVAL_MS);
       status = { kind: 'local', state: 'connected' };
       lastSent = null;
       hello();
+      refreshVoice();
       return Promise.resolve();
     },
 
@@ -161,6 +208,44 @@ export function localFeed(me: FeedIdentity): PresenceFeed {
     voiceAvailable: () => false,
     setListener: () => undefined,
 
+    voice: () => voice,
+
+    onVoice(listener) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+
+    setDeafened(on) {
+      if (process.env.NODE_ENV !== 'production' && fixture !== null) {
+        fixture = { ...fixture, deafened: on };
+        refreshVoice();
+      }
+    },
+    setMuted(peerId, muted) {
+      if (process.env.NODE_ENV !== 'production' && fixture !== null) {
+        fixture = {
+          ...fixture,
+          people: fixture.people.map((p) => (p.id === peerId ? { ...p, mutedByYou: muted, direct: 0, reverb: 0 } : p)),
+        };
+        refreshVoice();
+      }
+    },
+    resumeAudio() {
+      if (process.env.NODE_ENV !== 'production' && fixture !== null) {
+        fixture = { ...fixture, soundBlocked: false };
+        refreshVoice();
+      }
+      return Promise.resolve();
+    },
+    retryRoomSound() {
+      if (process.env.NODE_ENV !== 'production' && fixture !== null) {
+        fixture = { ...fixture, roomSound: 'rendering' };
+        refreshVoice();
+      }
+    },
+
     close() {
       if (channel === null) return;
       post({ type: 'bye', id });
@@ -170,6 +255,8 @@ export function localFeed(me: FeedIdentity): PresenceFeed {
       window.removeEventListener('pagehide', onPageHide);
       clearInterval(helloTimer);
       helloTimer = undefined;
+      clearInterval(voiceTimer);
+      voiceTimer = undefined;
       seen.clear();
       peers.clear();
       joining.clear();
@@ -177,7 +264,27 @@ export function localFeed(me: FeedIdentity): PresenceFeed {
       latest = null;
       lastSent = null;
       status = { kind: 'local', state: 'closed' };
+      refreshVoice();
     },
+  };
+}
+
+/** Someone as the people panel lists them on a feed without voice: where they are, and nothing else. */
+function person(id: string, name: string, metres: number | null): Person {
+  return {
+    id,
+    name,
+    distance: metres === null ? null : Math.round(metres * 2) / 2,
+    nearness: metres === null ? 0 : Math.round(nearness(metres) * 50) / 50,
+    direct: 0,
+    reverb: 0,
+    cutoffHz: 0,
+    occlusion: 0,
+    reception: null,
+    crowded: false,
+    speaking: false,
+    micOn: false,
+    mutedByYou: false,
   };
 }
 
@@ -198,4 +305,53 @@ function parseMessage(data: unknown): Message | null {
 function randomHex(bytes: number): string {
   const values = crypto.getRandomValues(new Uint8Array(bytes));
   return Array.from(values, (value) => value.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * The people panel at its fullest, for the layout e2e (development builds
+ * only; `?voice-fixture=full`): voice on with sound held back, the cave sound
+ * failed, the mic refused, and eight people. The farthest one in range is
+ * speaking, so a phone must show them among its first four; one is too
+ * crowded to hear, one has their mic off, one you muted, the longest name
+ * GitHub allows, one still received at 38 m but past the falloff, and one
+ * still joining. The feed's own buttons act on it:
+ * "Turn on sound" and Retry go away as they would.
+ */
+function fullVoiceFixture(): VoiceSnapshot {
+  const person = (id: string, name: string, distance: number | null, extra: Partial<Person> = {}): Person => ({
+    id,
+    name,
+    distance,
+    nearness: distance === null ? 0 : Math.round(nearness(distance) * 50) / 50,
+    direct: 0,
+    reverb: 0,
+    cutoffHz: 18_000,
+    occlusion: 0,
+    reception: distance === null ? 'out-of-range' : 'in-range',
+    crowded: false,
+    speaking: false,
+    micOn: true,
+    mutedByYou: false,
+    ...extra,
+  });
+  return {
+    available: true,
+    connection: 'connected',
+    mic: 'off',
+    micProblem: 'denied',
+    deafened: false,
+    soundBlocked: true,
+    roomSound: 'failed',
+    speaking: false,
+    people: [
+      person('gh:1001', 'mara', 2, { direct: 1, reverb: 0.3 }),
+      person('gh:1002', 'a-login-as-long-as-github-allows-them-x', 6, { direct: 0.72, reverb: 0.28 }),
+      person('gh:1003', 'devon-kit', 9.5, { mutedByYou: true }),
+      person('gh:1004', 'octocat', 14, { micOn: false }),
+      person('gh:1005', 'crowded-out', 21, { reception: 'out-of-range', crowded: true }),
+      person('gh:1006', 'far-talker', 31, { direct: 0.04, reverb: 0.13, cutoffHz: 2_400, speaking: true }),
+      person('gh:1008', 'past-the-echo', 38),
+      person('gh:1007', 'just-arrived', null),
+    ],
+  };
 }

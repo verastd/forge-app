@@ -769,11 +769,18 @@ home, on screen whenever the wall is the page.
   limits, where it starts and how it's saved (`camera.ts`, `storage.ts`); the
   app registry and the rules every entry must pass (`registry.ts`,
   `csp.ts`); which chrome a route gets (`chrome.ts`, which `SiteChrome`
-  uses); and the presence packet, send rate, voice ranges, name rules and
-  rate limit (`presence.ts`).
+  uses); the presence packet, send rate, name rules, rate limit and the
+  check that a peer's next position is one a camera could reach
+  (`presence.ts`, with the camera's top speeds in `camera.ts`); and the
+  voice: Fable's attenuation curves and acoustics (`attenuation.ts`,
+  `acoustics.ts`, including the cave's synthesized impulse response) and
+  the cave's settings and rules for them (`voice.ts`: the ranges, the
+  reverb level, the cap on voices, the dwell and the backoff, when a panner
+  moves, when someone counts as speaking, `nearness` and `permitted`).
 - `src/components/lobby/Lobby.tsx`, the shell: the flag, a one-off WebGL2
-  probe, the scene inside an error boundary, the presence feed, the mic
-  button, the touch stick and lift buttons, and what a tap does.
+  probe, the scene inside an error boundary, the presence feed, the touch
+  stick and lift buttons, and what a tap does. `VoicePanel.tsx` beside it
+  is the people panel (below).
 - `src/components/lobby/scene/`: the scene itself, plain three.js with no
   React (`createCave.ts`, with `controls.ts`, `peers.ts`, `screen.ts`,
   `readout.ts` for an empty slot's readout and its light, and `palette.ts`,
@@ -782,6 +789,10 @@ home, on screen whenever the wall is the page.
   `LobbyScene.tsx` loads it with `next/dynamic` and `ssr: false`, so three.js
   is downloaded on `/apps` only, and never in any route's first load.
 - `src/components/lobby/presence/`: the presence feeds (below).
+- `src/components/lobby/voice/engine.ts`: the voice engine, a close port of
+  Fable's `ProximityVoiceEngine` (its own header lists what FORGE changed).
+  Only the LiveKit feed loads it, by `import()`, so it and `livekit-client`
+  ship in lazy chunks of their own, never in the `/apps` first load.
 - `src/app/api/lobby/token/route.ts`: the LiveKit room token (below).
 
 **States.** The lobby's root element, `<div data-lobby>`, reports what it is
@@ -795,21 +806,25 @@ doing, for e2e and for anyone debugging:
 | `lost` | The WebGL context was lost, or the scene threw while building or in a frame: "The 3D view stopped. Reload to try again." |
 | `off` | The `apps_lobby` flag is off: "The 3D lobby is switched off right now." |
 
-Beside it: `data-x`, `data-y`, `data-z` and `data-yaw` (the camera, written
-ten times a second once the first frame is drawn), `data-focus` (the app
+Beside it: `data-x`, `data-y`, `data-z`, `data-yaw` and `data-pitch` (the
+camera, written ten times a second once the first frame is drawn), `data-focus` (the app
 under the crosshair or the last tap, or `empty:<slot>`), `data-motion`
 (`full`, or `reduced` while the visitor prefers reduced motion: no drift,
 flicker or bob), `data-feed` (`none`, `local` or `livekit`: the feed presence
 is actually running on), `data-peers` (the people drawn in the room, so not
 anyone whose position hasn't arrived), `data-voice` (`unavailable`, `off`
-or `on`), and `data-hover-slot` and `data-hover-glow` (the empty slot whose
-readout is showing, or empty, and whether its light is `on` or `off`). The
-site nav's header on `/apps` carries `data-nav-mode` and `data-nav` (`shown`
-or `hidden`).
+or `on`), `data-sound` (`blocked` while the browser holds sound back until
+a tap, `on`, or `none` without voice), `data-room-sound` (the cave's
+reverb: `off`, `rendering`, `live` or `failed`), `data-deafened`, and
+`data-hover-slot` and `data-hover-glow` (the empty slot whose readout is
+showing, or empty, and whether its light is `on` or `off`). The people
+panel marks each row `data-person-id`. The site nav's header on `/apps`
+carries `data-nav-mode` and `data-nav` (`shown` or `hidden`).
 
-**Moving and opening.** Drag to look; WASD, the arrow keys or the touch
-stick to walk; Space and Shift, or the lift buttons, to rise and fall. The
-camera stays 2.5 m inside the wall's ring, between eye height and 220 m. A
+**Moving and opening.** Drag to look (a drag pulls the cave, as a photo
+sphere does: drag right and the view turns left); WASD, the arrow keys or
+the touch stick to walk; Space and Shift, or the lift buttons, to rise and
+fall. The camera stays 2.5 m inside the wall's ring, between eye height and 220 m. A
 tap on a lit panel saves the camera in `sessionStorage`
 (`forge.lobby.pos.v2`, so per tab) and opens the app; so does leaving the
 lobby any other way. Any visit to `/apps` in that tab, the browser's Back
@@ -847,10 +862,16 @@ in `presence/`:
   server and no voice. It exists so the practice app, and e2e, can show
   presence end to end.
 - a live build, signed in: `livekit`. It asks `POST /api/lobby/token` for a
-  token, only then downloads `livekit-client` (which then logs warnings and
-  errors only), and joins the room `lobby`. If the route refuses (`401`
-  signed out, `403` practice, `503` not configured) or anything else fails,
-  the feed settles on `none` and the lobby carries on alone.
+  token, only then loads the voice engine and `livekit-client` with it
+  (which then logs warnings and errors only), and joins the room `lobby`. If
+  the route refuses (`401` signed out, `403` practice, `503` not
+  configured) or answers anything else (`error`), or the join then fails in
+  the browser (`failed`: the engine's chunk didn't load, no AudioContext,
+  LiveKit's connect gave up), the feed settles on `none` with that reason,
+  the people panel says why, and the lobby carries on alone. A join that
+  failed in the browser tries once more by itself once the scene is up (a
+  slow phone may only have been busy building it), and then offers "Try
+  again".
 
 Both feeds send the same 9-byte position packet (`encodePosition`: a version
 byte, then centimetres and milliradians as int16s), at most ten a second
@@ -863,33 +884,110 @@ packets on the topic `pos`, and a peer's identity and name come only from
 their participant record, which our token signed; a packet carries nothing
 but a position. A packet has to place its sender somewhere a camera can be
 (the walking disk, eye height to 220 m, give or take a centimetre), or it is
-dropped. Voice is LiveKit audio: a peer is at full volume within 2 m, fades
-to silence at 9 m, and isn't received at all past 14 m (and received again
-from 13 m, so someone on the edge doesn't flicker in and out). Only a peer's
-microphone plays: any other source is refused on arrival, and the token
-lets members publish nothing else anyway. The mic button asks for the
-microphone only when pressed, reads "Voice unavailable" whenever the feed
-can't carry voice, and shows the feed's own word on the mic.
+dropped; and on LiveKit, somewhere they could have walked or flown to since
+their last packet (16 m/s across the floor, 24 m/s up or down, which the
+scene holds the camera to, plus 3 m for packets that arrive together; a
+session's first packet is exempt), or it is dropped too. A member's position
+never goes stale while they're in the room, so someone standing still, or
+whose tab is hidden, keeps their place.
+
+Voice (v2, [ADR-004's addendum](adr/ADR-004-apps-lobby.md#addendum-voice-v2-2026-10-04))
+is LiveKit audio played through Web Audio, by the voice engine. A peer is at
+full volume within 5 m, then fades along Unreal's natural-sound curve to
+−40 dB at 35 m, and is silent past it. The engine subscribes to a peer's mic
+itself (LiveKit's `autoSubscribe` is off): from 40 m, and it keeps it until
+45 m, so someone on the edge doesn't flicker in and out, and once it has
+taken or let go of a voice it holds that for 2 s, so nobody can make
+everyone churn. It receives the nearest 8 voices at most on a phone or a
+tablet (16 otherwise), plus anyone it already hears speaking, so a
+conversation isn't cut off when someone else walks nearer; the rest are
+listed as "too many voices nearby". A subscription the SFU refuses is
+asked for again after 1 s, doubling to 30 s. Only a peer's microphone of
+kind audio is ever subscribed or played. Each voice runs
+through an HRTF panner (placed in the listener's own frame, so it comes from
+where its speaker stands, whichever way you face), a lowpass that closes
+from 18 kHz to 1.8 kHz with distance, and a dry gain, plus a send into one
+shared convolver: the cave's reverb, an impulse response synthesized in the
+browser (deterministic, so everyone hears the same cave: 3.4 s, a 28 ms
+pre-delay, a tail that darkens). The send fades slower than the dry path,
+so a far voice is mostly echo. A panner moves only once its speaker has
+turned more than 3° around you or come 0.25 m nearer or farther, since
+every move costs the browser an HRTF cross-fade. Who is speaking is what
+this client hears: an analyser on each voice's chain, after its dry gain
+and reverb send, read each tick with some hysteresis (and your own, from
+your mic's meter), so "talking" means exactly "heard"; the SFU's own
+room-wide speaker updates are never read (ADR-004 has the limit). Each
+received track keeps one Web Audio source for the whole visit, since
+Chrome never frees one while its context runs; past 32 idle ones the
+engine starts a new context at a quiet moment. The engine runs on its own
+10 Hz timer rather than the scene's frames, so a hidden tab keeps
+evaluating, and keeps its 1 s position heartbeat. Its settings are all in
+`@forge/lobby`'s `voice.ts`.
+
+Nobody's mic is on when they arrive: the panel's "Mic" asks the browser for
+the microphone the first time it's pressed (the press is the gesture the
+permission prompt needs), and off stops the capture, so the browser's
+recording indicator goes out. Browsers hold sound back until a gesture: the
+first tap, click or key anywhere starts it, and until then the panel shows
+"Turn on sound". A reconnect leaves the mic as the room has it, and the
+panel says "Reconnecting…" meanwhile.
 
 The range holds at the source as well as in each listener's own client,
 because a modified client could otherwise listen from anywhere: while
-someone's mic is on, their feed tells LiveKit every 500 ms who may receive
-it (`setTrackSubscriptionPermissions`), which is every participant whose
-last known position is within 14 m. Someone whose position hasn't arrived
-is never in range. The list is sent before the mic goes live, and lifted
-when it goes off or the room goes. So nobody who could be listening is
-invisible, the people panel lists everyone in the room, nearest first with
-their distance, and anyone whose position hasn't arrived as
-"*name* · joining" (with no orb).
+someone is in the room, their client tells LiveKit who may receive their mic
+(`setTrackSubscriptionPermissions`), which is every participant whose last
+known position is within 50 m. A list that takes someone off goes out at
+once (when they walk away or leave); one that adds someone, at most every
+500 ms. Someone whose position hasn't arrived is never on it, and neither
+is a new session of someone who just rejoined (a new participant sid),
+until it says where it is. The list starts empty before the client even
+connects, so LiveKit never hears its default of everyone, and goes back to
+empty during a full reconnect, so what LiveKit resends as it reconnects is
+nobody. A client that lies about its own position still gets in: positions
+are peer to peer.
 
-A reconnect that has to rejoin the room (LiveKit restarted, or the network
-was gone too long to resume) comes back with the mic off: LiveKit would
-otherwise publish it again, live, behind a button that reads off. The room
-holds each member once (identity `gh:<id>`), so opening the lobby in another
-tab or device takes this one's seat: the first tab's feed settles on `none`
-(`data-feed=none`), and it says "You're in the lobby in another tab or
-device." with a "Rejoin here" button, which joins again and moves the seat
-back.
+**The people panel** (`VoicePanel.tsx`, the "People nearby" aside) says
+whether voice is on and, when it isn't, why: signed out, the practice
+account, voice not set up (`503`), the server out of reach, a join that
+failed in this browser ("Couldn't connect to voice.", with "Try again"), or
+disconnected (with "Rejoin"); with sound held back it says "Voice on. Sound
+is off until you press Turn on sound." beside that button. The practice
+build, which has no voice and no GitHub sign-in, says so in its own words
+(and its hint line leaves out the "Voices carry about 35 m" the live one
+has). The panel has "Mic" (with the level meter), "Deafen", a room-sound
+pill ("Rendering cave sound", "Cave sound", or "Cave sound failed" with
+Retry), and a line saying why the mic didn't start (blocked by the browser,
+no microphone, or anything else). It lists everyone else in the room,
+nearest first with their distance, and anyone whose position hasn't
+arrived as "joining" (with no orb), so nobody who could be listening is
+invisible; "Nobody else is here yet." only when the feed can see the room.
+Each row says why you can't hear someone ("mic off", "out of range" from
+35 m, "too many voices nearby", "muted by you"), has a per-person "Mute",
+and keeps the technical detail (the full name, direct and reverb levels,
+the lowpass) behind a tooltip on its level bar, a button: shown on hover or
+focus, toggled by a tap or a press, hidden by Escape whether hovered or
+focused. Its top block keeps its size and only the list scrolls; the panel
+is capped in height on every screen so it never runs under Exit, the menu
+button, the stick, the lift buttons or the toast (a short touch screen held
+sideways gets its own place at the top, and on a phone the toast moves to
+the top right). On a phone it shows the nearest four, and anyone speaking,
+then an "and N more" button that opens the rest. The order holds still
+while the pointer is over the list or focus is in it. For screen readers,
+its live regions (the status, the mic problem, the elsewhere notice, the
+cave sound failing) are always in the page with their text set and
+cleared, a control that goes away under focus hands it on (to Mic, or to
+the next row), and toggles keep their words, with `aria-pressed` carrying
+the state. In development builds the engine also exposes a debug view,
+`window.__forgeVoice` (each voice's graph, the output's level,
+`updateConfig` and `setPeerOcclusion`), and the practice feed takes
+`?voice-fixture=full`, the panel's fullest state, for the layout e2e;
+production builds compile both out.
+
+The room holds each member once (identity `gh:<id>`), so opening the lobby
+in another tab or device takes this one's seat: the first tab's feed
+settles on `none` (`data-feed=none`), and it says "You're in the lobby in
+another tab or device." with a "Rejoin here" button, which joins again and
+moves the seat back.
 
 **The token route.** `POST /api/lobby/token` (Node runtime, never cached)
 answers, checking in this order:
