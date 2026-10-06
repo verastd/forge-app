@@ -12,7 +12,8 @@
  *
  * Fitting a head (the head library): `loadHead` reads a head (a file not
  * uploaded yet, or one from the library) and measures it, `setFraming('head')`
- * brings the camera in on the head, and `setPicking` turns the robot to face
+ * brings the camera in on the head and holds the robot still (no hover bob,
+ * lean or sway, so what is aimed at stays put), and `setPicking` turns the robot to face
  * the camera and reports where a click lands on its head (a drag still turns
  * it; a click is a press that hardly moves).
  */
@@ -213,7 +214,9 @@ export function createRobotPreview(
     camera.position.lerp(target.eye, ease);
     lookAt.lerp(target.at, ease);
     camera.lookAt(lookAt);
-    speed += ((flying ? 5 : 0) - speed) * (1 - Math.exp(-dt * 3));
+    // Fitting a head (the head framing) holds the robot still, so what is aimed at stays put.
+    const still = framing === 'head';
+    speed += ((flying && !still ? 5 : 0) - speed) * (1 - Math.exp(-dt * 3));
     if (robot) {
       robot.root.rotation.y = spin;
       robot.update({
@@ -224,7 +227,7 @@ export function createRobotPreview(
         turnRate: 0,
         viewerBearing: 0,
         viewerDistance: 99,
-        reducedMotion,
+        reducedMotion: reducedMotion || still,
         talking: false,
       });
       report(robot.state);

@@ -219,9 +219,14 @@ export function createRobotAssets(renderer: THREE.WebGLRenderer): RobotAssets {
   };
 }
 
-/** What fitting needs from a head's model: every vertex (node transforms applied), and whether it has EyeL and EyeR. */
+/**
+ * What fitting needs from a head's model, node transforms applied: every
+ * vertex, every triangle (x, y, z × 3 each, for where the face is), and
+ * whether it has EyeL and EyeR.
+ */
 export interface HeadMeasure {
   positions: Float32Array;
+  triangles: Float32Array;
   hasEyes: boolean;
 }
 
@@ -233,6 +238,7 @@ export function measureHead(scene: THREE.Object3D): HeadMeasure {
   root.scale.setScalar(1);
   root.updateMatrixWorld(true);
   const chunks: Float32Array[] = [];
+  const triangleChunks: Float32Array[] = [];
   const at = new THREE.Vector3();
   root.traverse((object) => {
     const mesh = object as THREE.Mesh;
@@ -247,15 +253,26 @@ export function measureHead(scene: THREE.Object3D): HeadMeasure {
       out[i * 3 + 2] = at.z;
     }
     chunks.push(out);
+    const index = mesh.geometry.getIndex();
+    const corners = index ? index.count : position.count;
+    const tris = new Float32Array(corners * 3);
+    for (let k = 0; k < corners; k += 1) {
+      const v = index ? index.getX(k) : k;
+      tris.set(out.subarray(v * 3, v * 3 + 3), k * 3);
+    }
+    triangleChunks.push(tris);
   });
-  const positions = new Float32Array(chunks.reduce((n, c) => n + c.length, 0));
-  let offset = 0;
-  for (const chunk of chunks) {
-    positions.set(chunk, offset);
-    offset += chunk.length;
-  }
+  const join = (parts: Float32Array[]): Float32Array => {
+    const all = new Float32Array(parts.reduce((n, c) => n + c.length, 0));
+    let offset = 0;
+    for (const part of parts) {
+      all.set(part, offset);
+      offset += part.length;
+    }
+    return all;
+  };
   const hasEyes = Boolean(root.getObjectByName('EyeL') && root.getObjectByName('EyeR'));
-  return { positions, hasEyes };
+  return { positions: join(chunks), triangles: join(triangleChunks), hasEyes };
 }
 
 /** Frees an object tree's geometries, materials and their textures. */

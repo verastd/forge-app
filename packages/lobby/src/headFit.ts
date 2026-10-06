@@ -16,6 +16,9 @@
  *   back on the face screen. Where an eye shows through is the admin's call
  *   (`alignToEye`): a hole is the one thing a model can't point at.
  *
+ * Given the model's triangles too, a replacing head's eyes sit on its face
+ * where they are (a recessed screen behind a rim, say), not out at its front.
+ *
  * Widths are taken between the 2nd and 98th percentiles, so a stray vertex
  * or a sliver of brim doesn't decide the size. Pure and deterministic.
  */
@@ -37,6 +40,8 @@ export const HEAD_FIT = Object.freeze({
   headWidth: 0.37,
   /** The lower band: this share of the model's height, from its bottom. */
   band: 0.2,
+  /** How far an eye sits proud of the face under it, metres. */
+  eyeLift: 0.004,
   /** A face accessory is this wide, metres: most of the face screen. */
   faceWidth: 0.25,
   /** The limits AvatarHeadPlacement takes. */
@@ -60,7 +65,7 @@ function eyeHeight(): number {
  * the file's own frame, node transforms applied) are `positions`. A model
  * with no usable vertex is worn as it is.
  */
-export function autoPlacement(kind: HeadFitKind, positions: ArrayLike<number>): HeadPlacement {
+export function autoPlacement(kind: HeadFitKind, positions: ArrayLike<number>, triangles: ArrayLike<number> = []): HeadPlacement {
   const points = finitePoints(positions);
   if (points.length === 0) {
     return { scale: 1, offset: [0, 0, 0], ...(kind === 'replace' ? { eyes: null } : {}) };
@@ -79,7 +84,10 @@ export function autoPlacement(kind: HeadFitKind, positions: ArrayLike<number>): 
     const scale = clampScale(HEAD_FIT.headWidth / Math.max(x1 - x0, 1e-9));
     const offset = clampPoint([-scale * ((x0 + x1) / 2), -scale * bottom, -scale * ((z0 + z1) / 2)]);
     const front = scale * z1 + offset[2];
-    const eyes = ROBOT_EYES.map((eye) => clampPoint([eye[0], eye[1], front + 0.005])) as [Point3, Point3];
+    const eyes = ROBOT_EYES.map((eye) => clampPoint([eye[0], eye[1], surfaceAt(triangles, scale, offset, eye, front) + HEAD_FIT.eyeLift])) as [
+      Point3,
+      Point3,
+    ];
     return { scale, offset, eyes };
   }
   const [x0, x1] = spread(points.map((p) => p[0]));
@@ -142,6 +150,35 @@ export function nudge(placement: HeadPlacement, delta: Readonly<Point3>): HeadPl
     offset: move(placement.offset),
     ...(placement.eyes ? { eyes: [move(placement.eyes[0]), move(placement.eyes[1])] as [Point3, Point3] } : {}),
   };
+}
+
+/**
+ * The front of the model straight in front of an eye's spot (placed, metres):
+ * where a ray along -Z through the spot first meets one of `triangles` (x, y,
+ * z × 3 each, in the file's frame), so an eye sits on a recessed face screen
+ * rather than out at the frame around it. `fallback` (the lower band's front)
+ * when nothing of the model is there.
+ */
+function surfaceAt(triangles: ArrayLike<number>, scale: number, offset: Point3, eye: Readonly<Point3>, fallback: number): number {
+  const x = (eye[0] - offset[0]) / scale;
+  const y = (eye[1] - offset[1]) / scale;
+  let best = -Infinity;
+  for (let i = 0; i + 8 < triangles.length; i += 9) {
+    const ax = triangles[i]!;
+    const ay = triangles[i + 1]!;
+    const bx = triangles[i + 3]!;
+    const by = triangles[i + 4]!;
+    const cx = triangles[i + 6]!;
+    const cy = triangles[i + 7]!;
+    const area = (bx - ax) * (cy - ay) - (cx - ax) * (by - ay);
+    if (!Number.isFinite(area) || Math.abs(area) < 1e-12) continue;
+    const u = ((bx - x) * (cy - y) - (cx - x) * (by - y)) / area;
+    const v = ((cx - x) * (ay - y) - (ax - x) * (cy - y)) / area;
+    const w = 1 - u - v;
+    if (u < 0 || v < 0 || w < 0) continue;
+    best = Math.max(best, u * triangles[i + 2]! + v * triangles[i + 5]! + w * triangles[i + 8]!);
+  }
+  return Number.isFinite(best) ? scale * best + offset[2] : fallback;
 }
 
 function finitePoints(positions: ArrayLike<number>): Point3[] {
