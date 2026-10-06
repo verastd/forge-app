@@ -783,13 +783,14 @@ test('two tabs signed in with the practice account see each other, and a closed 
     await expect(panel.getByRole('button', { name: 'Mic', exact: true })).toHaveCount(0);
     await expect(peopleCount(tab)).toHaveAccessibleName('2 here');
     // The other tab, in the list, under the practice account's login and with
-    // its distance: both stand at the spawn point. No voice, so no mute, and
-    // no groups by what you hear: one list.
+    // its distance: both start at the spawn point, and their robots bump each
+    // other a step apart (collideBodies), so within a couple of metres. No
+    // voice, so no mute, and no groups by what you hear: one list.
     const drawer = await openPeople(tab);
     const others = drawer.getByRole('list', { name: 'Here' }).getByRole('listitem');
     await expect(others).toHaveCount(1);
     await expect(others.first()).toContainText('you');
-    await expect(others.first().getByText('0 m', { exact: true })).toBeVisible();
+    await expect(others.first().getByText(/^[0-2] m$/)).toBeVisible();
     await expect(others.first().getByRole('button', { name: /^Mute/ })).toHaveCount(0);
   }
 
