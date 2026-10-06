@@ -29,7 +29,7 @@
 
 import * as THREE from 'three';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { FACE_PANEL, HEAD_ANCHOR, HEAD_FIT, createBlinker, eyeRotations, hashId, robotPose } from '@forge/lobby';
+import { FACE_PANEL, HEAD_ANCHOR, HEAD_FIT, createBlinker, eyeRotations, hashId, robotPose, rotateAbout } from '@forge/lobby';
 import type { AvatarColors, Blinker, MotionInput, MotionPose } from '@forge/lobby';
 import type { AvatarHead } from '@forge/shared';
 
@@ -89,8 +89,8 @@ export function lookKey(look: RobotLook): string {
 /** A head's placement, to tell when only that changed. */
 function placementKey(head: AvatarHead | null): string {
   if (!head) return '';
-  const { scale, offset, eyes, eyeAngles, eyeScale, screen } = head.placement;
-  return JSON.stringify([scale, offset, eyes ?? null, eyeAngles ?? null, eyeScale ?? null, screen ?? null]);
+  const { scale, offset, eyes, eyeAngles, angles, eyeScale, screen } = head.placement;
+  return JSON.stringify([scale, offset, eyes ?? null, eyeAngles ?? null, angles ?? null, eyeScale ?? null, screen ?? null]);
 }
 
 /** Where `node` sits in `ancestor`'s frame (ancestor's own transform left out). */
@@ -130,7 +130,10 @@ export interface RobotView {
 
 /** A spot picked on a worn head. */
 export interface HeadPick {
-  /** In the head frame (metres from the neck, as a placement's eyes are). */
+  /**
+   * In the head frame (metres from the neck). On a head: unangled, as its placement's eyes
+   * are given; on an accessory: where it really is, as the eyes it lines up with are.
+   */
   head: [number, number, number];
   /** In the head file's own frame (before its placement). */
   file: [number, number, number];
@@ -385,17 +388,33 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
     envMapIntensity: 0.9,
     side: THREE.DoubleSide,
   });
+  // A worn head turns as a whole (its placement's angles) about its offset: the
+  // model, its face screen and its eyes ride this pivot, set at the offset.
+  const headPivot = new THREE.Group();
+  headPivot.name = 'head-pivot';
+  slot.add(headPivot);
+  const accessoryPivot = new THREE.Group();
+  accessoryPivot.name = 'accessory-pivot';
+  slot.add(accessoryPivot);
+
   const screen = new THREE.Mesh(sharedScreenGeometry(), screenMaterial);
   screen.name = 'face-screen';
   screen.visible = false;
-  slot.add(screen);
+  headPivot.add(screen);
 
   // A replacing head's eyes: where its placement, or its EyeL/EyeR, put them.
   const fittedSockets = [0, 1].map(() => {
     const socket = new THREE.Group();
-    slot.add(socket);
+    headPivot.add(socket);
     return socket;
   });
+
+  /** Sets a pivot at a placement's offset, angled as it says. */
+  const turnPivot = (pivot: THREE.Object3D, placement: AvatarHead['placement']): void => {
+    const [tilt, turn, slant] = placement.angles ?? [0, 0, 0];
+    pivot.position.set(placement.offset[0], placement.offset[1], placement.offset[2]);
+    pivot.rotation.set(tilt, turn, slant, 'YXZ');
+  };
 
   // The thruster's flame, under the pod's tip.
   const flameMaterial = new THREE.SpriteMaterial({
@@ -463,14 +482,16 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
     const { scale, offset, eyes, eyeAngles, eyeScale, screen: panel } = head.placement;
     const turns = eyeRotations(eyeAngles);
     const eyeSize = eyeScale ?? 1;
+    // The pivot sits at the offset, so everything on it is placed relative to that.
+    turnPivot(headPivot, head.placement);
     headObject.scale.setScalar(scale);
-    headObject.position.set(offset[0], offset[1], offset[2]);
+    headObject.position.set(0, 0, 0);
     const face = head.fit === 'replace' ? panel : null;
     screen.visible = Boolean(face);
     headCut.on.value = face ? 1 : 0;
     if (face) {
       const [w, h] = face.size;
-      screen.position.set(face.center[0], face.center[1], face.center[2]);
+      screen.position.set(face.center[0] - offset[0], face.center[1] - offset[1], face.center[2] - offset[2]);
       screen.scale.set(w, h, 1);
       // Cut the opening only (the screen tucks behind the frame round it), in the file's frame.
       const tuck = HEAD_FIT.screenTuck;
@@ -487,7 +508,7 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
     if (eyes) {
       eyes.forEach((eye, i) => {
         const socket = fittedSockets[i]!;
-        socket.position.set(eye[0], eye[1], eye[2]);
+        socket.position.set(eye[0] - offset[0], eye[1] - offset[1], eye[2] - offset[2]);
         const [x, y, z] = turns[i]!;
         socket.rotation.set(x, y, z, 'YXZ');
         socket.scale.setScalar(eyeSize);
@@ -503,7 +524,7 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
     }
     marks.forEach((mark, i) => {
       const socket = fittedSockets[i]!;
-      socket.position.copy(positionIn(object, mark)).multiplyScalar(scale).add(object.position);
+      socket.position.copy(positionIn(object, mark)).multiplyScalar(scale);
       if (eyeAngles) {
         const [x, y, z] = turns[i]!;
         socket.rotation.set(x, y, z, 'YXZ');
@@ -524,6 +545,8 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
       headMaterials = [];
     }
     uniforms.uHideHead.value = 0;
+    headPivot.position.set(0, 0, 0);
+    headPivot.rotation.set(0, 0, 0);
     screen.visible = false;
     headCut.on.value = 0;
     placeEyes(ownSockets);
@@ -564,9 +587,9 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
 
   const placeAccessory = (accessory: AvatarHead): void => {
     if (!accessoryObject) return;
-    const { scale, offset } = accessory.placement;
-    accessoryObject.scale.setScalar(scale);
-    accessoryObject.position.set(offset[0], offset[1], offset[2]);
+    turnPivot(accessoryPivot, accessory.placement);
+    accessoryObject.scale.setScalar(accessory.placement.scale);
+    accessoryObject.position.set(0, 0, 0);
   };
 
   const dropAccessory = (): void => {
@@ -588,7 +611,7 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
         accessoryObject = object;
         accessoryMaterials = materials;
         tint(accessoryMaterials);
-        slot.add(object);
+        accessoryPivot.add(object);
         placeAccessory(look.accessory?.sha256 === accessory.sha256 ? look.accessory : accessory);
       },
       () => {
@@ -612,7 +635,7 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
         headObject = object;
         headMaterials = materials;
         tintHead();
-        slot.add(object);
+        headPivot.add(object);
         if (head.fit === 'replace') uniforms.uHideHead.value = 1;
         // The placement as it is now: it may have changed while the file loaded.
         placeHead(look.head?.sha256 === head.sha256 ? look.head : head);
@@ -709,33 +732,45 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
     const object = target === 'head' ? headObject : accessoryObject;
     if (!head || !object) return null;
     root.updateMatrixWorld(true);
-    const toHead = slot.matrixWorld.clone().invert();
+    const { offset } = head.placement;
+    // The frame a pick is told in: a head's own (unangled, its pivot's plus the offset), or the slot's.
+    const toFrame =
+      target === 'head'
+        ? new THREE.Matrix4().makeTranslation(offset[0], offset[1], offset[2]).multiply(headPivot.matrixWorld.clone().invert())
+        : slot.matrixWorld.clone().invert();
     const hit = raycaster.intersectObject(object, true)[0];
-    let at: THREE.Vector3 | null;
+    let world: THREE.Vector3 | null;
     let normal: [number, number, number] | null = null;
     if (hit) {
-      at = hit.point.clone().applyMatrix4(toHead);
+      world = hit.point.clone();
       if (hit.face) {
-        // The face's normal into the head frame, by the normal matrix (the inverse transpose) of the
+        // The face's normal into that frame, by the normal matrix (the inverse transpose) of the
         // hit object's transform there, so a non-uniformly scaled model still gives the true angle.
-        const toHeadFrame = toHead.clone().multiply(hit.object.matrixWorld);
+        const toHeadFrame = toFrame.clone().multiply(hit.object.matrixWorld);
         const n = hit.face.normal.clone().applyMatrix3(new THREE.Matrix3().getNormalMatrix(toHeadFrame)).normalize();
         if (n.z < 0) n.negate();
         normal = [n.x, n.y, n.z];
       }
     } else {
-      const ray = raycaster.ray.clone().applyMatrix4(toHead);
       // Seen through (an eye hole): where the eyes are, on a replacing head's face or the robot's own.
-      const worn = look.head?.fit === 'replace' ? look.head.placement.eyes : null;
-      const faceZ = worn ? Math.min(worn[0][2], worn[1][2]) : FACE_PANEL.z + 0.004;
-      at = ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 0, 1), -faceZ), new THREE.Vector3());
+      const worn = look.head?.fit === 'replace' && look.head.placement.eyes ? look.head : null;
+      let faceZ = FACE_PANEL.z + 0.004;
+      if (worn?.placement.eyes) {
+        const [left, right] = worn.placement.eyes;
+        faceZ = target === 'head' ? Math.min(left[2], right[2]) : Math.min(rotateAbout(worn.placement, left)[2], rotateAbout(worn.placement, right)[2]);
+      }
+      const ray = raycaster.ray.clone().applyMatrix4(toFrame);
+      const at = ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 0, 1), -faceZ), new THREE.Vector3());
+      world = at ? at.applyMatrix4(toFrame.clone().invert()) : null;
     }
-    if (!at) return null;
-    const { scale, offset } = head.placement;
+    if (!world) return null;
+    const at = world.clone().applyMatrix4(toFrame);
+    // The file's own frame is the model's: its transform undone, angles and all.
+    const file = object.worldToLocal(world.clone());
     const round = (v: number): number => Math.round(v * 10_000) / 10_000 + 0;
     return {
       head: [round(at.x), round(at.y), round(at.z)],
-      file: [round((at.x - offset[0]) / scale), round((at.y - offset[1]) / scale), round((at.z - offset[2]) / scale)],
+      file: [round(file.x), round(file.y), round(file.z)],
       onModel: Boolean(hit),
       normal,
     };

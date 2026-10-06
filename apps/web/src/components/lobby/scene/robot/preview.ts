@@ -12,10 +12,11 @@
  *
  * Fitting a head (the head library): `loadHead` reads a head (a file not
  * uploaded yet, or one from the library) and measures it, `setFraming('head')`
- * brings the camera in on the head and holds the robot still (no hover bob,
- * lean or sway, so what is aimed at stays put), and `setPicking` turns the robot to face
- * the camera and reports where a click lands on its head (a drag still turns
- * it; a click is a press that hardly moves).
+ * brings the camera in on the head and holds the robot still, facing front: no
+ * turntable, hover bob, lean or sway, so what is being fitted stays put (a drag
+ * turns it by hand to see the side, and it comes back to the front when let go).
+ * `setPicking` reports where a click lands on its head (a click is a press that
+ * hardly moves).
  */
 
 import * as THREE from 'three';
@@ -34,7 +35,7 @@ export interface RobotPreview {
   setFlying(flying: boolean): void;
   /** Reads a head (a local file's bytes under `key`, or a library head's sha256) and measures it for fitting. */
   loadHead(source: HeadSource): Promise<HeadMeasure>;
-  /** The whole robot, or close in on its head. */
+  /** The whole robot on its turntable, or close in on its head, held still and facing front. */
   setFraming(framing: 'robot' | 'head'): void;
   /** While set, the robot faces front and a click on its head is reported (null: missed it). */
   setPicking(onPick: ((pick: HeadPick | null) => void) | null, target?: 'head' | 'accessory'): void;
@@ -205,8 +206,10 @@ export function createRobotPreview(
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
     }
-    if (onPick && !dragging) {
-      // Face front for picking: ease back to the nearest whole turn.
+    // Fitting a head (the head framing) holds the robot still, so what is aimed at stays put.
+    const still = framing === 'head';
+    if ((onPick || still) && !dragging) {
+      // Face front for fitting and picking: ease back to the nearest whole turn, and no turntable.
       const front = Math.round(spin / (Math.PI * 2)) * Math.PI * 2;
       spin += (front - spin) * (reducedMotion ? 1 : 1 - Math.exp(-dt * 8));
     } else if (!dragging && !reducedMotion && now - idleSince > 1500) spin += dt * 0.35;
@@ -215,8 +218,6 @@ export function createRobotPreview(
     camera.position.lerp(target.eye, ease);
     lookAt.lerp(target.at, ease);
     camera.lookAt(lookAt);
-    // Fitting a head (the head framing) holds the robot still, so what is aimed at stays put.
-    const still = framing === 'head';
     speed += ((flying && !still ? 5 : 0) - speed) * (1 - Math.exp(-dt * 3));
     if (robot) {
       robot.root.rotation.y = spin;

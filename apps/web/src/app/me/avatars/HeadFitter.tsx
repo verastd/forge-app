@@ -8,8 +8,8 @@
  * On load it measures the model and makes a first guess (@forge/lobby's
  * `autoPlacement`): a replacing head sized to the robot's head and set on
  * the neck, its eyes where the robot's own are (or on its EyeL/EyeR, if it
- * has them); a face accessory sized to the face. Then Size and three Move
- * sliders, a click on the head to place each eye (replacing heads), or a
+ * has them); a face accessory sized to the face. Then Size, three Move and
+ * three angle sliders (Tilt, Turn, Slant: the whole model, eyes and screen with it), a click on the head to place each eye (replacing heads), or a
  * click on an eye hole to line it up with that eye (accessories), and Reset
  * to the first guess. Every change reaches the page through `onChange`,
  * which uploads or saves it; this component never talks to the API.
@@ -24,7 +24,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
-import { HEAD_FIT, ROBOT_EYES, alignToEye, anglesFromNormal, autoPlacement, defaultColors, nudge, rescale } from '@forge/lobby';
+import { HEAD_FIT, ROBOT_EYES, alignToEye, anglesFromNormal, autoPlacement, defaultColors, nudge, rescale, rotateAbout } from '@forge/lobby';
 import type { AvatarColors, HeadPlacement, HeadScreen, Point3, WornFace } from '@forge/lobby';
 import type { AvatarHead, AvatarHeadFit, AvatarHeadPlacement } from '@forge/shared';
 
@@ -69,6 +69,18 @@ const EYE_ANGLES = [
 ] as const;
 const EYE_ANGLE_RANGE = 60;
 
+/**
+ * The whole model's angles a slider sets ([tilt, turn, slant] index), as seen from the front
+ * (the camera's side): `sign` flips one whose positive way reads backwards from there.
+ */
+const MODEL_ANGLES = [
+  { index: 0, label: 'Tilt', less: 'back', more: 'forward', sign: 1 },
+  { index: 1, label: 'Turn', less: 'to your left', more: 'to your right', sign: 1 },
+  { index: 2, label: 'Slant', less: 'top to your left', more: 'top to your right', sign: -1 },
+] as const;
+/** Degrees either way: inside the schema's AVATAR_PLACEMENT_ANGLE (0.8 rad, about 45.8°). */
+const MODEL_ANGLE_RANGE = 45;
+
 let localKeys = 0;
 
 /** The shared schema's shape (eyes absent when the file's own are used; angles only when set). */
@@ -78,6 +90,7 @@ function toWire(placement: HeadPlacement): AvatarHeadPlacement {
     offset: placement.offset,
     ...(placement.eyes ? { eyes: placement.eyes } : {}),
     ...(placement.eyeAngles ? { eyeAngles: placement.eyeAngles } : {}),
+    ...(placement.angles?.some((a) => a !== 0) ? { angles: placement.angles } : {}),
     ...(placement.eyeScale && placement.eyeScale !== 1 ? { eyeScale: placement.eyeScale } : {}),
     ...(placement.screen ? { screen: placement.screen } : {}),
   };
@@ -95,7 +108,9 @@ const degrees = (radians: number): number => Math.round((radians * 180) / Math.P
 /** The face an accessory is fitted over: a replacing head's, when the wearer has one with placed eyes. */
 function wornFace(fit: AvatarHeadFit, worn: AvatarHead | null): WornFace | null {
   if (fit !== 'accessory' || worn?.fit !== 'replace' || !worn.placement.eyes) return null;
-  return { eyes: worn.placement.eyes, screen: worn.placement.screen ?? null };
+  // Where its eyes really are: a head angled as a whole carries them with it.
+  const [left, right] = worn.placement.eyes;
+  return { eyes: [rotateAbout(worn.placement, left), rotateAbout(worn.placement, right)], screen: worn.placement.screen ?? null };
 }
 
 function firstGuess(fit: AvatarHeadFit, measure: HeadMeasure, onto: WornFace | null = null): HeadPlacement {
@@ -378,6 +393,17 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled, w
     });
   };
 
+  const onModelAngle = (index: 0 | 1 | 2, sign: 1 | -1) => (event: ChangeEvent<HTMLInputElement>): void => {
+    const radians = (sign * Number(event.target.value) * Math.PI) / 180;
+    setPlacement((current) => {
+      if (!current) return current;
+      const angles: [number, number, number] = [...(current.angles ?? [0, 0, 0])];
+      angles[index] = Math.round(radians * 10_000) / 10_000 + 0;
+      return { ...current, angles };
+    });
+  };
+  const angled = Boolean(placement?.angles?.some((a) => a !== 0));
+
   const pickingText: Record<Exclude<Picking, null>, string> = {
     left: 'Click the head where its left eye goes (the robot’s left, on your right).',
     right: 'Click the head where its right eye goes (on your left).',
@@ -460,6 +486,35 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled, w
             </label>
           );
         })}
+        {MODEL_ANGLES.map((control) => {
+          const value = ready ? control.sign * degrees((placement.angles ?? [0, 0, 0])[control.index]) + 0 : 0;
+          const words = value === 0 ? 'straight' : `${Math.abs(value)}° ${value < 0 ? control.less : control.more}`;
+          return (
+            <label key={control.label} className={styles.label}>
+              <span className={styles.sliderHead} aria-hidden="true">
+                {control.label} <span className={styles.sliderValue}>{words}</span>
+              </span>
+              <input
+                type="range"
+                min={-MODEL_ANGLE_RANGE}
+                max={MODEL_ANGLE_RANGE}
+                step={1}
+                value={Math.max(-MODEL_ANGLE_RANGE, Math.min(MODEL_ANGLE_RANGE, value))}
+                onChange={onModelAngle(control.index, control.sign)}
+                disabled={locked}
+                aria-label={`${control.label}, ${fit === 'replace' ? 'whole head' : 'whole accessory'}`}
+                aria-valuetext={words}
+              />
+            </label>
+          );
+        })}
+        {angled && (
+          <div className={styles.fitRow}>
+            <button type="button" className="btn btn-sm btn-ghost" onClick={() => setPlacement((current) => (current ? { ...current, angles: null } : current))} disabled={locked}>
+              Straighten
+            </button>
+          </div>
+        )}
 
         {fit === 'replace' ? (
           <div className={styles.fitRow} role="group" aria-label="Eyes">
@@ -473,7 +528,7 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled, w
               Place right eye
             </button>
             {reading.kind === 'ready' && reading.measure.hasEyes && placement?.eyes && (
-              <button type="button" className="btn btn-sm btn-ghost" onClick={() => setPlacement((current) => (current ? { scale: current.scale, offset: current.offset } : current))} disabled={locked}>
+              <button type="button" className="btn btn-sm btn-ghost" onClick={() => setPlacement((current) => (current ? { scale: current.scale, offset: current.offset, ...(current.angles ? { angles: current.angles } : {}) } : current))} disabled={locked}>
                 Use the file’s eyes
               </button>
             )}

@@ -628,6 +628,7 @@ FITTED = {
     "offset": [-0.0085, 0.0, -0.015],
     "eyes": [[-0.052, 0.106, 0.135], [0.052, 0.106, 0.135]],
     "eyeAngles": [0.2, 0.15, -0.05],
+    "angles": [0.1, -0.2, 0.05],
 }
 
 
@@ -657,6 +658,7 @@ def test_a_head_is_worn_as_its_file_says_until_it_is_fitted(
         "scale": 0.5,
         "offset": FITTED["offset"],
         "eyeAngles": FITTED["eyeAngles"],
+        "angles": FITTED["angles"],
     }
 
     straight = {"scale": 0.5, "offset": FITTED["offset"]}
@@ -720,6 +722,8 @@ def test_fitting_is_checked(client: TestClient, admin_headers: dict[str, str]) -
         {**FITTED, "eyes": [[0, 0, 0], [0, -1.5, 0]]},
         {**FITTED, "eyeAngles": [0, 0]},
         {**FITTED, "eyeAngles": [0, 1.3, 0]},
+        {**FITTED, "angles": [0, 0]},
+        {**FITTED, "angles": [0.9, 0, 0]},
         {**FITTED, "extra": 1},
     ):
         response = client.put(
@@ -925,6 +929,7 @@ def test_the_limits_match_the_zod_side() -> None:
         "AVATAR_PLACEMENT_SCALE_MAX",
         "AVATAR_PLACEMENT_REACH",
         "AVATAR_PLACEMENT_EYE_ANGLE",
+        "AVATAR_PLACEMENT_ANGLE",
         "AVATAR_PLACEMENT_EYE_SCALE_MIN",
         "AVATAR_PLACEMENT_EYE_SCALE_MAX",
         "AVATAR_PLACEMENT_SCREEN_MIN",

@@ -534,6 +534,39 @@ test.describe('fitting a head', () => {
     await expect(page.getByRole('status').filter({ hasText: 'Saved ✓' })).toBeVisible();
   });
 
+  test('a mask is tilted, turned and slanted as a whole, saved with its fit, and straightened', async ({ page, context, baseURL }) => {
+    await signInAs(context, baseURL ?? '', { sub: '4242', login: 'trent-admin' });
+    await page.route(`**/bff/avatars/assets/${SHA}`, (route) =>
+      route.fulfill({ status: 200, contentType: 'model/gltf-binary', body: TRIPO_HEAD }),
+    );
+    await openEditor(page);
+    await page.getByRole('listitem').filter({ hasText: 'Phantom mask' }).getByRole('button', { name: 'Adjust fit' }).click();
+    const tilt = page.getByRole('slider', { name: 'Tilt, whole accessory' });
+    await expect(tilt).toBeEnabled({ timeout: 90_000 });
+    await expect(page.getByRole('button', { name: 'Straighten' })).toHaveCount(0);
+    await tilt.fill('10');
+    await page.getByRole('slider', { name: 'Slant, whole accessory' }).fill('5');
+    await expect(tilt).toHaveAttribute('aria-valuetext', '10° forward');
+    await expect(page.getByRole('slider', { name: 'Slant, whole accessory' })).toHaveAttribute('aria-valuetext', '5° top to your right');
+
+    const saving = held();
+    let sent: { placement: { angles?: number[] } } | null = null;
+    await page.route('**/bff/avatars/heads/phantom/placement', async (route) => {
+      sent = route.request().postDataJSON() as { placement: { angles?: number[] } };
+      await saving.handler(route);
+    });
+    await page.getByRole('button', { name: 'Save fit' }).click();
+    await expect(page.getByRole('button', { name: 'Saving…' })).toBeVisible();
+    saving.release(200, { ...LIST.heads[0], placement: { scale: 0.3, offset: [0, 0.05, 0.12], angles: [0.1745, 0, -0.0873] } });
+    await expect(page.getByRole('status').filter({ hasText: 'Saved ✓' })).toBeVisible();
+    // Tilt forward is +x; a slant whose top goes to your right is the model's -z.
+    expect(sent!.placement.angles).toEqual([0.1745, 0, -0.0873]);
+
+    await page.getByRole('button', { name: 'Straighten' }).click();
+    await expect(tilt).toHaveAttribute('aria-valuetext', 'straight');
+    await expect(page.getByRole('button', { name: 'Straighten' })).toHaveCount(0);
+  });
+
   test('two library heads on one file each keep their own fit', async ({ page, context, baseURL }) => {
     await signInAs(context, baseURL ?? '', { sub: '4242', login: 'trent-admin' });
     await page.route(`**/bff/avatars/assets/${SHA}`, (route) =>

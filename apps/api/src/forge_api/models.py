@@ -1039,6 +1039,7 @@ AVATAR_PLACEMENT_SCALE_MIN: Final = 0.01
 AVATAR_PLACEMENT_SCALE_MAX: Final = 10
 AVATAR_PLACEMENT_REACH: Final = 1
 AVATAR_PLACEMENT_EYE_ANGLE: Final = 1.2
+AVATAR_PLACEMENT_ANGLE: Final = 0.8
 AVATAR_PLACEMENT_EYE_SCALE_MIN: Final = 0.5
 AVATAR_PLACEMENT_EYE_SCALE_MAX: Final = 2.5
 AVATAR_PLACEMENT_SCREEN_MIN: Final = 0.01
@@ -1055,6 +1056,10 @@ _PlacementPoint = tuple[_Reach, _Reach, _Reach]
 _EyeAngle = Annotated[
     float,
     Field(ge=-AVATAR_PLACEMENT_EYE_ANGLE, le=AVATAR_PLACEMENT_EYE_ANGLE, allow_inf_nan=False),
+]
+_ModelAngle = Annotated[
+    float,
+    Field(ge=-AVATAR_PLACEMENT_ANGLE, le=AVATAR_PLACEMENT_ANGLE, allow_inf_nan=False),
 ]
 
 
@@ -1107,6 +1112,8 @@ class AvatarHeadPlacement(BaseModel):
     eyes: tuple[_PlacementPoint, _PlacementPoint] | None = None
     #: [slant, turn, pitch] radians for the left eye, mirrored for the right.
     eyeAngles: tuple[_EyeAngle, _EyeAngle, _EyeAngle] | None = None
+    #: [tilt, turn, slant] radians for the whole model, about `offset`; eyes and screen go with it.
+    angles: tuple[_ModelAngle, _ModelAngle, _ModelAngle] | None = None
     #: The glowing eyes' size, times their own.
     eyeScale: (
         Annotated[
