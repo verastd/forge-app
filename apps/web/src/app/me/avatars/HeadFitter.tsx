@@ -24,7 +24,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
-import { alignToEye, autoPlacement, defaultColors, nudge, rescale } from '@forge/lobby';
+import { alignToEye, anglesFromNormal, autoPlacement, defaultColors, nudge, rescale } from '@forge/lobby';
 import type { HeadPlacement, Point3 } from '@forge/lobby';
 import type { AvatarHead, AvatarHeadFit, AvatarHeadPlacement } from '@forge/shared';
 
@@ -57,17 +57,32 @@ const AXES = [
   { index: 2, label: 'Back · Forward', less: 'back', more: 'forward' },
 ] as const;
 
+/** The eye angles a slider sets, mirrored for both eyes ([slant, turn, pitch] index). */
+const EYE_ANGLES = [
+  { index: 0, label: 'Eye slant', less: 'tops out', more: 'tops in' },
+  { index: 1, label: 'Eye turn', less: 'out', more: 'in' },
+] as const;
+const EYE_ANGLE_RANGE = 60;
+
 let localKeys = 0;
 
-/** The shared schema's shape (eyes absent when the file's own are used). */
+/** The shared schema's shape (eyes absent when the file's own are used; angles only when set). */
 function toWire(placement: HeadPlacement): AvatarHeadPlacement {
-  return placement.eyes ? { scale: placement.scale, offset: placement.offset, eyes: placement.eyes } : { scale: placement.scale, offset: placement.offset };
+  return {
+    scale: placement.scale,
+    offset: placement.offset,
+    ...(placement.eyes ? { eyes: placement.eyes } : {}),
+    ...(placement.eyeAngles ? { eyeAngles: placement.eyeAngles } : {}),
+  };
 }
+
+const degrees = (radians: number): number => Math.round((radians * 180) / Math.PI);
 
 function firstGuess(fit: AvatarHeadFit, measure: HeadMeasure): HeadPlacement {
   const guess = autoPlacement(fit, measure.positions, measure.triangles);
   // A head that brings its own EyeL/EyeR keeps them.
   return fit === 'replace' && measure.hasEyes ? { scale: guess.scale, offset: guess.offset } : guess;
+  // (Its own EyeL/EyeR bring their own angles, too.)
 }
 
 export default function HeadFitter({ source, fit, initial, onChange, disabled }: HeadFitterProps) {
@@ -241,8 +256,15 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled }:
       }
       const spot: Point3 = [pick.head[0], pick.head[1], Math.round((pick.head[2] + 0.004) * 10_000) / 10_000];
       const eyes = current.eyes ?? autoRef.current?.eyes ?? [spot, spot];
-      setPlacement({ ...current, eyes: picking === 'left' ? [spot, eyes[1]] : [eyes[0], spot] });
-      setNote({ tone: 'ok', text: `${picking === 'left' ? 'Left' : 'Right'} eye placed.` });
+      // Facing the surface clicked (turn and pitch); the slant stays the admin's.
+      const [slant] = current.eyeAngles ?? [0, 0, 0];
+      const aim = pick.normal ? anglesFromNormal(pick.normal, picking === 'left' ? 'left' : 'right') : null;
+      setPlacement({
+        ...current,
+        eyes: picking === 'left' ? [spot, eyes[1]] : [eyes[0], spot],
+        ...(aim ? { eyeAngles: [slant, aim[0], aim[1]] as [number, number, number] } : {}),
+      });
+      setNote({ tone: 'ok', text: `${picking === 'left' ? 'Left' : 'Right'} eye placed${aim ? ', angled to the surface' : ''}.` });
       // Left done: straight on to the right.
       setPicking(picking === 'left' ? 'right' : null);
     },
@@ -281,6 +303,16 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled }:
       const delta: Point3 = [0, 0, 0];
       delta[index] = base.offset[index] + wanted - current.offset[index];
       return nudge(current, delta);
+    });
+  };
+
+  const onEyeAngle = (index: 0 | 1) => (event: ChangeEvent<HTMLInputElement>): void => {
+    const radians = (Number(event.target.value) * Math.PI) / 180;
+    setPlacement((current) => {
+      if (!current) return current;
+      const angles: [number, number, number] = [...(current.eyeAngles ?? [0, 0, 0])];
+      angles[index] = Math.round(radians * 10_000) / 10_000;
+      return { ...current, eyeAngles: angles };
     });
   };
 
@@ -383,6 +415,28 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled }:
                 Use the file’s eyes
               </button>
             )}
+            {EYE_ANGLES.map((control) => {
+              const value = ready ? degrees((placement.eyeAngles ?? [0, 0, 0])[control.index]) : 0;
+              const words = value === 0 ? 'straight' : `${Math.abs(value)}° ${value < 0 ? control.less : control.more}`;
+              return (
+                <label key={control.index} className={`${styles.label} ${styles.fitFull}`}>
+                  <span className={styles.sliderHead} aria-hidden="true">
+                    {control.label} <span className={styles.sliderValue}>{words}</span>
+                  </span>
+                  <input
+                    type="range"
+                    min={-EYE_ANGLE_RANGE}
+                    max={EYE_ANGLE_RANGE}
+                    step={1}
+                    value={Math.max(-EYE_ANGLE_RANGE, Math.min(EYE_ANGLE_RANGE, value))}
+                    onChange={onEyeAngle(control.index)}
+                    disabled={locked}
+                    aria-label={`${control.label}, both eyes`}
+                    aria-valuetext={words}
+                  />
+                </label>
+              );
+            })}
           </div>
         ) : (
           <div className={styles.fitRow}>

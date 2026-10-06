@@ -41,13 +41,16 @@ export class AvatarsError extends Error {
   readonly code: string;
   readonly status: number | undefined;
   readonly reason: string | undefined;
+  /** The fields the API named, for an `invalid_request`. */
+  readonly fields: readonly string[];
 
-  constructor(code: string, status?: number, reason?: string) {
+  constructor(code: string, status?: number, reason?: string, fields: readonly string[] = []) {
     super(`avatars: ${code}${reason ? ` (${reason})` : ''}`);
     this.name = 'AvatarsError';
     this.code = code;
     this.status = status;
     this.reason = reason;
+    this.fields = fields;
   }
 }
 
@@ -55,7 +58,8 @@ function errorFrom(status: number, body: unknown): AvatarsError {
   const fields = typeof body === 'object' && body !== null ? (body as Record<string, unknown>) : {};
   const code = typeof fields.error === 'string' ? fields.error : `http_${status}`;
   const reason = typeof fields.reason === 'string' ? fields.reason : undefined;
-  return new AvatarsError(code, status, reason);
+  const named = Array.isArray(fields.fields) ? fields.fields.filter((f): f is string => typeof f === 'string') : [];
+  return new AvatarsError(code, status, reason, named);
 }
 
 async function request<T>(method: 'GET' | 'PUT' | 'DELETE', path: string, schema: Schema<T> | null, body?: unknown): Promise<T> {
@@ -122,8 +126,15 @@ export const removeChest = (memberId: string): Promise<Avatar> =>
   request('DELETE', `/members/${encodeURIComponent(memberId)}/chest`, AvatarSchema);
 export const deleteHead = (headId: string): Promise<void> => request('DELETE', `/heads/${encodeURIComponent(headId)}`, null);
 /** Changes how a library head is worn, keeping its file. */
-export const refitHead = (headId: string, placement: AvatarHeadPlacement): Promise<AvatarHead> =>
-  request('PUT', `/heads/${encodeURIComponent(headId)}/placement`, AvatarHeadSchema, { placement });
+export async function refitHead(headId: string, placement: AvatarHeadPlacement): Promise<AvatarHead> {
+  try {
+    return await request('PUT', `/heads/${encodeURIComponent(headId)}/placement`, AvatarHeadSchema, { placement });
+  } catch (error) {
+    // An API from before fitting has no such route: FastAPI's bare 404, no code of its own.
+    if (error instanceof AvatarsError && error.code === 'http_404') throw new AvatarsError('fitting_unsupported', 404);
+    throw error;
+  }
+}
 
 /** Upload progress, 0..1, as the bytes leave the browser. */
 export type OnProgress = (fraction: number) => void;
@@ -220,11 +231,20 @@ const REASONS: Record<string, string> = {
   blank: 'Give it a name.',
 };
 
+const FITTING_UNSUPPORTED =
+  'The API server is older than head fitting, so it can’t save a head’s fit yet. Redeploy the API, then try again.';
+
 /** A sentence for the page. */
 export function describeAvatarsError(error: unknown): string {
   if (!(error instanceof AvatarsError)) return 'Something went wrong. Try again.';
   if (error.reason && REASONS[error.reason]) return REASONS[error.reason]!;
+  // An API from before fitting refuses a head's fit as a field it doesn't know.
+  if (error.code === 'invalid_request' && error.fields.some((f) => f === 'placement' || f.startsWith('placement.'))) {
+    return FITTING_UNSUPPORTED;
+  }
   switch (error.code) {
+    case 'fitting_unsupported':
+      return FITTING_UNSUPPORTED;
     case 'admin_only':
       return 'Only admins can change avatars.';
     case 'unauthenticated':

@@ -1296,6 +1296,7 @@ export type Avatar = z.infer<typeof AvatarSchema>;
 export const AVATAR_PLACEMENT_SCALE_MIN = 0.01;
 export const AVATAR_PLACEMENT_SCALE_MAX = 10;
 export const AVATAR_PLACEMENT_REACH = 1;
+export const AVATAR_PLACEMENT_EYE_ANGLE = 1.2;
 
 const placementPoint = z.tuple([
   z.number().min(-AVATAR_PLACEMENT_REACH).max(AVATAR_PLACEMENT_REACH),
@@ -1315,6 +1316,18 @@ export const AvatarHeadPlacementSchema = z.object({
   scale: z.number().min(AVATAR_PLACEMENT_SCALE_MIN).max(AVATAR_PLACEMENT_SCALE_MAX),
   offset: placementPoint,
   eyes: z.tuple([placementPoint, placementPoint]).nullish(),
+  /**
+   * How the eyes are angled, radians, as [slant, turn, pitch] for the left eye and mirrored
+   * for the right (−slant, −turn, pitch): slant leans their tops toward the middle, turn faces
+   * them toward the middle, pitch tips them up. Absent: straight ahead, upright.
+   */
+  eyeAngles: z
+    .tuple([
+      z.number().min(-AVATAR_PLACEMENT_EYE_ANGLE).max(AVATAR_PLACEMENT_EYE_ANGLE),
+      z.number().min(-AVATAR_PLACEMENT_EYE_ANGLE).max(AVATAR_PLACEMENT_EYE_ANGLE),
+      z.number().min(-AVATAR_PLACEMENT_EYE_ANGLE).max(AVATAR_PLACEMENT_EYE_ANGLE),
+    ])
+    .nullish(),
 });
 export type AvatarHeadPlacement = z.infer<typeof AvatarHeadPlacementSchema>;
 

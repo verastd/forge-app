@@ -31,6 +31,8 @@ export interface HeadPlacement {
   scale: number;
   offset: Point3;
   eyes?: [Point3, Point3] | null;
+  /** [slant, turn, pitch] radians for the left eye, mirrored for the right (see `eyeRotations`). */
+  eyeAngles?: [number, number, number] | null;
 }
 
 export type HeadFitKind = 'replace' | 'accessory';
@@ -40,6 +42,8 @@ export const HEAD_FIT = Object.freeze({
   headWidth: 0.37,
   /** The lower band: this share of the model's height, from its bottom. */
   band: 0.2,
+  /** The most any eye angle may be, radians (AvatarHeadPlacement's limit). */
+  eyeAngle: 1.2,
   /** How far an eye sits proud of the face under it, metres. */
   eyeLift: 0.004,
   /** A face accessory is this wide, metres: most of the face screen. */
@@ -84,11 +88,12 @@ export function autoPlacement(kind: HeadFitKind, positions: ArrayLike<number>, t
     const scale = clampScale(HEAD_FIT.headWidth / Math.max(x1 - x0, 1e-9));
     const offset = clampPoint([-scale * ((x0 + x1) / 2), -scale * bottom, -scale * ((z0 + z1) / 2)]);
     const front = scale * z1 + offset[2];
-    const eyes = ROBOT_EYES.map((eye) => clampPoint([eye[0], eye[1], surfaceAt(triangles, scale, offset, eye, front) + HEAD_FIT.eyeLift])) as [
-      Point3,
-      Point3,
-    ];
-    return { scale, offset, eyes };
+    const hits = ROBOT_EYES.map((eye) => surfaceAt(triangles, scale, offset, eye));
+    const eyes = ROBOT_EYES.map((eye, i) => clampPoint([eye[0], eye[1], (hits[i]?.z ?? front) + HEAD_FIT.eyeLift])) as [Point3, Point3];
+    const aims = hits.flatMap((hit, i) => (hit ? [anglesFromNormal(hit.normal, i === 0 ? 'left' : 'right')] : []));
+    if (aims.length === 0) return { scale, offset, eyes };
+    const mean = (k: 0 | 1): number => aims.reduce((sum, aim) => sum + aim[k], 0) / aims.length;
+    return { scale, offset, eyes, eyeAngles: clampAngles([0, mean(0), mean(1)]) };
   }
   const [x0, x1] = spread(points.map((p) => p[0]));
   const [z0] = spread(points.map((p) => p[2]));
@@ -153,32 +158,81 @@ export function nudge(placement: HeadPlacement, delta: Readonly<Point3>): HeadPl
 }
 
 /**
- * The front of the model straight in front of an eye's spot (placed, metres):
- * where a ray along -Z through the spot first meets one of `triangles` (x, y,
- * z × 3 each, in the file's frame), so an eye sits on a recessed face screen
- * rather than out at the frame around it. `fallback` (the lower band's front)
- * when nothing of the model is there.
+ * The eye angles that face a surface whose normal (head frame) is `normal`,
+ * for the eye on `side`: [turn, pitch], radians. Turn faces the eye toward
+ * the middle (so it is mirrored between the eyes), pitch tips it up.
  */
-function surfaceAt(triangles: ArrayLike<number>, scale: number, offset: Point3, eye: Readonly<Point3>, fallback: number): number {
+export function anglesFromNormal(normal: Readonly<Point3>, side: 'left' | 'right'): [number, number] {
+  const length = Math.hypot(normal[0], normal[1], normal[2]);
+  if (!(length > 0)) return [0, 0];
+  const [x, y, z] = [normal[0] / length, normal[1] / length, normal[2] / length];
+  const toward = side === 'left' ? x : -x;
+  return [clampAngle(Math.atan2(toward, z)), clampAngle(Math.asin(Math.max(-1, Math.min(1, y))))];
+}
+
+/**
+ * Each eye's rotation (radians, applied in Y, X, Z order) for `angles`
+ * ([slant, turn, pitch], the left eye's; the right mirrors slant and turn):
+ * [x, y, z] for the left eye, then the right. The eye's own +Z faces out.
+ */
+export function eyeRotations(angles: Readonly<[number, number, number]> | null | undefined): [Point3, Point3] {
+  const [slant, turn, pitch] = angles ?? [0, 0, 0];
+  return [
+    [round(-pitch), round(turn), round(-slant)],
+    [round(-pitch), round(-turn), round(slant)],
+  ];
+}
+
+/**
+ * Where a ray along -Z through an eye's spot (placed, metres) first meets
+ * one of `triangles` (x, y, z × 3 each, in the file's frame): its depth in
+ * the head frame and the face's normal there (turned to face out), so an
+ * eye sits on, and faces along, a recessed or angled face screen. Null when
+ * nothing of the model is there.
+ */
+function surfaceAt(
+  triangles: ArrayLike<number>,
+  scale: number,
+  offset: Point3,
+  eye: Readonly<Point3>,
+): { z: number; normal: Point3 } | null {
   const x = (eye[0] - offset[0]) / scale;
   const y = (eye[1] - offset[1]) / scale;
-  let best = -Infinity;
+  let best: { z: number; normal: Point3 } | null = null;
   for (let i = 0; i + 8 < triangles.length; i += 9) {
     const ax = triangles[i]!;
     const ay = triangles[i + 1]!;
+    const az = triangles[i + 2]!;
     const bx = triangles[i + 3]!;
     const by = triangles[i + 4]!;
+    const bz = triangles[i + 5]!;
     const cx = triangles[i + 6]!;
     const cy = triangles[i + 7]!;
+    const cz = triangles[i + 8]!;
     const area = (bx - ax) * (cy - ay) - (cx - ax) * (by - ay);
     if (!Number.isFinite(area) || Math.abs(area) < 1e-12) continue;
     const u = ((bx - x) * (cy - y) - (cx - x) * (by - y)) / area;
     const v = ((cx - x) * (ay - y) - (ax - x) * (cy - y)) / area;
     const w = 1 - u - v;
     if (u < 0 || v < 0 || w < 0) continue;
-    best = Math.max(best, u * triangles[i + 2]! + v * triangles[i + 5]! + w * triangles[i + 8]!);
+    const z = u * az + v * bz + w * cz;
+    if (best && z <= best.z) continue;
+    // The face's normal, from its edges; flipped to face out (+Z), whichever way it was wound.
+    const e1: Point3 = [bx - ax, by - ay, bz - az];
+    const e2: Point3 = [cx - ax, cy - ay, cz - az];
+    let normal: Point3 = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]];
+    if (normal[2] < 0) normal = [-normal[0], -normal[1], -normal[2]];
+    best = { z, normal };
   }
-  return Number.isFinite(best) ? scale * best + offset[2] : fallback;
+  return best ? { z: scale * best.z + offset[2], normal: best.normal } : null;
+}
+
+function clampAngle(angle: number): number {
+  return round(Math.min(HEAD_FIT.eyeAngle, Math.max(-HEAD_FIT.eyeAngle, angle)));
+}
+
+function clampAngles(angles: [number, number, number]): [number, number, number] {
+  return angles.map(clampAngle) as [number, number, number];
 }
 
 function finitePoints(positions: ArrayLike<number>): Point3[] {

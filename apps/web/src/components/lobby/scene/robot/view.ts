@@ -29,7 +29,7 @@
 
 import * as THREE from 'three';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { FACE_PANEL, HEAD_ANCHOR, createBlinker, hashId, robotPose } from '@forge/lobby';
+import { FACE_PANEL, HEAD_ANCHOR, createBlinker, eyeRotations, hashId, robotPose } from '@forge/lobby';
 import type { AvatarColors, Blinker, MotionInput, MotionPose } from '@forge/lobby';
 import type { AvatarHead } from '@forge/shared';
 
@@ -74,8 +74,8 @@ export function lookKey(look: RobotLook): string {
 /** A head's placement, to tell when only that changed. */
 function placementKey(head: AvatarHead | null): string {
   if (!head) return '';
-  const { scale, offset, eyes } = head.placement;
-  return JSON.stringify([scale, offset, eyes ?? null]);
+  const { scale, offset, eyes, eyeAngles } = head.placement;
+  return JSON.stringify([scale, offset, eyes ?? null, eyeAngles ?? null]);
 }
 
 /** Where `node` sits in `ancestor`'s frame (ancestor's own transform left out). */
@@ -121,6 +121,8 @@ export interface HeadPick {
   file: [number, number, number];
   /** Whether it is on the model itself, not seen through it. */
   onModel: boolean;
+  /** Which way the model's surface faces there (head frame, unit length; facing out), when on it. */
+  normal: [number, number, number] | null;
 }
 
 /** The eye shape every robot shares: a softly rounded pill. */
@@ -353,7 +355,8 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
   /** Scales and moves the worn head as `head.placement` says, and puts a replacing head's eyes. */
   const placeHead = (head: AvatarHead): void => {
     if (!headObject) return;
-    const { scale, offset, eyes } = head.placement;
+    const { scale, offset, eyes, eyeAngles } = head.placement;
+    const turns = eyeRotations(eyeAngles);
     headObject.scale.setScalar(scale);
     headObject.position.set(offset[0], offset[1], offset[2]);
     if (head.fit !== 'replace') return;
@@ -361,7 +364,8 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
       eyes.forEach((eye, i) => {
         const socket = fittedSockets[i]!;
         socket.position.set(eye[0], eye[1], eye[2]);
-        socket.quaternion.identity();
+        const [x, y, z] = turns[i]!;
+        socket.rotation.set(x, y, z, 'YXZ');
         socket.scale.setScalar(1);
       });
       placeEyes(fittedSockets);
@@ -376,7 +380,12 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
     marks.forEach((mark, i) => {
       const socket = fittedSockets[i]!;
       socket.position.copy(positionIn(object, mark)).multiplyScalar(scale).add(object.position);
-      socket.quaternion.copy(mark.quaternion);
+      if (eyeAngles) {
+        const [x, y, z] = turns[i]!;
+        socket.rotation.set(x, y, z, 'YXZ');
+      } else {
+        socket.quaternion.copy(mark.quaternion);
+      }
       socket.scale.copy(mark.scale);
     });
     placeEyes(fittedSockets);
@@ -511,8 +520,17 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
     const toHead = slot.matrixWorld.clone().invert();
     const hit = raycaster.intersectObject(headObject, true)[0];
     let at: THREE.Vector3 | null;
+    let normal: [number, number, number] | null = null;
     if (hit) {
       at = hit.point.clone().applyMatrix4(toHead);
+      if (hit.face) {
+        // The face's normal into the head frame, by the normal matrix (the inverse transpose) of the
+        // hit object's transform there, so a non-uniformly scaled model still gives the true angle.
+        const toHeadFrame = toHead.clone().multiply(hit.object.matrixWorld);
+        const n = hit.face.normal.clone().applyMatrix3(new THREE.Matrix3().getNormalMatrix(toHeadFrame)).normalize();
+        if (n.z < 0) n.negate();
+        normal = [n.x, n.y, n.z];
+      }
     } else {
       const ray = raycaster.ray.clone().applyMatrix4(toHead);
       at = ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 0, 1), -(FACE_PANEL.z + 0.004)), new THREE.Vector3());
@@ -524,6 +542,7 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
       head: [round(at.x), round(at.y), round(at.z)],
       file: [round((at.x - offset[0]) / scale), round((at.y - offset[1]) / scale), round((at.z - offset[2]) / scale)],
       onModel: Boolean(hit),
+      normal,
     };
   };
 

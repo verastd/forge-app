@@ -490,3 +490,8 @@
     animation: none;
   }
 }
+
+/* A control that takes a whole row of its own inside a wrapping row. */
+.fitFull {
+  flex: 1 1 100%;
+}

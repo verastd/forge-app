@@ -90,13 +90,24 @@ register_schema(
             z REAL NOT NULL,
             eyes TEXT
         )""",
+        # A fitted head's eye angles, in a table of their own so a database made by the
+        # first fitting release (whose placements table predates them) gains them by
+        # CREATE alone. No row: eyes straight ahead.
+        """CREATE TABLE IF NOT EXISTS avatars_head_eye_angles (
+            head_id TEXT PRIMARY KEY REFERENCES avatars_heads (id),
+            slant REAL NOT NULL,
+            turn REAL NOT NULL,
+            pitch REAL NOT NULL
+        )""",
     ],
 )
 
 #: A head with how it is worn (the placement's columns are NULL when it has none).
 _HEAD_SELECT: Final = (
-    "SELECT h.*, p.scale AS p_scale, p.x AS p_x, p.y AS p_y, p.z AS p_z, p.eyes AS p_eyes "
-    "FROM avatars_heads h LEFT JOIN avatars_head_placements p ON p.head_id = h.id"
+    "SELECT h.*, p.scale AS p_scale, p.x AS p_x, p.y AS p_y, p.z AS p_z, p.eyes AS p_eyes, "
+    "a.slant AS a_slant, a.turn AS a_turn, a.pitch AS a_pitch "
+    "FROM avatars_heads h LEFT JOIN avatars_head_placements p ON p.head_id = h.id "
+    "LEFT JOIN avatars_head_eye_angles a ON a.head_id = h.id"
 )
 
 
@@ -334,15 +345,27 @@ def _placement(row: dict[str, Any]) -> AvatarHeadPlacement:
     if row["p_scale"] is None:
         return AVATAR_PLACEMENT_AS_IS
     eyes = json.loads(row["p_eyes"]) if row["p_eyes"] is not None else None
+    angles = (
+        (row["a_slant"], row["a_turn"], row["a_pitch"]) if row["a_slant"] is not None else None
+    )
     return AvatarHeadPlacement(
-        scale=row["p_scale"], offset=(row["p_x"], row["p_y"], row["p_z"]), eyes=eyes
+        scale=row["p_scale"],
+        offset=(row["p_x"], row["p_y"], row["p_z"]),
+        eyes=eyes,
+        eyeAngles=angles,
     )
 
 
 def _store_placement(db: StateDB, head_id: str, placement: AvatarHeadPlacement | None) -> None:
     db.execute("DELETE FROM avatars_head_placements WHERE head_id = ?", (head_id,))
+    db.execute("DELETE FROM avatars_head_eye_angles WHERE head_id = ?", (head_id,))
     if placement is None:
         return
+    if placement.eyeAngles is not None:
+        db.execute(
+            "INSERT INTO avatars_head_eye_angles (head_id, slant, turn, pitch) VALUES (?, ?, ?, ?)",
+            (head_id, *placement.eyeAngles),
+        )
     eyes = None if placement.eyes is None else json.dumps([list(eye) for eye in placement.eyes])
     db.execute(
         "INSERT INTO avatars_head_placements (head_id, scale, x, y, z, eyes) "
@@ -498,5 +521,6 @@ def delete_head(db: StateDB, head_id: str) -> None:
             raise ApiError(404, {"error": "head_not_found"})
         db.execute("UPDATE avatars_members SET head_id = NULL WHERE head_id = ?", (head_id,))
         db.execute("DELETE FROM avatars_head_placements WHERE head_id = ?", (head_id,))
+        db.execute("DELETE FROM avatars_head_eye_angles WHERE head_id = ?", (head_id,))
         db.execute("DELETE FROM avatars_heads WHERE id = ?", (head_id,))
         _drop_unused_assets(db, [row["sha256"]])

@@ -437,6 +437,7 @@ FITTED = {
     "scale": 0.5,
     "offset": [-0.0085, 0.0, -0.015],
     "eyes": [[-0.052, 0.106, 0.135], [0.052, 0.106, 0.135]],
+    "eyeAngles": [0.2, 0.15, -0.05],
 }
 
 
@@ -462,7 +463,18 @@ def test_a_head_is_worn_as_its_file_says_until_it_is_fitted(
     again = client.put(
         "/api/avatars/heads/bolt/placement", headers=admin_headers, json={"placement": eyeless}
     )
-    assert again.json()["placement"] == {"scale": 0.5, "offset": FITTED["offset"]}
+    assert again.json()["placement"] == {
+        "scale": 0.5,
+        "offset": FITTED["offset"],
+        "eyeAngles": FITTED["eyeAngles"],
+    }
+
+    straight = {"scale": 0.5, "offset": FITTED["offset"]}
+    cleared = client.put(
+        "/api/avatars/heads/bolt/placement", headers=admin_headers, json={"placement": straight}
+    )
+    assert cleared.json()["placement"] == straight
+    assert client.get("/api/avatars").json()["heads"][0]["placement"] == straight
 
 
 def test_an_upload_carries_its_fit_and_a_new_file_without_one_starts_over(
@@ -516,6 +528,8 @@ def test_fitting_is_checked(client: TestClient, admin_headers: dict[str, str]) -
         {**FITTED, "offset": [0, 0]},
         {**FITTED, "eyes": [[0, 0, 0]]},
         {**FITTED, "eyes": [[0, 0, 0], [0, -1.5, 0]]},
+        {**FITTED, "eyeAngles": [0, 0]},
+        {**FITTED, "eyeAngles": [0, 1.3, 0]},
         {**FITTED, "extra": 1},
     ):
         response = client.put(
@@ -718,6 +732,7 @@ def test_the_limits_match_the_zod_side() -> None:
         "AVATAR_PLACEMENT_SCALE_MIN",
         "AVATAR_PLACEMENT_SCALE_MAX",
         "AVATAR_PLACEMENT_REACH",
+        "AVATAR_PLACEMENT_EYE_ANGLE",
     ):
         match = re.search(rf"export const {name} = ([0-9.]+);", source)
         assert match is not None, name
