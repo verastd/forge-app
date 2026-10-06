@@ -469,6 +469,13 @@ def test_a_head_is_worn_as_its_file_says_until_it_is_fitted(
         "eyeAngles": FITTED["eyeAngles"],
     }
 
+    straight = {"scale": 0.5, "offset": FITTED["offset"]}
+    cleared = client.put(
+        "/api/avatars/heads/bolt/placement", headers=admin_headers, json={"placement": straight}
+    )
+    assert cleared.json()["placement"] == straight
+    assert client.get("/api/avatars").json()["heads"][0]["placement"] == straight
+
 
 def test_an_upload_carries_its_fit_and_a_new_file_without_one_starts_over(
     client: TestClient, admin_headers: dict[str, str]

@@ -524,8 +524,10 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
     if (hit) {
       at = hit.point.clone().applyMatrix4(toHead);
       if (hit.face) {
-        // The face's normal into the head frame: through the hit object's world rotation, then out of the slot's.
-        const n = hit.face.normal.clone().transformDirection(hit.object.matrixWorld).transformDirection(toHead);
+        // The face's normal into the head frame, by the normal matrix (the inverse transpose) of the
+        // hit object's transform there, so a non-uniformly scaled model still gives the true angle.
+        const toHeadFrame = toHead.clone().multiply(hit.object.matrixWorld);
+        const n = hit.face.normal.clone().applyMatrix3(new THREE.Matrix3().getNormalMatrix(toHeadFrame)).normalize();
         if (n.z < 0) n.negate();
         normal = [n.x, n.y, n.z];
       }
