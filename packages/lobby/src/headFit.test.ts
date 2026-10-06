@@ -11,6 +11,13 @@ function box(min: Point3, max: Point3): number[] {
   return out;
 }
 
+/** A box as triangles (x, y, z × 3 each), as a modeller exports it. */
+function slab(min: Point3, max: Point3): number[] {
+  const c = (i: number): Point3 => [i & 1 ? max[0] : min[0], i & 2 ? max[1] : min[1], i & 4 ? max[2] : min[2]];
+  const faces = [0, 1, 3, 0, 3, 2, 4, 6, 7, 4, 7, 5, 0, 4, 5, 0, 5, 1, 2, 3, 7, 2, 7, 6, 0, 2, 6, 0, 6, 4, 1, 5, 7, 1, 7, 3];
+  return faces.flatMap((i) => c(i));
+}
+
 /** Points filling a box evenly, flat, so percentiles see its real edges. */
 function solid(min: Point3, max: Point3, steps = 10): number[] {
   const out: number[] = [];
@@ -39,11 +46,35 @@ describe('autoPlacement, replacing the head', () => {
     expect(left[2]).toBeCloseTo(0, 3);
   });
 
-  it('starts its eyes where the robot’s own are, on the band’s front', () => {
+  it('starts its eyes where the robot’s own are, on the band’s front when it has no triangles to look at', () => {
     const placement = autoPlacement('replace', head);
     const front = placePoint(placement, [0, 0, 0.3])[2];
-    expect(placement.eyes?.[0]).toEqual([ROBOT_EYES[0][0], ROBOT_EYES[0][1], Math.round((front + 0.005) * 10_000) / 10_000]);
+    expect(placement.eyes?.[0]).toEqual([ROBOT_EYES[0][0], ROBOT_EYES[0][1], Math.round((front + HEAD_FIT.eyeLift) * 10_000) / 10_000]);
     expect(placement.eyes?.[1]?.[0]).toBe(ROBOT_EYES[1][0]);
+  });
+
+  it('seats its eyes on a recessed face screen, not out at the rim around it', () => {
+    // A flat screen face (two big triangles, no vertex near the eyes) 0.1 m behind a rim: Tripo's robot heads look like this.
+    const shell = slab([-0.35, 0, -0.2], [0.35, 0.4, 0.15]);
+    const screen = slab([-0.27, 0.02, 0.15], [0.27, 0.38, 0.2]);
+    const rim = [...slab([-0.35, 0, 0.2], [-0.27, 0.4, 0.3]), ...slab([0.27, 0, 0.2], [0.35, 0.4, 0.3])];
+    const triangles = [...shell, ...screen, ...rim];
+    const placement = autoPlacement('replace', triangles, triangles);
+    const screenFront = placePoint(placement, [0, 0.2, 0.2])[2];
+    const rimFront = placePoint(placement, [0.3, 0.2, 0.3])[2];
+    for (const eye of placement.eyes ?? []) {
+      expect(eye[2]).toBeCloseTo(screenFront + HEAD_FIT.eyeLift, 3);
+      expect(eye[2]).toBeLessThan(rimFront);
+    }
+  });
+
+  it('falls back to the band’s front when nothing of the model is in front of the eyes, and skips flat-on triangles', () => {
+    const shell = slab([-0.35, 0, -0.2], [0.35, 0.4, 0.3]);
+    // Only triangles away from the eyes' spots, plus one seen edge-on.
+    const aside = [...slab([0.3, 0, 0.3], [0.35, 0.05, 0.35]), 0, 0.2, 0.5, 0, 0.3, 0.6, 0, 0.4, 0.7];
+    const placement = autoPlacement('replace', shell, aside);
+    const front = placePoint(placement, [0, 0, 0.3])[2];
+    expect(placement.eyes?.[0]?.[2]).toBeCloseTo(front + HEAD_FIT.eyeLift, 3);
   });
 
   it('wears a model with nothing to measure as it is', () => {

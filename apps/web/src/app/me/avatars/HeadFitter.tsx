@@ -65,7 +65,7 @@ function toWire(placement: HeadPlacement): AvatarHeadPlacement {
 }
 
 function firstGuess(fit: AvatarHeadFit, measure: HeadMeasure): HeadPlacement {
-  const guess = autoPlacement(fit, measure.positions);
+  const guess = autoPlacement(fit, measure.positions, measure.triangles);
   // A head that brings its own EyeL/EyeR keeps them.
   return fit === 'replace' && measure.hasEyes ? { scale: guess.scale, offset: guess.offset } : guess;
 }
