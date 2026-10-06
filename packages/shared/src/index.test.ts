@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import * as shared from './index.js';
 import {
+  AVATAR_PLACEMENT_AS_IS,
+  AVATAR_PLACEMENT_REACH,
+  AVATAR_PLACEMENT_SCALE_MAX,
+  AVATAR_PLACEMENT_SCALE_MIN,
   ActionCodesSchema,
+  AvatarHeadPlacementSchema,
+  AvatarHeadRefitSchema,
+  AvatarHeadUploadSchema,
   ActionDistributionEntrySchema,
   ActiveAccountSchema,
   AuthorizeCheckSchema,
@@ -1073,5 +1080,38 @@ describe('Phase 7: RepoActionRequestSchema / CopyResultSchema / ReviewResultSche
       'head_taken',
       'github_failed',
     ]);
+  });
+});
+
+describe('AvatarHeadPlacementSchema', () => {
+  const fitted = { scale: 0.5, offset: [-0.01, 0, -0.015], eyes: [[-0.052, 0.106, 0.135], [0.052, 0.106, 0.135]] };
+
+  it('takes a fit, with or without eyes of its own', () => {
+    expect(AvatarHeadPlacementSchema.parse(fitted)).toEqual(fitted);
+    expect(AvatarHeadPlacementSchema.parse({ scale: 1, offset: [0, 0, 0] })).toEqual({ scale: 1, offset: [0, 0, 0] });
+    expect(AvatarHeadPlacementSchema.parse({ ...fitted, eyes: null }).eyes).toBeNull();
+  });
+
+  it.each([
+    { ...fitted, scale: AVATAR_PLACEMENT_SCALE_MIN / 2 },
+    { ...fitted, scale: AVATAR_PLACEMENT_SCALE_MAX * 2 },
+    { ...fitted, offset: [0, AVATAR_PLACEMENT_REACH + 0.1, 0] },
+    { ...fitted, offset: [0, 0] },
+    { ...fitted, eyes: [[0, 0, 0]] },
+    { ...fitted, scale: Number.NaN },
+  ])('refuses %j', (bad) => {
+    expect(AvatarHeadPlacementSchema.safeParse(bad).success).toBe(false);
+  });
+
+  it('wears a head from an API older than fitting as its file is', () => {
+    const head = { id: 'bolt', name: 'Bolt', sha256: 'a'.repeat(64), bytes: 1, fit: 'replace', eyes: true, updatedAt: 'now' };
+    expect(shared.AvatarHeadSchema.parse(head).placement).toEqual(AVATAR_PLACEMENT_AS_IS);
+  });
+
+  it('starts every head as its file is, and a refit carries one placement', () => {
+    expect(AVATAR_PLACEMENT_AS_IS).toEqual({ scale: 1, offset: [0, 0, 0] });
+    expect(Object.isFrozen(AVATAR_PLACEMENT_AS_IS)).toBe(true);
+    expect(AvatarHeadRefitSchema.safeParse({ placement: fitted }).success).toBe(true);
+    expect(AvatarHeadUploadSchema.safeParse({ name: 'Bolt', fit: 'replace', data: 'AA==', placement: fitted }).success).toBe(true);
   });
 });

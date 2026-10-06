@@ -411,3 +411,82 @@
   clip: rect(0 0 0 0);
   white-space: nowrap;
 }
+
+/* --- fitting a head (HeadFitter) ----------------------------------------- */
+
+.fitter {
+  display: grid;
+  grid-template-columns: minmax(0, 360px) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+@media (max-width: 760px) {
+  .fitter {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.fitStage {
+  aspect-ratio: 1 / 1;
+}
+
+.fitWide {
+  grid-column: 1 / -1;
+}
+
+.fitControls {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+.fitControls[aria-disabled='true'] {
+  opacity: 0.6;
+}
+
+.fitControls input[type='range'] {
+  width: 100%;
+  accent-color: var(--spark);
+}
+
+.sliderHead {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.sliderValue {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.fitRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.pickDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--spark);
+  animation: pick-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes pick-pulse {
+  50% {
+    opacity: 0.35;
+    transform: scale(0.7);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pickDot {
+    animation: none;
+  }
+}

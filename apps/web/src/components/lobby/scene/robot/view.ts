@@ -12,8 +12,11 @@
  *   are; the eyes and their glow are depth-tested, so whatever the accessory
  *   puts in front of them covers them, and an eye hole shows them through.
  *
- * Library heads are modelled around HEAD_ANCHOR (@forge/lobby): origin on
- * the neck, +Y up, facing +Z, metres, at the robot's unscaled size. A head's
+ * Library heads are worn by their placement (AvatarHead.placement, set in
+ * the editor): the file scaled about its origin, then moved, in HEAD_ANCHOR's
+ * frame (origin on the neck, +Y up, facing +Z, metres, the robot's unscaled
+ * size). A replacing head's eyes go where the placement says, or else on the
+ * file's EyeL/EyeR, wherever its scale and move put them. A head's
  * materials named `shell…`, `trim…`, `accent…`, `joint…` or `eye…` take
  * this robot's colours (any other material keeps its own), and every one is
  * lit by the robots' environment map.
@@ -65,7 +68,24 @@ export interface RobotLook {
 /** A look's identity, to tell when it changed. */
 export function lookKey(look: RobotLook): string {
   const { colors: c } = look;
-  return [look.name, c.shell, c.trim, c.accent, c.eye, look.head?.sha256 ?? '', look.head?.fit ?? '', look.chest ?? ''].join('|');
+  return [look.name, c.shell, c.trim, c.accent, c.eye, look.head?.sha256 ?? '', look.head?.fit ?? '', placementKey(look.head), look.chest ?? ''].join('|');
+}
+
+/** A head's placement, to tell when only that changed. */
+function placementKey(head: AvatarHead | null): string {
+  if (!head) return '';
+  const { scale, offset, eyes } = head.placement;
+  return JSON.stringify([scale, offset, eyes ?? null]);
+}
+
+/** Where `node` sits in `ancestor`'s frame (ancestor's own transform left out). */
+function positionIn(ancestor: THREE.Object3D, node: THREE.Object3D): THREE.Vector3 {
+  const at = node.position.clone();
+  for (let up = node.parent; up && up !== ancestor; up = up.parent) {
+    up.updateMatrix();
+    at.applyMatrix4(up.matrix);
+  }
+  return at;
 }
 
 /** What drives one frame of a robot, besides its pose inputs. */
@@ -84,7 +104,23 @@ export interface RobotView {
   /** Shows the chestplate's loading scan (an upload on its way), or lets the image back. */
   holdChest(loading: boolean): void;
   update(frame: RobotFrame): MotionPose;
+  /**
+   * Where `raycaster` meets the head it wears (for the editor's fitting): on
+   * the model, or else on the face screen's plane (what an eye hole shows),
+   * in the head frame and in the file's own frame. Null with no head worn.
+   */
+  pickHead(raycaster: THREE.Raycaster): HeadPick | null;
   dispose(): void;
+}
+
+/** A spot picked on a worn head. */
+export interface HeadPick {
+  /** In the head frame (metres from the neck, as a placement's eyes are). */
+  head: [number, number, number];
+  /** In the head file's own frame (before its placement). */
+  file: [number, number, number];
+  /** Whether it is on the model itself, not seen through it. */
+  onModel: boolean;
 }
 
 /** The eye shape every robot shares: a softly rounded pill. */
@@ -263,6 +299,12 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
     slot.add(socket);
     return socket;
   });
+  // A replacing head's eyes: where its placement, or its EyeL/EyeR, put them.
+  const fittedSockets = [0, 1].map(() => {
+    const socket = new THREE.Group();
+    slot.add(socket);
+    return socket;
+  });
 
   // The thruster's flame, under the pod's tip.
   const flameMaterial = new THREE.SpriteMaterial({
@@ -308,6 +350,38 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
     }
   };
 
+  /** Scales and moves the worn head as `head.placement` says, and puts a replacing head's eyes. */
+  const placeHead = (head: AvatarHead): void => {
+    if (!headObject) return;
+    const { scale, offset, eyes } = head.placement;
+    headObject.scale.setScalar(scale);
+    headObject.position.set(offset[0], offset[1], offset[2]);
+    if (head.fit !== 'replace') return;
+    if (eyes) {
+      eyes.forEach((eye, i) => {
+        const socket = fittedSockets[i]!;
+        socket.position.set(eye[0], eye[1], eye[2]);
+        socket.quaternion.identity();
+        socket.scale.setScalar(1);
+      });
+      placeEyes(fittedSockets);
+      return;
+    }
+    const object = headObject;
+    const marks = ['EyeL', 'EyeR'].map((name) => object.getObjectByName(name)).filter((o) => o !== undefined);
+    if (marks.length !== 2) {
+      placeEyes([]);
+      return;
+    }
+    marks.forEach((mark, i) => {
+      const socket = fittedSockets[i]!;
+      socket.position.copy(positionIn(object, mark)).multiplyScalar(scale).add(object.position);
+      socket.quaternion.copy(mark.quaternion);
+      socket.scale.copy(mark.scale);
+    });
+    placeEyes(fittedSockets);
+  };
+
   const dropHead = (): void => {
     if (headObject) {
       headObject.removeFromParent();
@@ -349,11 +423,9 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
         headMaterials = materials;
         tintHead();
         slot.add(object);
-        if (head.fit === 'replace') {
-          uniforms.uHideHead.value = 1;
-          const sockets = ['EyeL', 'EyeR'].map((name) => object.getObjectByName(name)).filter((o) => o !== undefined);
-          placeEyes(sockets.length === 2 ? sockets : []);
-        }
+        if (head.fit === 'replace') uniforms.uHideHead.value = 1;
+        // The placement as it is now: it may have changed while the file loaded.
+        placeHead(look.head?.sha256 === head.sha256 ? look.head : head);
       },
       () => {
         // The head didn't load: the robot keeps its own, and tries again in a while.
@@ -421,6 +493,7 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
       if (next.head) wearHead(next.head);
     } else {
       tintHead();
+      if (next.head && placementKey(previous.head) !== placementKey(next.head)) placeHead(next.head);
     }
     const emblemChanged = !next.chest && (previous.name !== next.name || previous.colors.accent !== next.colors.accent || previous.colors.eye !== next.colors.eye);
     if (first || previous.chest !== next.chest || emblemChanged) {
@@ -431,8 +504,32 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
 
   setLook(initial);
 
+  const pickHead = (raycaster: THREE.Raycaster): HeadPick | null => {
+    const head = look.head;
+    if (!head || !headObject) return null;
+    root.updateMatrixWorld(true);
+    const toHead = slot.matrixWorld.clone().invert();
+    const hit = raycaster.intersectObject(headObject, true)[0];
+    let at: THREE.Vector3 | null;
+    if (hit) {
+      at = hit.point.clone().applyMatrix4(toHead);
+    } else {
+      const ray = raycaster.ray.clone().applyMatrix4(toHead);
+      at = ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 0, 1), -(FACE_PANEL.z + 0.004)), new THREE.Vector3());
+    }
+    if (!at) return null;
+    const { scale, offset } = head.placement;
+    const round = (v: number): number => Math.round(v * 10_000) / 10_000 + 0;
+    return {
+      head: [round(at.x), round(at.y), round(at.z)],
+      file: [round((at.x - offset[0]) / scale), round((at.y - offset[1]) / scale), round((at.z - offset[2]) / scale)],
+      onModel: Boolean(hit),
+    };
+  };
+
   return {
     root,
+    pickHead,
     get look() {
       return look;
     },

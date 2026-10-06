@@ -26,7 +26,7 @@ import {
   AVATAR_HEAD_MAX_BYTES,
   AVATAR_HEAD_NAME_MAX,
 } from '@forge/shared';
-import type { Avatar, AvatarHead, AvatarHeadFit, AvatarList, AvatarMember } from '@forge/shared';
+import type { Avatar, AvatarHead, AvatarHeadFit, AvatarHeadPlacement, AvatarList, AvatarMember } from '@forge/shared';
 
 import {
   AvatarsError,
@@ -35,6 +35,7 @@ import {
   fetchAvatars,
   fetchMembers,
   headIdFrom,
+  refitHead,
   removeChest,
   resetAvatar,
   saveAvatar,
@@ -52,6 +53,20 @@ const Preview = dynamic(() => import('./Preview'), {
         <span className="loading-line">
           <span className="spinner spinner-lg" aria-hidden="true" />
           Loading the preview…
+        </span>
+      </div>
+    </div>
+  ),
+});
+
+const HeadFitter = dynamic(() => import('./HeadFitter'), {
+  ssr: false,
+  loading: () => (
+    <div className={`${styles.stage} ${styles.fitStage}`}>
+      <div className={styles.stageOverlay} role="status">
+        <span className="loading-line">
+          <span className="spinner spinner-lg" aria-hidden="true" />
+          Loading the fitting tool…
         </span>
       </div>
     </div>
@@ -616,15 +631,50 @@ function HeadLibrary({ list, setList }: HeadLibraryProps) {
   const [upload, setUpload] = useState<Upload>({ kind: 'idle' });
   const [deleting, setDeleting] = useState<string | null>(null);
   const [rowError, setRowError] = useState<string | null>(null);
+  /** How the chosen file (or the head being adjusted) is worn, from the fitting tool; null until it has read it. */
+  const [placement, setPlacement] = useState<AvatarHeadPlacement | null>(null);
+  const [adjusting, setAdjusting] = useState<AvatarHead | null>(null);
+  const [refit, setRefit] = useState<Busy>({ kind: 'idle' });
   const fileRef = useRef<HTMLInputElement>(null);
 
   const id = replacing ? replacing.id : headIdFrom(name);
   const idValid = new RegExp(AVATAR_HEAD_ID.source).test(id);
   const taken = !replacing && list.heads.some((h) => h.id === id);
   const busy = upload.kind === 'preparing' || upload.kind === 'uploading' || upload.kind === 'processing';
-  const ready = name.trim().length > 0 && idValid && !taken && file !== null && !busy;
+  const refitting = refit.kind === 'saving';
+  const ready = name.trim().length > 0 && idValid && !taken && file !== null && placement !== null && !busy;
+  const fitSource = useMemo(
+    () => (file ? { kind: 'file' as const, file } : adjusting ? { kind: 'library' as const, head: adjusting } : null),
+    [file, adjusting],
+  );
+
+  const startAdjust = (h: AvatarHead): void => {
+    setReplacing(null);
+    setFile(null);
+    setName('');
+    if (fileRef.current) fileRef.current.value = '';
+    setUpload({ kind: 'idle' });
+    setRefit({ kind: 'idle' });
+    setAdjusting(h);
+  };
+
+  const saveFit = (): void => {
+    if (!adjusting || !placement) return;
+    const target = adjusting;
+    const fitted = placement;
+    setRefit({ kind: 'saving' });
+    refitHead(target.id, fitted).then(
+      (head) => {
+        setList((current) => ({ ...current, heads: current.heads.map((h) => (h.id === head.id ? head : h)) }));
+        setAdjusting(head);
+        setRefit({ kind: 'saved' });
+      },
+      (error: unknown) => setRefit({ kind: 'error', message: describeAvatarsError(error), retry: saveFit }),
+    );
+  };
 
   const startReplace = (h: AvatarHead): void => {
+    setAdjusting(null);
     setReplacing(h);
     setName(h.name);
     setFit(h.fit);
@@ -643,6 +693,7 @@ function HeadLibrary({ list, setList }: HeadLibraryProps) {
   const onFile = (event: ChangeEvent<HTMLInputElement>): void => {
     const chosen = event.target.files?.[0] ?? null;
     setUpload({ kind: 'idle' });
+    setAdjusting(null);
     if (chosen && chosen.size > AVATAR_HEAD_MAX_BYTES) {
       setFile(null);
       event.target.value = '';
@@ -664,8 +715,13 @@ function HeadLibrary({ list, setList }: HeadLibraryProps) {
     if (!ready || !file) return;
     setUpload({ kind: 'preparing', what: 'Reading the file…' });
     try {
-      const head = await uploadHead(id, name.trim(), fit, file, (progress) =>
-        setUpload(progress >= 1 ? { kind: 'processing' } : { kind: 'uploading', progress }),
+      const head = await uploadHead(
+        id,
+        name.trim(),
+        fit,
+        file,
+        (progress) => setUpload(progress >= 1 ? { kind: 'processing' } : { kind: 'uploading', progress }),
+        placement ?? undefined,
       );
       setList((current) => ({
         ...current,
@@ -689,6 +745,7 @@ function HeadLibrary({ list, setList }: HeadLibraryProps) {
     setRowError(null);
     deleteHead(h.id).then(
       () => {
+        if (adjusting?.id === h.id) setAdjusting(null);
         setList((current) => ({
           heads: current.heads.filter((x) => x.id !== h.id),
           avatars: current.avatars.map((a) => (a.head === h.id ? { ...a, head: undefined } : a)),
@@ -709,19 +766,19 @@ function HeadLibrary({ list, setList }: HeadLibraryProps) {
           Head library
         </h2>
         <p className="muted">
-          Heads are .glb files (binary glTF 2.0, self-contained), modelled around the neck: origin where the head meets the neck, +Y
-          up, facing +Z, in metres at the robot’s own size (its head is about 0.32 m wide). Materials named <code>shell…</code>,{' '}
-          <code>trim…</code>, <code>accent…</code>, <code>joint…</code> or <code>eye…</code> take each robot’s colours.
+          Heads are .glb files (binary glTF 2.0, self-contained), straight from Tripo or any modeller, facing +Z. Pick one and the
+          fitting tool sizes it and sets it on a robot; nudge it there, then add it. <strong>Adjust fit</strong> changes a head
+          already in the library without uploading it again. Materials named <code>shell…</code>, <code>trim…</code>,{' '}
+          <code>accent…</code>, <code>joint…</code> or <code>eye…</code> take each robot’s colours.
         </p>
         <ul className={styles.hint} style={{ margin: '8px 0 0', paddingLeft: 18 }}>
           <li>
-            <strong>Replaces the head</strong>: the robot’s own head is hidden. Add empties named <code>EyeL</code> and{' '}
-            <code>EyeR</code> where the blinking eyes go (their scale sizes the eyes); without them the head has no eyes.
+            <strong>Replaces the head</strong>: the robot’s own head is hidden. Click the head to place each blinking eye (or
+            keep the file’s own <code>EyeL</code> and <code>EyeR</code> empties, if it has them).
           </li>
           <li>
-            <strong>Face accessory</strong>: worn over the robot’s own head (a mask, a visor, a helmet). The face screen and the
-            eyes stay put, about 0.12 m in front of the neck and 0.1 m up; whatever the accessory puts in front of them covers
-            them, and an eye hole shows them through.
+            <strong>Face accessory</strong>: worn over the robot’s own head (a mask, a visor, a helmet). The eyes stay on the face
+            screen; whatever covers them hides them, and an eye hole shows them through: click the hole to line it up with an eye.
           </li>
         </ul>
       </div>
@@ -739,14 +796,23 @@ function HeadLibrary({ list, setList }: HeadLibraryProps) {
               {h.fit === 'replace' && !h.eyes && <span className="chip chip-warn">No EyeL/EyeR: no eyes</span>}
               <span className={styles.headMeta}>{kb(h.bytes)}</span>
               <span className={styles.headMeta}>{list.avatars.filter((a) => a.head === h.id).length} wearing</span>
-              <button type="button" className="btn btn-sm btn-ghost" onClick={() => startReplace(h)} disabled={busy || deleting !== null}>
+              <button
+                type="button"
+                className={`btn btn-sm ${adjusting?.id === h.id ? 'btn-primary' : 'btn-ghost'}`}
+                onClick={() => startAdjust(h)}
+                disabled={busy || refitting || deleting !== null}
+                aria-pressed={adjusting?.id === h.id}
+              >
+                Adjust fit
+              </button>
+              <button type="button" className="btn btn-sm btn-ghost" onClick={() => startReplace(h)} disabled={busy || refitting || deleting !== null}>
                 Replace file
               </button>
               <button
                 type="button"
                 className="btn btn-sm btn-ghost"
                 onClick={() => remove(h)}
-                disabled={busy || deleting !== null}
+                disabled={busy || refitting || deleting !== null}
                 aria-busy={deleting === h.id}
               >
                 {deleting === h.id && <span className="spinner" aria-hidden="true" />}
@@ -760,6 +826,46 @@ function HeadLibrary({ list, setList }: HeadLibraryProps) {
         <p className={styles.error} role="alert">
           {rowError}
         </p>
+      )}
+
+      {adjusting && fitSource?.kind === 'library' && (
+        <div className="stack" aria-labelledby="head-refit">
+          <h3 id="head-refit" className="card-title" style={{ margin: 0 }}>
+            Fitting “{adjusting.name}”
+          </h3>
+          <HeadFitter
+            source={fitSource}
+            fit={adjusting.fit}
+            initial={adjusting.placement}
+            onChange={(next) => {
+              setPlacement(next);
+              setRefit((current) => (current.kind === 'saved' || current.kind === 'error' ? { kind: 'idle' } : current));
+            }}
+            disabled={refitting}
+          />
+          <div className={styles.actions}>
+            <button type="button" className="btn btn-primary" onClick={saveFit} disabled={placement === null || refitting} aria-busy={refitting}>
+              {refitting && <span className="spinner" aria-hidden="true" />}
+              {refitting ? 'Saving…' : 'Save fit'}
+            </button>
+            <button type="button" className="btn btn-ghost" onClick={() => setAdjusting(null)} disabled={refitting}>
+              Close
+            </button>
+            {refit.kind === 'saved' && (
+              <span className={styles.status} role="status">
+                Saved ✓ Every robot wearing it now wears it this way.
+              </span>
+            )}
+          </div>
+          {refit.kind === 'error' && (
+            <div className={styles.error} role="alert">
+              {refit.message}{' '}
+              <button type="button" className="btn btn-sm" onClick={refit.retry}>
+                Try again
+              </button>
+            </div>
+          )}
+        </div>
       )}
 
       <form className="stack" onSubmit={(event) => void submit(event)} aria-labelledby="head-upload">
@@ -800,6 +906,11 @@ function HeadLibrary({ list, setList }: HeadLibraryProps) {
               </label>
             ))}
           </div>
+          {fitSource?.kind === 'file' && (
+            <div className={styles.fitWide}>
+              <HeadFitter source={fitSource} fit={fit} initial={null} onChange={setPlacement} disabled={busy} />
+            </div>
+          )}
           <div className={styles.actions}>
             <button type="submit" className="btn btn-primary" disabled={!ready} aria-busy={busy}>
               {busy && <span className="spinner" aria-hidden="true" />}
@@ -812,6 +923,11 @@ function HeadLibrary({ list, setList }: HeadLibraryProps) {
             )}
           </div>
         </div>
+        {file && placement === null && upload.kind === 'idle' && (
+          <p className={styles.hint} role="status">
+            The fitting tool is reading the file: it can be added once it’s on the robot.
+          </p>
+        )}
         <UploadStatus upload={upload} label="the head" />
       </form>
     </section>

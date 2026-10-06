@@ -1292,6 +1292,38 @@ export const AvatarSchema = z.object({
 });
 export type Avatar = z.infer<typeof AvatarSchema>;
 
+/** The smallest and largest a head may be scaled, and how far (metres) it or its eyes may sit from the neck. */
+export const AVATAR_PLACEMENT_SCALE_MIN = 0.01;
+export const AVATAR_PLACEMENT_SCALE_MAX = 10;
+export const AVATAR_PLACEMENT_REACH = 1;
+
+const placementPoint = z.tuple([
+  z.number().min(-AVATAR_PLACEMENT_REACH).max(AVATAR_PLACEMENT_REACH),
+  z.number().min(-AVATAR_PLACEMENT_REACH).max(AVATAR_PLACEMENT_REACH),
+  z.number().min(-AVATAR_PLACEMENT_REACH).max(AVATAR_PLACEMENT_REACH),
+]);
+
+/**
+ * How a library head is worn, set in the editor rather than baked into its
+ * file: the file is scaled by `scale` about its own origin, then moved by
+ * `offset` (metres, from the neck: +Y up, facing +Z, the robot's unscaled
+ * frame). `eyes`, when set, are where a replacing head's eyes go (left, then
+ * right, in that same frame), ahead of any EyeL/EyeR in the file; absent or
+ * null, the file's own.
+ */
+export const AvatarHeadPlacementSchema = z.object({
+  scale: z.number().min(AVATAR_PLACEMENT_SCALE_MIN).max(AVATAR_PLACEMENT_SCALE_MAX),
+  offset: placementPoint,
+  eyes: z.tuple([placementPoint, placementPoint]).nullish(),
+});
+export type AvatarHeadPlacement = z.infer<typeof AvatarHeadPlacementSchema>;
+
+/** A head worn as its file says: no scale, no move, its own eyes. */
+export const AVATAR_PLACEMENT_AS_IS: Readonly<AvatarHeadPlacement> = Object.freeze({
+  scale: 1,
+  offset: Object.freeze([0, 0, 0]) as unknown as AvatarHeadPlacement['offset'],
+});
+
 /** A head in the library. */
 export const AvatarHeadSchema = z.object({
   id: z.string().regex(AVATAR_HEAD_ID),
@@ -1302,6 +1334,11 @@ export const AvatarHeadSchema = z.object({
   fit: z.enum(AVATAR_HEAD_FITS),
   /** Whether it carries EyeL and EyeR, where a replacing head's eyes go. */
   eyes: z.boolean(),
+  /**
+   * How it is worn (AVATAR_PLACEMENT_AS_IS until an admin fits it, and from
+   * an API older than fitting, which doesn't send one).
+   */
+  placement: AvatarHeadPlacementSchema.default(AVATAR_PLACEMENT_AS_IS),
   updatedAt: z.string(),
 });
 export type AvatarHead = z.infer<typeof AvatarHeadSchema>;
@@ -1332,8 +1369,16 @@ export const AvatarHeadUploadSchema = z.object({
   name: z.string().min(1).max(AVATAR_HEAD_NAME_MAX),
   fit: z.enum(AVATAR_HEAD_FITS),
   data: z.string().min(1),
+  /** How to wear it; absent: as the file is. */
+  placement: AvatarHeadPlacementSchema.optional(),
 });
 export type AvatarHeadUpload = z.infer<typeof AvatarHeadUploadSchema>;
+
+/** `PUT /api/avatars/heads/{headId}/placement` (admins): refit a head without sending its file again. */
+export const AvatarHeadRefitSchema = z.object({
+  placement: AvatarHeadPlacementSchema,
+});
+export type AvatarHeadRefit = z.infer<typeof AvatarHeadRefitSchema>;
 
 /** A member an admin can dress, for the editor's list. */
 export const AvatarMemberSchema = z.object({

@@ -21,6 +21,7 @@ import type {
   AvatarChestType,
   AvatarHead,
   AvatarHeadFit,
+  AvatarHeadPlacement,
   AvatarList,
   AvatarMemberList,
   AvatarUpdate,
@@ -120,6 +121,9 @@ export const resetAvatar = (memberId: string): Promise<void> =>
 export const removeChest = (memberId: string): Promise<Avatar> =>
   request('DELETE', `/members/${encodeURIComponent(memberId)}/chest`, AvatarSchema);
 export const deleteHead = (headId: string): Promise<void> => request('DELETE', `/heads/${encodeURIComponent(headId)}`, null);
+/** Changes how a library head is worn, keeping its file. */
+export const refitHead = (headId: string, placement: AvatarHeadPlacement): Promise<AvatarHead> =>
+  request('PUT', `/heads/${encodeURIComponent(headId)}/placement`, AvatarHeadSchema, { placement });
 
 /** Upload progress, 0..1, as the bytes leave the browser. */
 export type OnProgress = (fraction: number) => void;
@@ -184,9 +188,11 @@ export async function uploadHead(
   fit: AvatarHeadFit,
   file: File,
   onProgress: OnProgress,
+  placement?: AvatarHeadPlacement,
 ): Promise<AvatarHead> {
   const data = await fileToBase64(file);
-  return upload(`/heads/${encodeURIComponent(headId)}`, { name, fit, data }, AvatarHeadSchema, onProgress);
+  const body = placement ? { name, fit, data, placement } : { name, fit, data };
+  return upload(`/heads/${encodeURIComponent(headId)}`, body, AvatarHeadSchema, onProgress);
 }
 
 /** A head id from its name: lower case, dashes for anything else, at most 40 characters. */

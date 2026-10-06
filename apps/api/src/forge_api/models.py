@@ -1035,11 +1035,18 @@ AVATAR_EYE_NODES: Final = ("EyeL", "EyeR")
 #: replace: the robot's own head is hidden; accessory: a face accessory worn over it (a
 #: mask, a visor, a helmet), the eyes staying where they always are.
 AvatarHeadFit = Literal["replace", "accessory"]
+AVATAR_PLACEMENT_SCALE_MIN: Final = 0.01
+AVATAR_PLACEMENT_SCALE_MAX: Final = 10
+AVATAR_PLACEMENT_REACH: Final = 1
 
 _HexColor = Annotated[str, Field(pattern=r"^#[0-9a-f]{6}$")]
 _AvatarHeadId = Annotated[str, Field(pattern=AVATAR_HEAD_ID)]
 _AvatarMemberId = Annotated[str, Field(pattern=AVATAR_MEMBER_ID)]
 _Sha256 = Annotated[str, Field(pattern=AVATAR_SHA256)]
+_Reach = Annotated[
+    float, Field(ge=-AVATAR_PLACEMENT_REACH, le=AVATAR_PLACEMENT_REACH, allow_inf_nan=False)
+]
+_PlacementPoint = tuple[_Reach, _Reach, _Reach]
 
 
 class AvatarColors(BaseModel):
@@ -1059,6 +1066,25 @@ class Avatar(BaseModel):
     updatedAt: str
 
 
+class AvatarHeadPlacement(BaseModel):
+    """How a library head is worn: its file scaled by `scale` about its origin, then moved
+    by `offset` (metres from the neck, the robot's unscaled frame); `eyes`, when set, are
+    where a replacing head's eyes go (left, right), ahead of any EyeL/EyeR in the file."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    scale: Annotated[
+        float,
+        Field(ge=AVATAR_PLACEMENT_SCALE_MIN, le=AVATAR_PLACEMENT_SCALE_MAX, allow_inf_nan=False),
+    ]
+    offset: _PlacementPoint
+    eyes: tuple[_PlacementPoint, _PlacementPoint] | None = None
+
+
+#: A head worn as its file says.
+AVATAR_PLACEMENT_AS_IS: Final = AvatarHeadPlacement(scale=1, offset=(0, 0, 0))
+
+
 class AvatarHead(BaseModel):
     id: _AvatarHeadId
     name: Annotated[str, Field(min_length=1, max_length=AVATAR_HEAD_NAME_MAX)]
@@ -1066,6 +1092,7 @@ class AvatarHead(BaseModel):
     bytes: int
     fit: AvatarHeadFit
     eyes: bool
+    placement: AvatarHeadPlacement = AVATAR_PLACEMENT_AS_IS
     updatedAt: str
 
 
@@ -1094,6 +1121,13 @@ class AvatarHeadUpload(BaseModel):
     name: Annotated[str, Field(min_length=1, max_length=AVATAR_HEAD_NAME_MAX)]
     fit: AvatarHeadFit
     data: Annotated[str, Field(min_length=1)]
+    placement: AvatarHeadPlacement | None = None
+
+
+class AvatarHeadRefit(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    placement: AvatarHeadPlacement
 
 
 class AvatarMember(BaseModel):
