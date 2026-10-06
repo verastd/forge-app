@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import type { BrowserContext, Page, Route } from '@playwright/test';
 
-import { addGhost, lobbyRoot, openLobby, serveFlags } from './helpers/lobby';
+import { addGhost, lobbyRoot, openLobby, readCamera, seedCamera, serveFlags } from './helpers/lobby';
 import type { FlagName } from './helpers/lobby';
 import { demoSignIn, signInAs } from './helpers/session';
 import { assertionClaims, json, withStandIn } from './helpers/standin';
@@ -83,6 +83,25 @@ test.describe('robots in the lobby', () => {
     await addGhost(page, 'practice-0a0a0a', 'robo friend', { x: 0, y: 1.7, z: -3 });
     await expect(lobbyRoot(page)).toHaveAttribute('data-peers', '1', { timeout: 15_000 });
     await expect(lobbyRoot(page)).toHaveAttribute('data-robots', '1', { timeout: 60_000 });
+  });
+
+  test('walking into another member bumps off them instead of going through', async ({ page }) => {
+    await serveFlags(page);
+    await seedCamera(page, { x: 0, y: 1.7, z: 0, yaw: 0, pitch: 0 });
+    await openLobby(page);
+    await addGhost(page, 'practice-0d0d0d', 'in the way', { x: 0, y: 1.7, z: -3 });
+    await expect(lobbyRoot(page)).toHaveAttribute('data-peers', '1', { timeout: 15_000 });
+    await expect(lobbyRoot(page)).toHaveAttribute('data-bumps', '0');
+    await page.keyboard.down('KeyW');
+    try {
+      await expect.poll(async () => Number(await lobbyRoot(page).getAttribute('data-bumps')), { timeout: 60_000 }).toBeGreaterThan(0);
+      // Keep pushing: still stopped at their shell, not through them and off to the wall.
+      await page.waitForTimeout(1_500);
+    } finally {
+      await page.keyboard.up('KeyW');
+    }
+    const camera = await readCamera(page);
+    expect(camera.z).toBeGreaterThan(-3 + 0.8);
   });
 
   test('with lobby_avatars off, everyone stays an orb', async ({ page }) => {
@@ -319,6 +338,18 @@ test.describe('a head that fails to load', () => {
 });
 
 test.describe('the account menu', () => {
+  /**
+   * Opens the account panel. A click that lands before the page has hydrated
+   * does nothing, so it is clicked again until Profile shows.
+   */
+  async function openPanel(page: Page, name: string | RegExp): Promise<void> {
+    await expect(async () => {
+      const profile = page.getByRole('link', { name: 'Profile' });
+      if (!(await profile.isVisible())) await page.getByRole('button', { name }).click();
+      await expect(profile).toBeVisible({ timeout: 1_000 });
+    }).toPass({ timeout: 15_000 });
+  }
+
   /** Signs in as `login`, answers the access check with `canEdit`, and opens the menu. */
   async function openMenu(
     page: Page,
@@ -335,7 +366,7 @@ test.describe('the account menu', () => {
       return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ canEdit }) });
     });
     await page.goto('/');
-    await page.getByRole('button', { name: 'Account: trent-admin' }).click();
+    await openPanel(page, 'Account: trent-admin');
     return { asked: () => asked };
   }
 
@@ -363,6 +394,66 @@ test.describe('the account menu', () => {
     await expect(page.getByRole('link', { name: 'Robot avatars' })).toHaveCount(0);
   });
 
+  test('an API from before /me asks the member list instead', async ({ page, context, baseURL }) => {
+    await serveFlags(page);
+    await signInAs(context, baseURL ?? '', { sub: '4242', login: 'trent-admin' });
+    await page.route('**/bff/avatars/me', (route) =>
+      route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ detail: 'Not Found' }) }),
+    );
+    await page.route('**/bff/avatars/members', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ members: [] }) }),
+    );
+    await page.goto('/');
+    await openPanel(page, 'Account: trent-admin');
+    await expect(page.getByRole('link', { name: 'Robot avatars' })).toBeVisible();
+  });
+
+  test('on that older API, admin_only from the member list means no link', async ({ page, context, baseURL }) => {
+    await serveFlags(page);
+    await signInAs(context, baseURL ?? '', { sub: '4242', login: 'trent-admin' });
+    await page.route('**/bff/avatars/me', (route) =>
+      route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ detail: 'Not Found' }) }),
+    );
+    let listed = 0;
+    await page.route('**/bff/avatars/members', (route) => {
+      listed += 1;
+      return route.fulfill({ status: 403, contentType: 'application/json', body: JSON.stringify({ error: 'admin_only' }) });
+    });
+    await page.goto('/');
+    await openPanel(page, 'Account: trent-admin');
+    await expect.poll(() => listed).toBe(1);
+    await expect(page.getByRole('link', { name: 'Profile' })).toBeVisible();
+    await expect(page.getByText('Checking admin access…')).toHaveCount(0);
+    await expect(page.getByRole('link', { name: 'Robot avatars' })).toHaveCount(0);
+  });
+
+  test('the check shows a spinner, then a failure and Retry, then the link', async ({ page, context, baseURL }) => {
+    await serveFlags(page);
+    await signInAs(context, baseURL ?? '', { sub: '4242', login: 'trent-admin' });
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let calls = 0;
+    await page.route('**/bff/avatars/me', async (route) => {
+      calls += 1;
+      if (calls === 1) {
+        await held;
+        return route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'service_unreachable' }) });
+      }
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ canEdit: true }) });
+    });
+    await page.goto('/');
+    await openPanel(page, 'Account: trent-admin');
+    await expect(page.getByRole('status').filter({ hasText: 'Checking admin access…' })).toBeVisible();
+    release();
+    const failure = page.getByRole('alert').filter({ hasText: 'Couldn’t check admin access.' });
+    await expect(failure).toBeVisible();
+    await failure.getByRole('button', { name: 'Retry' }).click();
+    await expect(page.getByRole('link', { name: 'Robot avatars' })).toBeVisible();
+    await expect(failure).toHaveCount(0);
+  });
+
   test('the practice account is never asked', async ({ page }) => {
     let asked = 0;
     await serveFlags(page);
@@ -372,7 +463,7 @@ test.describe('the account menu', () => {
     });
     await page.goto('/signin?next=%2F');
     await demoSignIn(page);
-    await page.getByRole('button', { name: /^Account:/ }).click();
+    await openPanel(page, /^Account:/);
     await expect(page.getByRole('link', { name: 'Profile' })).toBeVisible();
     await page.waitForTimeout(1_000);
     expect(asked).toBe(0);

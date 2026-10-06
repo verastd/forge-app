@@ -84,16 +84,34 @@ export const fetchMembers = (): Promise<AvatarMemberList> => request('GET', '/me
 
 /**
  * Whether the signed-in caller may use the avatar editor (is an admin), for
- * the account menu. False on any refusal or failure: it never throws, and a
- * link nobody can use is worse than none.
+ * the account menu. `/me` answers it. An API deployed before `/me` existed
+ * answers it 404 with no code of its own, and then the admin-only member list
+ * answers instead: listed means admin, `admin_only` means not. Robot avatars
+ * switched off, or the practice account, is a plain no. Anything else (signed
+ * out, unreachable, a timeout) throws an AvatarsError, so the menu can say it
+ * couldn't check rather than quietly showing nothing.
  */
 export async function fetchAvatarAccess(): Promise<boolean> {
   try {
     const access = await request('GET', '/me', AvatarAccessSchema);
     return access.canEdit;
-  } catch {
-    return false;
+  } catch (error) {
+    if (!(error instanceof AvatarsError) || error.code !== 'http_404') return refusalOrThrow(error);
   }
+  try {
+    await fetchMembers();
+    return true;
+  } catch (error) {
+    return refusalOrThrow(error);
+  }
+}
+
+/** The answers that mean "no editor for you"; everything else is a failure. */
+const NOT_AN_EDITOR = new Set(['admin_only', 'avatars-disabled', 'practice_session']);
+
+function refusalOrThrow(error: unknown): false {
+  if (error instanceof AvatarsError && NOT_AN_EDITOR.has(error.code)) return false;
+  throw error;
 }
 export const saveAvatar = (memberId: string, update: AvatarUpdate): Promise<Avatar> =>
   request('PUT', `/members/${encodeURIComponent(memberId)}`, AvatarSchema, update);

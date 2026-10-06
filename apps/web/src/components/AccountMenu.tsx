@@ -8,8 +8,9 @@
  * button with the avatar, opening a small panel: Profile, Settings, Connect
  * an agent (the FORGE connector's one-time setup, /connect), Sign out. An
  * admin also gets an Admin group with Robot avatars (the avatar editor,
- * /me/avatars), once the API has said so (`/bff/avatars/me`); nobody else
- * ever sees it, and it never flickers in and out while the answer is coming.
+ * /me/avatars), once the API has said so (`fetchAvatarAccess`). While that is
+ * being asked the group shows a spinner; if it can't be asked, it says so and
+ * offers Retry. Only a definite "not an admin" leaves it out.
  * Deliberately not an ARIA `menu` — its items are ordinary links and a
  * form button, reachable in normal tab order, same as any other disclosure
  * on the site (see Modal for the pattern this borrows Escape-to-close from).
@@ -21,18 +22,22 @@ import { usePathname } from 'next/navigation';
 
 import { useFlags } from '@forge/flags/react';
 
-import { fetchAvatarAccess } from '../lib/avatars';
+import { describeAvatarsError, fetchAvatarAccess } from '../lib/avatars';
 import { demoFlagFallback } from '../lib/flags';
 import { Chip } from './Chip';
 import { useSession } from './SessionProvider';
 import styles from './AccountMenu.module.css';
+
+/** The Admin group's state: left out, asking, the link, or couldn't ask (with why). */
+type AvatarAccess = { state: 'none' } | { state: 'checking' } | { state: 'admin' } | { state: 'error'; message: string };
 
 export function AccountMenu() {
   const { session, availability } = useSession();
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const { flags, loading: flagsLoading } = useFlags(demoFlagFallback());
-  const [canEditAvatars, setCanEditAvatars] = useState(false);
+  const [avatarAccess, setAvatarAccess] = useState<AvatarAccess>({ state: 'none' });
+  const [accessAttempt, setAccessAttempt] = useState(0);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const panelId = useId();
@@ -76,18 +81,28 @@ export function AccountMenu() {
   const avatarsOn = !flagsLoading && flags.lobby_avatars;
   const askAs = session !== null && !session.demo ? session.login : null;
   useEffect(() => {
-    setCanEditAvatars(false);
     if (!avatarsOn || askAs === null) {
+      setAvatarAccess({ state: 'none' });
       return undefined;
     }
+    setAvatarAccess({ state: 'checking' });
     let live = true;
-    void fetchAvatarAccess().then((canEdit) => {
-      if (live) setCanEditAvatars(canEdit);
-    });
+    fetchAvatarAccess().then(
+      (canEdit) => {
+        if (live) setAvatarAccess({ state: canEdit ? 'admin' : 'none' });
+      },
+      (error: unknown) => {
+        if (live) setAvatarAccess({ state: 'error', message: describeAvatarsError(error) });
+      },
+    );
     return () => {
       live = false;
     };
-  }, [avatarsOn, askAs]);
+  }, [avatarsOn, askAs, accessAttempt]);
+
+  const retryAvatarAccess = useCallback(() => {
+    setAccessAttempt((attempt) => attempt + 1);
+  }, []);
 
   const close = useCallback(() => {
     setOpen(false);
@@ -166,15 +181,31 @@ export function AccountMenu() {
               Connect an agent
             </Link>
           </li>
-          {canEditAvatars && (
+          {avatarAccess.state !== 'none' && (
             <li className={styles.group}>
               <span className={styles.groupLabel}>Admin</span>
-              <Link href="/me/avatars" className={styles.item} onClick={close}>
-                Robot avatars
-              </Link>
+              {avatarAccess.state === 'checking' && (
+                <span className={styles.status} role="status">
+                  <span className="spinner" aria-hidden="true" />
+                  Checking admin access…
+                </span>
+              )}
+              {avatarAccess.state === 'admin' && (
+                <Link href="/me/avatars" className={styles.item} onClick={close}>
+                  Robot avatars
+                </Link>
+              )}
+              {avatarAccess.state === 'error' && (
+                <div className={styles.status} role="alert">
+                  <span>Couldn’t check admin access. {avatarAccess.message}</span>
+                  <button type="button" className={styles.retry} onClick={retryAvatarAccess}>
+                    Retry
+                  </button>
+                </div>
+              )}
             </li>
           )}
-          <li className={canEditAvatars ? styles.group : undefined}>
+          <li className={avatarAccess.state !== 'none' ? styles.group : undefined}>
             <form method="post" action="/auth/signout" className={styles.signOutForm}>
               <button type="submit" className={styles.item}>
                 Sign out
