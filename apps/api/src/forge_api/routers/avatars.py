@@ -48,7 +48,6 @@ from forge_api.services import avatars as avatars_service
 from forge_api.services import flags as flags_service
 from forge_api.services import proposals as proposals_service
 from forge_api.services.errors import ApiError
-from forge_api.services.identity import admin_ids
 
 #: Room for the JSON around a base64 file: the field names and a 40-character name.
 _ENVELOPE = 4096
@@ -122,7 +121,7 @@ def get_asset(sha256: str, db: Db) -> Response:
 def my_access(user: Member) -> AvatarAccess:
     """Whether the caller may use the avatar editor: the web's account menu asks, to link
     admins to it. The editor's own routes still check, every time."""
-    return AvatarAccess(canEdit=user.sub in admin_ids())
+    return avatars_service.access(user)
 
 
 @router.get("/members", response_model=AvatarMemberList)

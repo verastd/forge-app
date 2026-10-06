@@ -8,7 +8,7 @@
  * button with the avatar, opening a small panel: Profile, Settings, Connect
  * an agent (the FORGE connector's one-time setup, /connect), Sign out. An
  * admin also gets an Admin group with Robot avatars (the avatar editor,
- * /apps/avatars), once the API has said so (`/bff/avatars/me`); nobody else
+ * /me/avatars), once the API has said so (`/bff/avatars/me`); nobody else
  * ever sees it, and it never flickers in and out while the answer is coming.
  * Deliberately not an ARIA `menu` — its items are ordinary links and a
  * form button, reachable in normal tab order, same as any other disclosure
@@ -169,7 +169,7 @@ export function AccountMenu() {
           {canEditAvatars && (
             <li className={styles.group}>
               <span className={styles.groupLabel}>Admin</span>
-              <Link href="/apps/avatars" className={styles.item} onClick={close}>
+              <Link href="/me/avatars" className={styles.item} onClick={close}>
                 Robot avatars
               </Link>
             </li>
