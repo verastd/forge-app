@@ -117,6 +117,13 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled }:
     };
   }, [generation]);
 
+  // When to start over: a new file, or another library head (even one sharing this file).
+  const resetKey = source.kind === 'file' ? headKey : `library:${source.head.id}:${source.head.sha256}`;
+  // The fit as it is now, for a head that finishes loading after it was changed.
+  const fitRef = useRef(fit);
+  fitRef.current = fit;
+  const lastFit = useRef(fit);
+
   // Read and measure the head, then make the first guess (or take the saved placement).
   useEffect(() => {
     const preview = previewRef.current;
@@ -141,8 +148,9 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled }:
           setReading({ kind: 'error', message: 'That file has no shapes to wear: nothing to fit.' });
           return;
         }
+        lastFit.current = fitRef.current;
         setReading({ kind: 'ready', measure });
-        setPlacement(initialRef.current ?? firstGuess(fit, measure));
+        setPlacement(initialRef.current ?? firstGuess(fitRef.current, measure));
       },
       () => {
         if (!live) return;
@@ -158,20 +166,18 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled }:
     return () => {
       live = false;
     };
-    // `fit` is handled below (a new first guess); a new source or preview starts over.
-  }, [headKey, generation]);
+    // `fit` is read when it lands (fitRef) and handled below after that; a new source or preview starts over.
+  }, [resetKey, generation]);
 
   // Switching between replacing and accessory makes a new first guess for that fit.
-  const lastFit = useRef(fit);
   useEffect(() => {
-    if (lastFit.current === fit) return;
+    // Until the head is read there is nothing to redo: it is guessed for the fit it lands with.
+    if (reading.kind !== 'ready' || lastFit.current === fit) return;
     lastFit.current = fit;
-    if (reading.kind === 'ready') {
-      setPlacement(firstGuess(fit, reading.measure));
-      setBase(firstGuess(fit, reading.measure));
-      setPicking(null);
-      setNote(null);
-    }
+    setPlacement(firstGuess(fit, reading.measure));
+    setBase(firstGuess(fit, reading.measure));
+    setPicking(null);
+    setNote(null);
   }, [fit, reading]);
 
   // The robot wears it as it stands, and the page hears every change.

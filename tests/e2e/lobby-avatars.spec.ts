@@ -456,6 +456,42 @@ test.describe('fitting a head', () => {
     await expect(page.getByRole('status').filter({ hasText: 'Saved ✓' })).toBeVisible();
   });
 
+  test('two library heads on one file each keep their own fit', async ({ page, context, baseURL }) => {
+    await signInAs(context, baseURL ?? '', { sub: '4242', login: 'trent-admin' });
+    await page.route(`**/bff/avatars/assets/${SHA}`, (route) =>
+      route.fulfill({ status: 200, contentType: 'model/gltf-binary', body: TRIPO_HEAD }),
+    );
+    const twins = {
+      ...LIST,
+      heads: [
+        { ...LIST.heads[0], id: 'phantom', name: 'Phantom mask', placement: { scale: 0.3, offset: [0, 0.05, 0.12] } },
+        { ...LIST.heads[0], id: 'phantom-big', name: 'Phantom mask big', placement: { scale: 0.45, offset: [0, 0.02, 0.15] } },
+      ],
+    };
+    await page.route('**/bff/avatars/members', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(MEMBERS) }),
+    );
+    await page.route('**/bff/avatars', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(twins) }),
+    );
+    await page.goto('/me/avatars');
+    const rowOf = (name: string) => page.getByRole('listitem').filter({ has: page.getByText(name, { exact: true }) });
+    await rowOf('Phantom mask').getByRole('button', { name: 'Adjust fit' }).click();
+    await expect(page.getByRole('slider', { name: 'Size' })).toBeEnabled({ timeout: 90_000 });
+    await rowOf('Phantom mask big').getByRole('button', { name: 'Adjust fit' }).click();
+    await expect(page.getByRole('heading', { name: 'Fitting “Phantom mask big”' })).toBeVisible();
+    await expect(page.getByRole('slider', { name: 'Size' })).toBeEnabled({ timeout: 90_000 });
+
+    let sent: { placement: { scale: number; offset: number[] } } | null = null;
+    await page.route('**/bff/avatars/heads/phantom-big/placement', async (route) => {
+      sent = route.request().postDataJSON() as { placement: { scale: number; offset: number[] } };
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ...twins.heads[1], placement: sent.placement }) });
+    });
+    await page.getByRole('button', { name: 'Save fit' }).click();
+    await expect(page.getByRole('status').filter({ hasText: 'Saved ✓' })).toBeVisible();
+    expect(sent).toEqual({ placement: { scale: 0.45, offset: [0, 0.02, 0.15] } });
+  });
+
   test('a library head that won’t load says so, with Try again', async ({ page, context, baseURL }) => {
     await signInAs(context, baseURL ?? '', { sub: '4242', login: 'trent-admin' });
     let fail = true;
