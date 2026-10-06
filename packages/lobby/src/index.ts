@@ -5,7 +5,8 @@
  * registry and its safety rules, the page chrome decision, (from
  * presence.ts) the multiplayer packet and name rules, and the voice: Fable's
  * attenuation and acoustics (attenuation.ts, acoustics.ts) and the cave's
- * settings for them (voice.ts). No DOM, no three.js and no runtime
+ * settings for them (voice.ts), and members bumping into each other
+ * (collide.ts). No DOM, no three.js and no runtime
  * dependencies (tsconfig.json and eslint.config.mjs enforce it), so the
  * scene, the shell, the presence feeds, the voice engine and next.config.mjs
  * all share one source of truth, and vitest can prove it in Node.
@@ -29,3 +30,4 @@ export * from './acoustics.js';
 export * from './voice.js';
 export * from './avatar.js';
 export * from './avatarMotion.js';
+export * from './collide.js';

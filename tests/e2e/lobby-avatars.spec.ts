@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import type { BrowserContext, Page, Route } from '@playwright/test';
 
-import { addGhost, lobbyRoot, openLobby, serveFlags } from './helpers/lobby';
+import { addGhost, lobbyRoot, openLobby, readCamera, seedCamera, serveFlags } from './helpers/lobby';
 import type { FlagName } from './helpers/lobby';
 import { demoSignIn, signInAs } from './helpers/session';
 import { assertionClaims, json, withStandIn } from './helpers/standin';
@@ -83,6 +83,25 @@ test.describe('robots in the lobby', () => {
     await addGhost(page, 'practice-0a0a0a', 'robo friend', { x: 0, y: 1.7, z: -3 });
     await expect(lobbyRoot(page)).toHaveAttribute('data-peers', '1', { timeout: 15_000 });
     await expect(lobbyRoot(page)).toHaveAttribute('data-robots', '1', { timeout: 60_000 });
+  });
+
+  test('walking into another member bumps off them instead of going through', async ({ page }) => {
+    await serveFlags(page);
+    await seedCamera(page, { x: 0, y: 1.7, z: 0, yaw: 0, pitch: 0 });
+    await openLobby(page);
+    await addGhost(page, 'practice-0d0d0d', 'in the way', { x: 0, y: 1.7, z: -3 });
+    await expect(lobbyRoot(page)).toHaveAttribute('data-peers', '1', { timeout: 15_000 });
+    await expect(lobbyRoot(page)).toHaveAttribute('data-bumps', '0');
+    await page.keyboard.down('KeyW');
+    try {
+      await expect.poll(async () => Number(await lobbyRoot(page).getAttribute('data-bumps')), { timeout: 60_000 }).toBeGreaterThan(0);
+      // Keep pushing: still stopped at their shell, not through them and off to the wall.
+      await page.waitForTimeout(1_500);
+    } finally {
+      await page.keyboard.up('KeyW');
+    }
+    const camera = await readCamera(page);
+    expect(camera.z).toBeGreaterThan(-3 + 0.8);
   });
 
   test('with lobby_avatars off, everyone stays an orb', async ({ page }) => {

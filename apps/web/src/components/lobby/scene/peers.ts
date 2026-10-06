@@ -26,7 +26,7 @@
 
 import * as THREE from 'three';
 import { nearness, normalizeYaw, sanitizeName, stepSpring, wrapAngle } from '@forge/lobby';
-import type { Spring } from '@forge/lobby';
+import type { Spring, Vec3 } from '@forge/lobby';
 
 import type { PeerState } from '../presence/types';
 import { CAVE_PALETTE } from './palette';
@@ -59,6 +59,8 @@ export interface Peers {
   ): void;
   /** How many peers are drawn as robots now (the rest are orbs). */
   robotCount(): number;
+  /** Where everyone is drawn now, eye positions: what the local member bumps into. */
+  bodies(): readonly Vec3[];
   dispose(): void;
 }
 
@@ -341,6 +343,9 @@ export function createPeers(
           light.intensity = 2;
         }
       });
+    },
+    bodies() {
+      return [...views.values()].map((view) => view.shown);
     },
     robotCount() {
       let count = 0;

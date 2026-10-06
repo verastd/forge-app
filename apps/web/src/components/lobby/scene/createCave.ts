@@ -26,10 +26,14 @@
  * readout's slot as `data-hover-slot` (empty when none) and its light as
  * `data-hover-glow` (on or off) whenever they change, and how many people
  * are robots (with avatars on) as `data-robots`.
+ *
+ * With avatars on, members also bump into each other (`collideBodies`):
+ * after each step the local member is pushed out of everyone drawn and
+ * bounces off them, counted on the root as `data-bumps`.
  */
 
 import * as THREE from 'three';
-import { WALL, clampCamera, normalizeYaw, slotPose } from '@forge/lobby';
+import { WALL, clampCamera, collideBodies, normalizeYaw, slotPose } from '@forge/lobby';
 import type { AppEntry, CameraState } from '@forge/lobby';
 
 import type { PeerState, PresenceFeed, SelfState } from '../presence/types';
@@ -659,6 +663,10 @@ export function createCave(canvas: HTMLCanvasElement, opts: CaveOptions): Cave {
     }
   };
 
+  // Bumping into people: this client's own way out of a body on the very same spot, so two members who land together part.
+  const tieAngle = Math.random() * Math.PI * 2;
+  let bumps = 0;
+
   const frame = (now: number): void => {
     if (!running) {
       return;
@@ -678,6 +686,14 @@ export function createCave(canvas: HTMLCanvasElement, opts: CaveOptions): Cave {
       fit();
 
       controls.step(dt, reducedMotion);
+      if (opts.avatars) {
+        const bump = collideBodies(motion.pos, motion.vel, peers.bodies(), tieAngle);
+        if (bump.hits > 0) {
+          motion.pos.set(bump.pos.x, bump.pos.y, bump.pos.z);
+          motion.vel.set(bump.vel.x, bump.vel.y, bump.vel.z);
+          bumps += 1;
+        }
+      }
       camera.position.copy(motion.pos);
       camera.rotation.set(-motion.pitch, -motion.yaw, 0);
       camera.updateMatrixWorld();
@@ -786,6 +802,7 @@ export function createCave(canvas: HTMLCanvasElement, opts: CaveOptions): Cave {
         root.dataset.z = fixed(motion.pos.z);
         root.dataset.yaw = fixed(normalizeYaw(motion.yaw));
         root.dataset.pitch = fixed(motion.pitch);
+        if (opts.avatars) root.dataset.bumps = String(bumps);
         const key = poseKey();
         if (key !== focusKey) {
           focusKey = key;
