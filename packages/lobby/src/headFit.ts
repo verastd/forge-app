@@ -33,6 +33,11 @@ export interface HeadPlacement {
   eyes?: [Point3, Point3] | null;
   /** [slant, turn, pitch] radians for the left eye, mirrored for the right (see `eyeRotations`). */
   eyeAngles?: [number, number, number] | null;
+  /**
+   * The whole model's angles, [tilt, turn, slant] radians, about `offset` (see `turnPoint`);
+   * `eyes` and `screen` are given unangled and turn with it.
+   */
+  angles?: [number, number, number] | null;
   /** The glowing eyes' size, times their own. */
   eyeScale?: number | null;
   /** A shiny black LED face screen across the face opening (head frame, metres). */
@@ -145,13 +150,34 @@ export function autoPlacement(
   return { scale, offset };
 }
 
-/** Where `point` (in the file's own frame) lands under `placement`. */
+/**
+ * `v` turned by a model's `angles` ([tilt, turn, slant] radians; three.js's Euler
+ * order YXZ: slant about Z, then tilt about X, then turn about Y). Tilt nods the
+ * top forward (+Z), turn faces +Z toward +X (the robot's left), slant leans the
+ * top toward -X.
+ */
+export function turnPoint(v: Readonly<Point3>, angles: Readonly<[number, number, number]> | null | undefined): Point3 {
+  if (!angles) return [v[0], v[1], v[2]];
+  const [tilt, turn, slant] = angles;
+  const [x0, y0, z0] = v;
+  const x1 = x0 * Math.cos(slant) - y0 * Math.sin(slant);
+  const y1 = x0 * Math.sin(slant) + y0 * Math.cos(slant);
+  const y2 = y1 * Math.cos(tilt) - z0 * Math.sin(tilt);
+  const z2 = y1 * Math.sin(tilt) + z0 * Math.cos(tilt);
+  return [x1 * Math.cos(turn) + z2 * Math.sin(turn), y2, -x1 * Math.sin(turn) + z2 * Math.cos(turn)];
+}
+
+/** Where `point`, given unangled in a placement's head frame (its eyes, its screen), really is once the model is angled. */
+export function rotateAbout(placement: HeadPlacement, point: Readonly<Point3>): Point3 {
+  const o = placement.offset;
+  const t = turnPoint([point[0] - o[0], point[1] - o[1], point[2] - o[2]], placement.angles);
+  return [round(t[0] + o[0]), round(t[1] + o[1]), round(t[2] + o[2])];
+}
+
+/** Where `point` (in the file's own frame) lands under `placement`, angles and all. */
 export function placePoint(placement: HeadPlacement, point: Readonly<Point3>): Point3 {
-  return [
-    round(placement.scale * point[0] + placement.offset[0]),
-    round(placement.scale * point[1] + placement.offset[1]),
-    round(placement.scale * point[2] + placement.offset[2]),
-  ];
+  const t = turnPoint([placement.scale * point[0], placement.scale * point[1], placement.scale * point[2]], placement.angles);
+  return [round(t[0] + placement.offset[0]), round(t[1] + placement.offset[1]), round(t[2] + placement.offset[2])];
 }
 
 /**

@@ -1,7 +1,19 @@
 import { describe, expect, it } from 'vitest';
 
 import { FACE_PANEL } from './avatar.js';
-import { HEAD_FIT, ROBOT_EYES, alignToEye, anglesFromNormal, autoPlacement, eyeRotations, nudge, placePoint, rescale } from './headFit.js';
+import {
+  HEAD_FIT,
+  ROBOT_EYES,
+  alignToEye,
+  anglesFromNormal,
+  autoPlacement,
+  eyeRotations,
+  nudge,
+  placePoint,
+  rescale,
+  rotateAbout,
+  turnPoint,
+} from './headFit.js';
 import type { HeadPlacement, Point3 } from './headFit.js';
 
 /** A box's eight corners, flat. */
@@ -201,6 +213,36 @@ describe('eye angles', () => {
       [-0.1, 0.3, -0.2],
       [-0.1, -0.3, 0.2],
     ]);
+  });
+});
+
+describe('angling a whole model', () => {
+  const near = (actual: Point3, expected: Point3): void => {
+    actual.forEach((v, i) => expect(v).toBeCloseTo(expected[i]!, 4));
+  };
+  const quarter = Math.PI / 2;
+
+  it('tilts the top forward, turns the front to the robot’s left, slants the top to its right', () => {
+    near(turnPoint([0, 1, 0], [quarter, 0, 0]), [0, 0, 1]);
+    near(turnPoint([0, 0, 1], [0, quarter, 0]), [1, 0, 0]);
+    near(turnPoint([0, 1, 0], [0, 0, quarter]), [-1, 0, 0]);
+    expect(turnPoint([1, 2, 3], null)).toEqual([1, 2, 3]);
+  });
+
+  it('turns in three.js’s YXZ order: slant, then tilt, then turn', () => {
+    // Slanted a quarter, the top lies along -X; tilting about X leaves it there; turning takes it to +Z.
+    near(turnPoint([0, 1, 0], [quarter, quarter, quarter]), [0, 0, 1]);
+  });
+
+  it('carries eyes and points about the offset, and an eye hole still lands on the eye', () => {
+    const angled: HeadPlacement = { scale: 0.5, offset: [0, 0.1, 0], angles: [0, 0, quarter] };
+    near(rotateAbout(angled, [0, 0.2, 0]), [-0.1, 0.1, 0]);
+    expect(rotateAbout({ scale: 1, offset: [0, 0, 0] }, [0.1, 0.2, 0.3])).toEqual([0.1, 0.2, 0.3]);
+    near(placePoint(angled, [0, 0.2, 0]), [-0.1, 0.1, 0]);
+    const lined = alignToEye(angled, [0.1, 0.1, 0.2], 'left');
+    const hole = placePoint(lined, [0.1, 0.1, 0.2]);
+    expect(hole[0]).toBeCloseTo(ROBOT_EYES[0][0], 3);
+    expect(hole[1]).toBeCloseTo(ROBOT_EYES[0][1], 3);
   });
 });
 

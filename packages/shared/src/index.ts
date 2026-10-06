@@ -1299,6 +1299,8 @@ export const AVATAR_PLACEMENT_SCALE_MIN = 0.01;
 export const AVATAR_PLACEMENT_SCALE_MAX = 10;
 export const AVATAR_PLACEMENT_REACH = 1;
 export const AVATAR_PLACEMENT_EYE_ANGLE = 1.2;
+/** How far (radians, either way) a fitted head or accessory may be tilted, turned or slanted. */
+export const AVATAR_PLACEMENT_ANGLE = 0.8;
 /** The smallest and largest a fitted head's glowing eyes may be, times their own size. */
 export const AVATAR_PLACEMENT_EYE_SCALE_MIN = 0.5;
 export const AVATAR_PLACEMENT_EYE_SCALE_MAX = 2.5;
@@ -1343,6 +1345,19 @@ export const AvatarHeadPlacementSchema = z.object({
       z.number().min(-AVATAR_PLACEMENT_EYE_ANGLE).max(AVATAR_PLACEMENT_EYE_ANGLE),
       z.number().min(-AVATAR_PLACEMENT_EYE_ANGLE).max(AVATAR_PLACEMENT_EYE_ANGLE),
       z.number().min(-AVATAR_PLACEMENT_EYE_ANGLE).max(AVATAR_PLACEMENT_EYE_ANGLE),
+    ])
+    .nullish(),
+  /**
+   * How the whole fitted model is angled, radians, as [tilt, turn, slant], about `offset`
+   * (applied turn, then tilt, then slant): tilt nods its top forward, turn faces it to the
+   * robot's left, slant rolls it. Its `eyes` and `screen` are given unangled and go with it.
+   * Absent: upright, straight ahead.
+   */
+  angles: z
+    .tuple([
+      z.number().min(-AVATAR_PLACEMENT_ANGLE).max(AVATAR_PLACEMENT_ANGLE),
+      z.number().min(-AVATAR_PLACEMENT_ANGLE).max(AVATAR_PLACEMENT_ANGLE),
+      z.number().min(-AVATAR_PLACEMENT_ANGLE).max(AVATAR_PLACEMENT_ANGLE),
     ])
     .nullish(),
   /** How big a replacing head's glowing eyes are, times their own size. Absent: 1. */
