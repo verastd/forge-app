@@ -1103,3 +1103,7 @@ class AvatarMember(BaseModel):
 
 class AvatarMemberList(BaseModel):
     members: list[AvatarMember]
+
+
+class AvatarAccess(BaseModel):
+    canEdit: bool

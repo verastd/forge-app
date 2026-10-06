@@ -1,7 +1,8 @@
 /**
  * The avatars BFF (behind `lobby_avatars`, which the API enforces): the
  * lobby reads every robot's look from `GET /bff/avatars` (forwarded as
- * nobody when signed out), and the admin's avatar editor paints robots,
+ * nobody when signed out), the account menu asks `GET /bff/avatars/me`
+ * whether to link the caller to the editor, and the admin's avatar editor paints robots,
  * gives them chestplates and keeps the head library through the rest, as the
  * signed-in GitHub member. Whether the caller is an admin is the API's to
  * decide, never this file's.
@@ -40,6 +41,7 @@ interface Route {
 
 const ROUTES: readonly Route[] = [
   { method: 'GET', path: /^$/, identity: 'optional' },
+  { method: 'GET', path: /^me$/, identity: 'required' },
   { method: 'GET', path: /^members$/, identity: 'required' },
   { method: 'PUT', path: new RegExp(`^members/${MEMBER}$`), identity: 'required' },
   { method: 'DELETE', path: new RegExp(`^members/${MEMBER}$`), identity: 'required' },

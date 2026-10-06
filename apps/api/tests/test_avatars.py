@@ -270,6 +270,23 @@ def test_changes_need_an_admin(
         assert response.json() == {"error": "admin_only"}
 
 
+def test_me_says_whether_the_caller_may_edit(
+    client: TestClient, admin_headers: dict[str, str], user_headers: dict[str, str]
+) -> None:
+    assert client.get("/api/avatars/me").status_code == 401
+    assert client.get("/api/avatars/me", headers=user_headers).json() == {"canEdit": False}
+    assert client.get("/api/avatars/me", headers=admin_headers).json() == {"canEdit": True}
+
+
+def test_me_is_behind_the_flag(
+    client: TestClient, admin_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FORGE_FLAGS_JSON", json.dumps({"lobby_avatars": False}))
+    response = client.get("/api/avatars/me", headers=admin_headers)
+    assert response.status_code == 404
+    assert response.json() == {"error": "avatars-disabled"}
+
+
 def test_an_admin_lists_members_as_lobby_ids(
     client: TestClient, admin_headers: dict[str, str], user_headers: dict[str, str]
 ) -> None:
@@ -577,6 +594,7 @@ def zod_fields(name: str) -> list[str]:
         models.AvatarHeadUpload,
         models.AvatarMember,
         models.AvatarMemberList,
+        models.AvatarAccess,
     ],
 )
 def test_every_avatar_model_matches_its_zod_schema_field_for_field(model: type[BaseModel]) -> None:
