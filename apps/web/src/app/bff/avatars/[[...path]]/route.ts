@@ -59,6 +59,7 @@ const ROUTES: readonly Route[] = [
     maxBodyBytes: uploadCap(AVATAR_HEAD_MAX_BYTES),
   },
   { method: 'DELETE', path: new RegExp(`^heads/${HEAD}$`), identity: 'required' },
+  { method: 'PUT', path: new RegExp(`^heads/${HEAD}/placement$`), identity: 'required' },
 ];
 
 interface Context {

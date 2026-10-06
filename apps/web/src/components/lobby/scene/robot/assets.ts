@@ -107,6 +107,12 @@ export interface RobotAssets {
   body: Promise<RobotBody>;
   /** A library head's scene, by its GLB's sha256: clone it before use. */
   head(sha256: string): Promise<GLTF>;
+  /**
+   * A head from a file not uploaded yet (the editor's fitting), parsed from
+   * its bytes and kept under `key`, which then works like a sha256 in
+   * `head()` and in a look.
+   */
+  localHead(key: string, bytes: ArrayBuffer): Promise<GLTF>;
   /** A chestplate image, by sha256. */
   chest(sha256: string): Promise<THREE.Texture>;
   /** A member's generated emblem, by id and name (cached per both). */
@@ -172,6 +178,9 @@ export function createRobotAssets(renderer: THREE.WebGLRenderer): RobotAssets {
     head(sha256) {
       return heads.get(sha256, () => loader().loadAsync(assetUrl(sha256)));
     },
+    localHead(key, bytes) {
+      return heads.get(key, () => loader().parseAsync(bytes, ''));
+    },
     chest(sha256) {
       return chests.get(sha256, async () => {
         const texture = await textureLoader.loadAsync(assetUrl(sha256));
@@ -208,6 +217,45 @@ export function createRobotAssets(renderer: THREE.WebGLRenderer): RobotAssets {
       heads.clear();
     },
   };
+}
+
+/** What fitting needs from a head's model: every vertex (node transforms applied), and whether it has EyeL and EyeR. */
+export interface HeadMeasure {
+  positions: Float32Array;
+  hasEyes: boolean;
+}
+
+/** Measures a loaded head's scene (its own frame: the scene root left as it is). */
+export function measureHead(scene: THREE.Object3D): HeadMeasure {
+  const root = scene.clone(true);
+  root.position.set(0, 0, 0);
+  root.quaternion.identity();
+  root.scale.setScalar(1);
+  root.updateMatrixWorld(true);
+  const chunks: Float32Array[] = [];
+  const at = new THREE.Vector3();
+  root.traverse((object) => {
+    const mesh = object as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    const position = mesh.geometry.getAttribute('position');
+    if (!position) return;
+    const out = new Float32Array(position.count * 3);
+    for (let i = 0; i < position.count; i += 1) {
+      at.fromBufferAttribute(position, i).applyMatrix4(mesh.matrixWorld);
+      out[i * 3] = at.x;
+      out[i * 3 + 1] = at.y;
+      out[i * 3 + 2] = at.z;
+    }
+    chunks.push(out);
+  });
+  const positions = new Float32Array(chunks.reduce((n, c) => n + c.length, 0));
+  let offset = 0;
+  for (const chunk of chunks) {
+    positions.set(chunk, offset);
+    offset += chunk.length;
+  }
+  const hasEyes = Boolean(root.getObjectByName('EyeL') && root.getObjectByName('EyeR'));
+  return { positions, hasEyes };
 }
 
 /** Frees an object tree's geometries, materials and their textures. */

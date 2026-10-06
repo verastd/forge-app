@@ -218,9 +218,14 @@ in the Apps lobby is a hovering robot instead of an orb: one shared body
 idles, flies, banks and blinks procedurally. An admin dresses each robot at
 **/me/avatars** (in the account menu): four colours, a chestplate image (PNG, JPEG or WebP, up
 to 1 MB), and a head from a library of `.glb` files they upload, either a
-head that replaces the robot's own (eyes on its `EyeL`/`EyeR` empties) or
-a face accessory worn over it (a mask, a visor, a helmet), which can cover
-the eyes. Anyone not dressed wears a default picked from their GitHub id.
+head that replaces the robot's own or a face accessory worn over it (a
+mask, a visor, a helmet), which can cover the eyes. A head can come
+straight from a modeller such as Tripo: the editor's fitting tool sizes it
+and sets it on a robot, and the admin nudges it, clicks where a replacing
+head's eyes go (or which eye an accessory's eye hole is for), then adds
+it. The fit is saved beside the file (`PUT /api/avatars/heads/{id}/placement`),
+so **Adjust fit** changes it later without uploading again. Anyone not
+dressed wears a default picked from their GitHub id.
 Admins are `FORGE_ADMIN_IDS` on the API, as for proposals.
 
 ## Repo map

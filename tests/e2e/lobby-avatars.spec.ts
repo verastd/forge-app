@@ -305,6 +305,173 @@ test.describe('the avatar editor', () => {
   });
 });
 
+/**
+ * A tiny real .glb: one box mesh, `min` to `max` in metres, as a modeller
+ * exports it (origin at its feet, far bigger than the robot's head).
+ */
+function boxGlb(min: [number, number, number], max: [number, number, number]): Buffer {
+  const corners: number[] = [];
+  for (const x of [min[0], max[0]]) for (const y of [min[1], max[1]]) for (const z of [min[2], max[2]]) corners.push(x, y, z);
+  const faces = [0, 1, 3, 0, 3, 2, 4, 6, 7, 4, 7, 5, 0, 4, 5, 0, 5, 1, 2, 3, 7, 2, 7, 6, 0, 2, 6, 0, 6, 4, 1, 5, 7, 1, 7, 3];
+  const positions = Buffer.from(new Float32Array(corners).buffer);
+  const indices = Buffer.from(new Uint16Array(faces).buffer);
+  const bin = Buffer.concat([positions, indices, Buffer.alloc((4 - ((positions.length + indices.length) % 4)) % 4)]);
+  const doc = {
+    asset: { version: '2.0' },
+    scene: 0,
+    scenes: [{ nodes: [0] }],
+    nodes: [{ name: 'Head', mesh: 0 }],
+    meshes: [{ primitives: [{ attributes: { POSITION: 0 }, indices: 1 }] }],
+    buffers: [{ byteLength: bin.length }],
+    bufferViews: [
+      { buffer: 0, byteOffset: 0, byteLength: positions.length, target: 34962 },
+      { buffer: 0, byteOffset: positions.length, byteLength: indices.length, target: 34963 },
+    ],
+    accessors: [
+      { bufferView: 0, componentType: 5126, count: 8, type: 'VEC3', min, max },
+      { bufferView: 1, componentType: 5123, count: faces.length, type: 'SCALAR' },
+    ],
+  };
+  let text = Buffer.from(JSON.stringify(doc));
+  text = Buffer.concat([text, Buffer.alloc((4 - (text.length % 4)) % 4, 0x20)]);
+  const header = Buffer.alloc(12);
+  header.write('glTF', 0);
+  header.writeUInt32LE(2, 4);
+  header.writeUInt32LE(12 + 8 + text.length + 8 + bin.length, 8);
+  const chunk = (length: number, type: number): Buffer => {
+    const b = Buffer.alloc(8);
+    b.writeUInt32LE(length, 0);
+    b.writeUInt32LE(type, 4);
+    return b;
+  };
+  return Buffer.concat([header, chunk(text.length, 0x4e4f534a), text, chunk(bin.length, 0x004e4942), bin]);
+}
+
+const TRIPO_HEAD = boxGlb([-0.4, 0, -0.35], [0.4, 0.8, 0.35]);
+
+test.describe('fitting a head', () => {
+  test.describe.configure({ timeout: 150_000 });
+
+  test('a raw file is fitted on the robot, then added with its fit', async ({ page, context, baseURL }) => {
+    await signInAs(context, baseURL ?? '', { sub: '4242', login: 'trent-admin' });
+    await openEditor(page);
+    const upload = held();
+    let sent: Record<string, unknown> | null = null;
+    await page.route('**/bff/avatars/heads/tripo-head', async (route) => {
+      sent = route.request().postDataJSON() as Record<string, unknown>;
+      await upload.handler(route);
+    });
+    await page.getByLabel('Name').fill('Tripo head');
+    await page.getByLabel(/File \(\.glb/).setInputFiles({ name: 'tripo-head.glb', mimeType: 'model/gltf-binary', buffer: TRIPO_HEAD });
+    const add = page.getByRole('button', { name: 'Add to library' });
+    // Not before the fitting tool has it on a robot.
+    await expect(page.getByText('Reading the head…').or(page.getByText('Loading the robot…')).or(page.getByText('Loading the fitting tool…')).first()).toBeVisible();
+    await expect(add).toBeDisabled();
+    const size = page.getByRole('slider', { name: /^Size/ });
+    await expect(size).toBeEnabled({ timeout: 90_000 });
+    await expect(add).toBeEnabled();
+    await expect(page.getByText('Eyes: placed here')).toBeVisible();
+
+    // Placing the eyes: a click on the head, then straight on to the other eye; Esc stops.
+    await page.getByRole('button', { name: 'Place left eye' }).click();
+    const chip = page.getByRole('status').filter({ hasText: 'Click the head where its left eye goes' });
+    await expect(chip).toBeVisible();
+    const stage = page.locator('[data-fitter] canvas');
+    const box = await stage.boundingBox();
+    if (!box) throw new Error('no fitting preview');
+    await expect(async () => {
+      await page.mouse.click(box.x + box.width / 2, box.y + box.height * 0.45);
+      await expect(page.getByText('Left eye placed.')).toBeVisible({ timeout: 2_000 });
+    }).toPass({ timeout: 30_000 });
+    await expect(page.getByRole('status').filter({ hasText: 'Click the head where its right eye goes' })).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('status').filter({ hasText: 'Click the head where its right eye goes' })).toHaveCount(0);
+
+    await size.fill('150');
+    await expect(size).toHaveAttribute('aria-valuetext', '150% of where it started');
+    await page.getByRole('slider', { name: /^Down · Up/ }).fill('0.02');
+    await expect(page.getByRole('slider', { name: /^Down · Up/ })).toHaveAttribute('aria-valuetext', '2 centimetres up');
+
+    await add.click();
+    await expect(page.getByRole('button', { name: 'Uploading…' })).toBeVisible();
+    await expect.poll(() => sent).not.toBeNull();
+    const placement = (sent as unknown as { placement: { scale: number; offset: number[]; eyes: number[][] } }).placement;
+    // 0.37 m of robot head over a 0.8 m wide model, then half as big again.
+    expect(placement.scale).toBeCloseTo((0.37 / 0.8) * 1.5, 2);
+    expect(placement.offset[1]).toBeCloseTo(0.02, 3);
+    expect(placement.eyes).toHaveLength(2);
+    upload.release(200, {
+      id: 'tripo-head',
+      name: 'Tripo head',
+      sha256: 'c'.repeat(64),
+      bytes: TRIPO_HEAD.length,
+      fit: 'replace',
+      eyes: false,
+      placement,
+      updatedAt: '2026-10-06T09:00:00+00:00',
+    });
+    await expect(page.getByRole('listitem').filter({ hasText: 'Tripo head' })).toBeVisible();
+    await expect(page.getByRole('slider', { name: /^Size/ })).toHaveCount(0);
+  });
+
+  test('a file the preview can’t open says so and can’t be added', async ({ page, context, baseURL }) => {
+    await signInAs(context, baseURL ?? '', { sub: '4242', login: 'trent-admin' });
+    await openEditor(page);
+    await page.getByLabel('Name').fill('Broken');
+    await page.getByLabel(/File \(\.glb/).setInputFiles({ name: 'broken.glb', mimeType: 'model/gltf-binary', buffer: Buffer.from('not a glb at all') });
+    await expect(page.getByRole('alert').filter({ hasText: 'The preview couldn’t open that file.' })).toBeVisible({ timeout: 90_000 });
+    await expect(page.getByRole('button', { name: 'Add to library' })).toBeDisabled();
+  });
+
+  test('a library head is refitted and saved, Saving… then Saved, and a failure says why', async ({ page, context, baseURL }) => {
+    await signInAs(context, baseURL ?? '', { sub: '4242', login: 'trent-admin' });
+    await page.route(`**/bff/avatars/assets/${SHA}`, (route) =>
+      route.fulfill({ status: 200, contentType: 'model/gltf-binary', body: TRIPO_HEAD }),
+    );
+    await openEditor(page);
+    const row = page.getByRole('listitem').filter({ hasText: 'Phantom mask' });
+    await row.getByRole('button', { name: 'Adjust fit' }).click();
+    await expect(page.getByRole('heading', { name: 'Fitting “Phantom mask”' })).toBeVisible();
+    const size = page.getByRole('slider', { name: /^Size/ });
+    await expect(size).toBeEnabled({ timeout: 90_000 });
+    await expect(page.getByRole('button', { name: 'Line up an eye hole' })).toBeEnabled();
+
+    let attempts = 0;
+    const second = held();
+    await page.route('**/bff/avatars/heads/phantom/placement', async (route) => {
+      attempts += 1;
+      if (attempts === 1) {
+        await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'service_unreachable' }) });
+        return;
+      }
+      await second.handler(route);
+    });
+    await page.getByRole('slider', { name: /^Left · Right/ }).fill('-0.03');
+    await page.getByRole('button', { name: 'Save fit' }).click();
+    const failure = page.getByRole('alert').filter({ hasText: 'Couldn’t reach the server.' });
+    await expect(failure).toBeVisible();
+    await failure.getByRole('button', { name: 'Try again' }).click();
+    await expect(page.getByRole('button', { name: 'Saving…' })).toBeVisible();
+    second.release(200, { ...LIST.heads[0], placement: { scale: 0.3, offset: [-0.03, 0.05, 0.12] } });
+    await expect(page.getByRole('status').filter({ hasText: 'Saved ✓' })).toBeVisible();
+  });
+
+  test('a library head that won’t load says so, with Try again', async ({ page, context, baseURL }) => {
+    await signInAs(context, baseURL ?? '', { sub: '4242', login: 'trent-admin' });
+    let fail = true;
+    await page.route(`**/bff/avatars/assets/${SHA}`, (route) =>
+      fail ? route.fulfill({ status: 503, body: '' }) : route.fulfill({ status: 200, contentType: 'model/gltf-binary', body: TRIPO_HEAD }),
+    );
+    await openEditor(page);
+    await page.getByRole('listitem').filter({ hasText: 'Phantom mask' }).getByRole('button', { name: 'Adjust fit' }).click();
+    const failure = page.getByRole('alert').filter({ hasText: 'Couldn’t load this head from the library.' });
+    await expect(failure).toBeVisible({ timeout: 90_000 });
+    fail = false;
+    await failure.getByRole('button', { name: 'Try again' }).click();
+    await expect(page.getByRole('slider', { name: /^Size/ })).toBeEnabled({ timeout: 90_000 });
+  });
+});
+
 test.describe('a head that fails to load', () => {
   test.describe.configure({ timeout: 120_000 });
 

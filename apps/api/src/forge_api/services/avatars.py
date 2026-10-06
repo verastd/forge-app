@@ -31,11 +31,13 @@ from forge_api.models import (
     AVATAR_CHEST_MAX_PIXELS,
     AVATAR_EYE_NODES,
     AVATAR_HEAD_MAX_BYTES,
+    AVATAR_PLACEMENT_AS_IS,
     Avatar,
     AvatarAccess,
     AvatarChestUpload,
     AvatarColors,
     AvatarHead,
+    AvatarHeadPlacement,
     AvatarHeadUpload,
     AvatarList,
     AvatarMember,
@@ -78,7 +80,23 @@ register_schema(
             chest_sha256 TEXT REFERENCES avatars_assets (sha256),
             updated_at TEXT NOT NULL
         )""",
+        # How a head is worn, apart from its row so a database from before fitting
+        # existed gains it by CREATE alone. No row: worn as its file says.
+        """CREATE TABLE IF NOT EXISTS avatars_head_placements (
+            head_id TEXT PRIMARY KEY REFERENCES avatars_heads (id),
+            scale REAL NOT NULL,
+            x REAL NOT NULL,
+            y REAL NOT NULL,
+            z REAL NOT NULL,
+            eyes TEXT
+        )""",
     ],
+)
+
+#: A head with how it is worn (the placement's columns are NULL when it has none).
+_HEAD_SELECT: Final = (
+    "SELECT h.*, p.scale AS p_scale, p.x AS p_x, p.y AS p_y, p.z AS p_z, p.eyes AS p_eyes "
+    "FROM avatars_heads h LEFT JOIN avatars_head_placements p ON p.head_id = h.id"
 )
 
 
@@ -307,8 +325,34 @@ def _head(row: dict[str, Any]) -> AvatarHead:
         bytes=row["bytes"],
         fit=row["fit"],
         eyes=bool(row["eyes"]),
+        placement=_placement(row),
         updatedAt=members_service.from_db(row["updated_at"]).isoformat(),
     )
+
+
+def _placement(row: dict[str, Any]) -> AvatarHeadPlacement:
+    if row["p_scale"] is None:
+        return AVATAR_PLACEMENT_AS_IS
+    eyes = json.loads(row["p_eyes"]) if row["p_eyes"] is not None else None
+    return AvatarHeadPlacement(
+        scale=row["p_scale"], offset=(row["p_x"], row["p_y"], row["p_z"]), eyes=eyes
+    )
+
+
+def _store_placement(db: StateDB, head_id: str, placement: AvatarHeadPlacement | None) -> None:
+    db.execute("DELETE FROM avatars_head_placements WHERE head_id = ?", (head_id,))
+    if placement is None:
+        return
+    eyes = None if placement.eyes is None else json.dumps([list(eye) for eye in placement.eyes])
+    db.execute(
+        "INSERT INTO avatars_head_placements (head_id, scale, x, y, z, eyes) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (head_id, placement.scale, *placement.offset, eyes),
+    )
+
+
+def _head_row(db: StateDB, head_id: str) -> dict[str, Any] | None:
+    return db.query_one(f"{_HEAD_SELECT} WHERE h.id = ?", (head_id,))
 
 
 def _avatar_row(db: StateDB, member_id: str) -> dict[str, Any] | None:
@@ -325,7 +369,7 @@ def access(identity: Identity) -> AvatarAccess:
 def list_all(db: StateDB) -> AvatarList:
     """Every dressed robot and the head library, each in a stable order."""
     avatars = db.query_all("SELECT * FROM avatars_members ORDER BY member_id")
-    heads = db.query_all("SELECT * FROM avatars_heads ORDER BY name, id")
+    heads = db.query_all(f"{_HEAD_SELECT} ORDER BY h.name, h.id")
     return AvatarList(avatars=[_avatar(r) for r in avatars], heads=[_head(r) for r in heads])
 
 
@@ -421,8 +465,26 @@ def put_head(db: StateDB, head_id: str, upload: AvatarHeadUpload, now: datetime)
             "eyes = excluded.eyes, updated_at = excluded.updated_at",
             (head_id, name, sha, len(raw), upload.fit, int(eyes), members_service.to_db(now)),
         )
+        _store_placement(db, head_id, upload.placement)
         _drop_unused_assets(db, [old["sha256"] if old else None])
-        row = db.query_one("SELECT * FROM avatars_heads WHERE id = ?", (head_id,))
+        row = _head_row(db, head_id)
+    assert row is not None
+    return _head(row)
+
+
+def refit_head(
+    db: StateDB, head_id: str, placement: AvatarHeadPlacement, now: datetime
+) -> AvatarHead:
+    """Changes how a library head is worn, keeping its file. 404 head_not_found."""
+    with db.transaction():
+        if db.query_one("SELECT 1 FROM avatars_heads WHERE id = ?", (head_id,)) is None:
+            raise ApiError(404, {"error": "head_not_found"})
+        _store_placement(db, head_id, placement)
+        db.execute(
+            "UPDATE avatars_heads SET updated_at = ? WHERE id = ?",
+            (members_service.to_db(now), head_id),
+        )
+        row = _head_row(db, head_id)
     assert row is not None
     return _head(row)
 
@@ -435,5 +497,6 @@ def delete_head(db: StateDB, head_id: str) -> None:
         if row is None:
             raise ApiError(404, {"error": "head_not_found"})
         db.execute("UPDATE avatars_members SET head_id = NULL WHERE head_id = ?", (head_id,))
+        db.execute("DELETE FROM avatars_head_placements WHERE head_id = ?", (head_id,))
         db.execute("DELETE FROM avatars_heads WHERE id = ?", (head_id,))
         _drop_unused_assets(db, [row["sha256"]])

@@ -30,6 +30,7 @@ from forge_api.models import (
     AvatarAccess,
     AvatarChestUpload,
     AvatarHead,
+    AvatarHeadRefit,
     AvatarHeadUpload,
     AvatarList,
     AvatarMemberList,
@@ -177,6 +178,7 @@ def delete_chest(admin: AdminMember, db: Db, now: Now, member_id: MemberId) -> A
 @router.put(
     "/heads/{headId}",
     response_model=AvatarHead,
+    response_model_exclude_none=True,
     openapi_extra=body_doc(AvatarHeadUpload),
 )
 def put_head(
@@ -187,6 +189,23 @@ def put_head(
     upload: Annotated[AvatarHeadUpload, Depends(_upload(AvatarHeadUpload, AVATAR_HEAD_MAX_BYTES))],
 ) -> AvatarHead:
     return avatars_service.put_head(db, head_id, upload, now)
+
+
+@router.put(
+    "/heads/{headId}/placement",
+    response_model=AvatarHead,
+    response_model_exclude_none=True,
+    openapi_extra=body_doc(AvatarHeadRefit),
+)
+def put_head_placement(
+    admin: AdminMember,
+    db: Db,
+    now: Now,
+    head_id: HeadId,
+    refit: Annotated[AvatarHeadRefit, Depends(json_body(AvatarHeadRefit))],
+) -> AvatarHead:
+    """Changes how a head is worn (the editor's fitting), keeping its file."""
+    return avatars_service.refit_head(db, head_id, refit.placement, now)
 
 
 @router.delete("/heads/{headId}", status_code=204, response_class=Response)

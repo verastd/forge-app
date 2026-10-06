@@ -264,6 +264,7 @@ def test_changes_need_an_admin(
         ("DELETE", f"/api/avatars/members/{MEMBER}/chest"),
         ("PUT", "/api/avatars/heads/bolt"),
         ("DELETE", "/api/avatars/heads/bolt"),
+        ("PUT", "/api/avatars/heads/bolt/placement"),
     ):
         response = client.request(method, path, headers=user_headers, json={"colors": COLORS})
         assert response.status_code == 403, (method, path)
@@ -431,6 +432,105 @@ def test_deleting_a_head_puts_its_wearers_back_in_their_own(
     assert again.status_code == 404 and again.json() == {"error": "head_not_found"}
 
 
+AS_IS = {"scale": 1.0, "offset": [0.0, 0.0, 0.0]}
+FITTED = {
+    "scale": 0.5,
+    "offset": [-0.0085, 0.0, -0.015],
+    "eyes": [[-0.052, 0.106, 0.135], [0.052, 0.106, 0.135]],
+}
+
+
+def test_a_head_is_worn_as_its_file_says_until_it_is_fitted(
+    client: TestClient, admin_headers: dict[str, str]
+) -> None:
+    head = client.put(
+        "/api/avatars/heads/bolt",
+        headers=admin_headers,
+        json={"name": "Bolt", "fit": "replace", "data": b64(glb())},
+    ).json()
+    assert head["placement"] == AS_IS
+
+    fitted = client.put(
+        "/api/avatars/heads/bolt/placement", headers=admin_headers, json={"placement": FITTED}
+    )
+    assert fitted.status_code == 200
+    assert fitted.json()["placement"] == FITTED
+    assert fitted.json()["sha256"] == head["sha256"]
+    assert client.get("/api/avatars").json()["heads"] == [fitted.json()]
+
+    eyeless = {**FITTED, "eyes": None}
+    again = client.put(
+        "/api/avatars/heads/bolt/placement", headers=admin_headers, json={"placement": eyeless}
+    )
+    assert again.json()["placement"] == {"scale": 0.5, "offset": FITTED["offset"]}
+
+
+def test_an_upload_carries_its_fit_and_a_new_file_without_one_starts_over(
+    client: TestClient, admin_headers: dict[str, str]
+) -> None:
+    head = client.put(
+        "/api/avatars/heads/mask",
+        headers=admin_headers,
+        json={"name": "Mask", "fit": "accessory", "data": b64(glb()), "placement": FITTED},
+    ).json()
+    assert head["placement"] == FITTED
+    plain = client.put(
+        "/api/avatars/heads/mask",
+        headers=admin_headers,
+        json={"name": "Mask", "fit": "accessory", "data": b64(glb(eyes=False))},
+    ).json()
+    assert plain["placement"] == AS_IS
+
+
+def test_deleting_a_fitted_head_takes_its_fit_too(
+    client: TestClient, admin_headers: dict[str, str]
+) -> None:
+    client.put(
+        "/api/avatars/heads/bolt",
+        headers=admin_headers,
+        json={"name": "Bolt", "fit": "replace", "data": b64(glb()), "placement": FITTED},
+    )
+    assert client.delete("/api/avatars/heads/bolt", headers=admin_headers).status_code == 204
+    back = client.put(
+        "/api/avatars/heads/bolt",
+        headers=admin_headers,
+        json={"name": "Bolt", "fit": "replace", "data": b64(glb())},
+    ).json()
+    assert back["placement"] == AS_IS
+
+
+def test_fitting_is_checked(client: TestClient, admin_headers: dict[str, str]) -> None:
+    missing = client.put(
+        "/api/avatars/heads/ghost/placement", headers=admin_headers, json={"placement": FITTED}
+    )
+    assert missing.status_code == 404 and missing.json() == {"error": "head_not_found"}
+    client.put(
+        "/api/avatars/heads/bolt",
+        headers=admin_headers,
+        json={"name": "Bolt", "fit": "replace", "data": b64(glb())},
+    )
+    for bad in (
+        {**FITTED, "scale": 0},
+        {**FITTED, "scale": 11},
+        {**FITTED, "offset": [0, 2, 0]},
+        {**FITTED, "offset": [0, 0]},
+        {**FITTED, "eyes": [[0, 0, 0]]},
+        {**FITTED, "eyes": [[0, 0, 0], [0, -1.5, 0]]},
+        {**FITTED, "extra": 1},
+    ):
+        response = client.put(
+            "/api/avatars/heads/bolt/placement", headers=admin_headers, json={"placement": bad}
+        )
+        assert response.status_code == 400, bad
+        assert response.json()["error"] == "invalid_request"
+    nan = client.put(
+        "/api/avatars/heads/bolt/placement",
+        headers={**admin_headers, "content-type": "application/json"},
+        content=b'{"placement": {"scale": NaN, "offset": [0, 0, 0], "eyes": null}}',
+    )
+    assert nan.status_code == 400
+
+
 def test_head_uploads_are_checked(client: TestClient, admin_headers: dict[str, str]) -> None:
     cases: list[tuple[str, dict[str, Any], int, str]] = [
         (
@@ -592,6 +692,8 @@ def zod_fields(name: str) -> list[str]:
         models.AvatarUpdate,
         models.AvatarChestUpload,
         models.AvatarHeadUpload,
+        models.AvatarHeadPlacement,
+        models.AvatarHeadRefit,
         models.AvatarMember,
         models.AvatarMemberList,
         models.AvatarAccess,
@@ -612,6 +714,14 @@ def test_the_limits_match_the_zod_side() -> None:
         match = re.search(rf"export const {name} = ([0-9 *]+);", source)
         assert match is not None, name
         assert eval(match.group(1)) == getattr(models, name), name  # noqa: S307 - digits and *
+    for name in (
+        "AVATAR_PLACEMENT_SCALE_MIN",
+        "AVATAR_PLACEMENT_SCALE_MAX",
+        "AVATAR_PLACEMENT_REACH",
+    ):
+        match = re.search(rf"export const {name} = ([0-9.]+);", source)
+        assert match is not None, name
+        assert float(match.group(1)) == getattr(models, name), name
     for name in ("AVATAR_MEMBER_ID", "AVATAR_HEAD_ID", "AVATAR_SHA256"):
         match = re.search(rf"export const {name} = /(.*)/;", source)
         assert match is not None and match.group(1) == getattr(models, name), name
