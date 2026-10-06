@@ -4,6 +4,8 @@ off). The logic is services/avatars.py.
 - `GET /api/avatars`: every dressed robot and the head library. Public: the lobby draws
   everyone's robot, and nothing here is private.
 - `GET /api/avatars/assets/{sha256}`: a chest image or a head, cacheable forever.
+- `GET /api/avatars/me`: whether the signed-in caller may edit (is an admin), for the web's
+  account menu.
 - Admins only (`AdminMember`): `GET /api/avatars/members` (whom to dress),
   `PUT|DELETE /api/avatars/members/{memberId}`, `PUT|DELETE .../{memberId}/chest`, and
   `PUT|DELETE /api/avatars/heads/{headId}`.
@@ -25,6 +27,7 @@ from forge_api.models import (
     AVATAR_MEMBER_ID,
     AVATAR_SHA256,
     Avatar,
+    AvatarAccess,
     AvatarChestUpload,
     AvatarHead,
     AvatarHeadUpload,
@@ -32,7 +35,15 @@ from forge_api.models import (
     AvatarMemberList,
     AvatarUpdate,
 )
-from forge_api.routers.members import AdminMember, Db, Now, body_doc, json_body, read_capped
+from forge_api.routers.members import (
+    AdminMember,
+    Db,
+    Member,
+    Now,
+    body_doc,
+    json_body,
+    read_capped,
+)
 from forge_api.services import avatars as avatars_service
 from forge_api.services import flags as flags_service
 from forge_api.services import proposals as proposals_service
@@ -104,6 +115,13 @@ def get_asset(sha256: str, db: Db) -> Response:
             "X-Content-Type-Options": "nosniff",
         },
     )
+
+
+@router.get("/me", response_model=AvatarAccess)
+def my_access(user: Member) -> AvatarAccess:
+    """Whether the caller may use the avatar editor: the web's account menu asks, to link
+    admins to it. The editor's own routes still check, every time."""
+    return avatars_service.access(user)
 
 
 @router.get("/members", response_model=AvatarMemberList)

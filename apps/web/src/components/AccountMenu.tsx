@@ -6,7 +6,10 @@
  * Signed out, a plain "Sign in" link — shown only once sign-in is actually
  * offered, never a button that would just 404. Signed in, a disclosure
  * button with the avatar, opening a small panel: Profile, Settings, Connect
- * an agent (the FORGE connector's one-time setup, /connect), Sign out.
+ * an agent (the FORGE connector's one-time setup, /connect), Sign out. An
+ * admin also gets an Admin group with Robot avatars (the avatar editor,
+ * /me/avatars), once the API has said so (`/bff/avatars/me`); nobody else
+ * ever sees it, and it never flickers in and out while the answer is coming.
  * Deliberately not an ARIA `menu` — its items are ordinary links and a
  * form button, reachable in normal tab order, same as any other disclosure
  * on the site (see Modal for the pattern this borrows Escape-to-close from).
@@ -16,6 +19,10 @@ import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
+import { useFlags } from '@forge/flags/react';
+
+import { fetchAvatarAccess } from '../lib/avatars';
+import { demoFlagFallback } from '../lib/flags';
 import { Chip } from './Chip';
 import { useSession } from './SessionProvider';
 import styles from './AccountMenu.module.css';
@@ -24,6 +31,8 @@ export function AccountMenu() {
   const { session, availability } = useSession();
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
+  const { flags, loading: flagsLoading } = useFlags(demoFlagFallback());
+  const [canEditAvatars, setCanEditAvatars] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const panelId = useId();
@@ -60,6 +69,25 @@ export function AccountMenu() {
       document.removeEventListener('mousedown', onPointerDown);
     };
   }, [open]);
+
+  // Admins get the avatar editor in the menu. Asked once per signed-in
+  // GitHub member while robot avatars are on; the practice account is nobody
+  // to the API, so it isn't asked.
+  const avatarsOn = !flagsLoading && flags.lobby_avatars;
+  const askAs = session !== null && !session.demo ? session.login : null;
+  useEffect(() => {
+    setCanEditAvatars(false);
+    if (!avatarsOn || askAs === null) {
+      return undefined;
+    }
+    let live = true;
+    void fetchAvatarAccess().then((canEdit) => {
+      if (live) setCanEditAvatars(canEdit);
+    });
+    return () => {
+      live = false;
+    };
+  }, [avatarsOn, askAs]);
 
   const close = useCallback(() => {
     setOpen(false);
@@ -138,7 +166,15 @@ export function AccountMenu() {
               Connect an agent
             </Link>
           </li>
-          <li>
+          {canEditAvatars && (
+            <li className={styles.group}>
+              <span className={styles.groupLabel}>Admin</span>
+              <Link href="/me/avatars" className={styles.item} onClick={close}>
+                Robot avatars
+              </Link>
+            </li>
+          )}
+          <li className={canEditAvatars ? styles.group : undefined}>
             <form method="post" action="/auth/signout" className={styles.signOutForm}>
               <button type="submit" className={styles.item}>
                 Sign out

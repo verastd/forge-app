@@ -1,7 +1,8 @@
 import { expect, test } from '@playwright/test';
-import type { Page, Route } from '@playwright/test';
+import type { BrowserContext, Page, Route } from '@playwright/test';
 
 import { addGhost, lobbyRoot, openLobby, serveFlags } from './helpers/lobby';
+import type { FlagName } from './helpers/lobby';
 import { demoSignIn, signInAs } from './helpers/session';
 import { assertionClaims, json, withStandIn } from './helpers/standin';
 
@@ -13,7 +14,7 @@ import { assertionClaims, json, withStandIn } from './helpers/standin';
  * is off or the body can't load. The page reports how many people are
  * robots as `data-robots`; no assertion reads pixels.
  *
- * The admin's editor (/apps/avatars) is driven with its BFF answered in the
+ * The admin's editor (/me/avatars) is driven with its BFF answered in the
  * browser (page.route), so each answer can be held to show the state the
  * page is in while it waits: loading, saving, uploading. The BFF itself is
  * checked against the stand-in API on the demo server's API port.
@@ -69,7 +70,7 @@ async function openEditor(page: Page): Promise<void> {
   await page.route('**/bff/avatars', (route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(LIST) }),
   );
-  await page.goto('/apps/avatars');
+  await page.goto('/me/avatars');
   await expect(page.getByRole('heading', { name: '@octo-alice' })).toBeVisible({ timeout: 60_000 });
 }
 
@@ -119,9 +120,9 @@ test.describe('the avatar editor', () => {
   test.describe.configure({ timeout: 90_000 });
 
   test('the practice account is told it can’t change avatars', async ({ page }) => {
-    await page.goto('/signin?next=%2Fapps%2Favatars');
+    await page.goto('/signin?next=%2Fme%2Favatars');
     await demoSignIn(page);
-    await expect(page).toHaveURL(/\/apps\/avatars$/);
+    await expect(page).toHaveURL(/\/me\/avatars$/);
     await expect(page.getByText('The practice account can’t change avatars')).toBeVisible();
   });
 
@@ -132,7 +133,7 @@ test.describe('the avatar editor', () => {
     await page.route('**/bff/avatars', (route) =>
       route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(LIST) }),
     );
-    await page.goto('/apps/avatars');
+    await page.goto('/me/avatars');
     await expect(page.getByText('Loading members and the head library…')).toBeVisible();
     members.release(200, MEMBERS);
     await expect(page.getByRole('heading', { name: '@octo-alice' })).toBeVisible();
@@ -140,6 +141,22 @@ test.describe('the avatar editor', () => {
     // The preview loads, then is ready (or says it can't, with a way to try again).
     await expect(page.locator('[data-preview]')).toHaveAttribute('data-preview', /^(ready|error)$/, { timeout: 60_000 });
     await expect(page.getByRole('button', { name: /Phantom mask/ })).toContainText('Face accessory');
+  });
+
+  test('it sits under the site nav, and its old address leads to it', async ({ page, context, baseURL }) => {
+    await signInAs(context, baseURL ?? '', { sub: '4242', login: 'trent-admin' });
+    await page.route('**/bff/avatars/members', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(MEMBERS) }),
+    );
+    await page.route('**/bff/avatars', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(LIST) }),
+    );
+    await page.goto('/apps/avatars');
+    await expect(page).toHaveURL(/\/me\/avatars$/);
+    await expect(page.getByRole('heading', { name: 'Robot avatars', level: 1 })).toBeVisible();
+    // The way back: the site nav and the account menu are both there.
+    await expect(page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Apps' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Account: trent-admin' })).toBeVisible();
   });
 
   test('a refusal says why, with no way to retry what can’t change', async ({ page, context, baseURL }) => {
@@ -150,7 +167,7 @@ test.describe('the avatar editor', () => {
     await page.route('**/bff/avatars', (route) =>
       route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(LIST) }),
     );
-    await page.goto('/apps/avatars');
+    await page.goto('/me/avatars');
     await expect(page.getByText('Only admins can change avatars.')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Try again' })).toHaveCount(0);
   });
@@ -167,7 +184,7 @@ test.describe('the avatar editor', () => {
     await page.route('**/bff/avatars', (route) =>
       route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(LIST) }),
     );
-    await page.goto('/apps/avatars');
+    await page.goto('/me/avatars');
     await expect(page.getByText('Couldn’t reach the server.', { exact: false })).toBeVisible();
     await page.getByRole('button', { name: 'Try again' }).click();
     await expect(page.getByRole('heading', { name: '@octo-alice' })).toBeVisible();
@@ -301,24 +318,96 @@ test.describe('a head that fails to load', () => {
   });
 });
 
+test.describe('the account menu', () => {
+  /** Signs in as `login`, answers the access check with `canEdit`, and opens the menu. */
+  async function openMenu(
+    page: Page,
+    context: BrowserContext,
+    baseURL: string | undefined,
+    canEdit: boolean,
+    flags: Partial<Record<FlagName, boolean>> = {},
+  ): Promise<{ asked: () => number }> {
+    let asked = 0;
+    await serveFlags(page, flags);
+    await signInAs(context, baseURL ?? '', { sub: '4242', login: 'trent-admin' });
+    await page.route('**/bff/avatars/me', (route) => {
+      asked += 1;
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ canEdit }) });
+    });
+    await page.goto('/');
+    await page.getByRole('button', { name: 'Account: trent-admin' }).click();
+    return { asked: () => asked };
+  }
+
+  test('an admin gets Robot avatars, which opens the editor', async ({ page, context, baseURL }) => {
+    await openMenu(page, context, baseURL, true);
+    const link = page.getByRole('link', { name: 'Robot avatars' });
+    await expect(link).toBeVisible();
+    await expect(link).toHaveAttribute('href', '/me/avatars');
+    await link.click();
+    await expect(page).toHaveURL(/\/me\/avatars$/);
+  });
+
+  test('anyone else gets no such link', async ({ page, context, baseURL }) => {
+    const menu = await openMenu(page, context, baseURL, false);
+    await expect.poll(menu.asked).toBe(1);
+    await expect(page.getByRole('link', { name: 'Profile' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Robot avatars' })).toHaveCount(0);
+  });
+
+  test('with robot avatars off, nobody is asked and nobody gets the link', async ({ page, context, baseURL }) => {
+    const menu = await openMenu(page, context, baseURL, true, { lobby_avatars: false });
+    await expect(page.getByRole('link', { name: 'Profile' })).toBeVisible();
+    await page.waitForTimeout(1_000);
+    expect(menu.asked()).toBe(0);
+    await expect(page.getByRole('link', { name: 'Robot avatars' })).toHaveCount(0);
+  });
+
+  test('the practice account is never asked', async ({ page }) => {
+    let asked = 0;
+    await serveFlags(page);
+    await page.route('**/bff/avatars/me', (route) => {
+      asked += 1;
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ canEdit: true }) });
+    });
+    await page.goto('/signin?next=%2F');
+    await demoSignIn(page);
+    await page.getByRole('button', { name: /^Account:/ }).click();
+    await expect(page.getByRole('link', { name: 'Profile' })).toBeVisible();
+    await page.waitForTimeout(1_000);
+    expect(asked).toBe(0);
+    await expect(page.getByRole('link', { name: 'Robot avatars' })).toHaveCount(0);
+  });
+});
+
 test.describe('the avatars BFF, against a stand-in API', () => {
   test.describe.configure({ mode: 'serial', timeout: 60_000 });
 
   test('the list goes up as nobody signed out; everything else needs you, as you', async ({ context, baseURL }) => {
     const base = baseURL ?? '';
     await withStandIn(
-      (request) => (request.path === '/api/avatars' || request.path === '/api/avatars/members' ? json(200, request.path === '/api/avatars' ? LIST : MEMBERS) : undefined),
+      (request) =>
+        request.path === '/api/avatars' || request.path === '/api/avatars/members'
+          ? json(200, request.path === '/api/avatars' ? LIST : MEMBERS)
+          : request.path === '/api/avatars/me'
+            ? json(200, { canEdit: true })
+            : undefined,
       async (seen) => {
         const list = await context.request.get('/bff/avatars');
         expect(list.status()).toBe(200);
         expect(await list.json()).toEqual(LIST);
         expect(seen[0]?.authorization).toBeNull();
         expect((await context.request.get('/bff/avatars/members')).status()).toBe(401);
+        expect((await context.request.get('/bff/avatars/me')).status()).toBe(401);
 
         await signInAs(context, base, { sub: '4242', login: 'trent-admin' });
         const members = await context.request.get('/bff/avatars/members');
         expect(members.status()).toBe(200);
         expect(assertionClaims(seen.at(-1)?.authorization)).toMatchObject({ sub: '4242', login: 'trent-admin' });
+        const me = await context.request.get('/bff/avatars/me');
+        expect(await me.json()).toEqual({ canEdit: true });
+        expect(seen.at(-1)?.path).toBe('/api/avatars/me');
+        expect(assertionClaims(seen.at(-1)?.authorization)).toMatchObject({ sub: '4242' });
       },
     );
   });

@@ -10,6 +10,7 @@
  */
 
 import {
+  AvatarAccessSchema,
   AvatarHeadSchema,
   AvatarListSchema,
   AvatarMemberListSchema,
@@ -80,6 +81,20 @@ async function request<T>(method: 'GET' | 'PUT' | 'DELETE', path: string, schema
 
 export const fetchAvatars = (): Promise<AvatarList> => request('GET', '', AvatarListSchema);
 export const fetchMembers = (): Promise<AvatarMemberList> => request('GET', '/members', AvatarMemberListSchema);
+
+/**
+ * Whether the signed-in caller may use the avatar editor (is an admin), for
+ * the account menu. False on any refusal or failure: it never throws, and a
+ * link nobody can use is worse than none.
+ */
+export async function fetchAvatarAccess(): Promise<boolean> {
+  try {
+    const access = await request('GET', '/me', AvatarAccessSchema);
+    return access.canEdit;
+  } catch {
+    return false;
+  }
+}
 export const saveAvatar = (memberId: string, update: AvatarUpdate): Promise<Avatar> =>
   request('PUT', `/members/${encodeURIComponent(memberId)}`, AvatarSchema, update);
 export const resetAvatar = (memberId: string): Promise<void> =>

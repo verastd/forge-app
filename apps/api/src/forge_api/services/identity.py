@@ -138,10 +138,15 @@ def require_identity(authorization: Annotated[str | None, Header()] = None) -> I
         raise _unauthenticated() from None
 
 
+def is_admin(identity: Identity) -> bool:
+    """Whether `identity` is an admin: its GitHub user id is on FORGE_ADMIN_IDS. The id,
+    never the login: a login can be renamed, and then registered by someone else."""
+    return identity.sub in admin_ids()
+
+
 def require_admin(identity: Annotated[Identity, Depends(require_identity)]) -> Identity:
-    """Router dependency for operator-only routes: the GitHub user id must be allowlisted.
-    The id, never the login: a login can be renamed, and then registered by someone else."""
-    if identity.sub not in admin_ids():
+    """Router dependency for operator-only routes: the caller must be an admin (`is_admin`)."""
+    if not is_admin(identity):
         raise ApiError(403, {"error": "admin_only"})
     return identity
 

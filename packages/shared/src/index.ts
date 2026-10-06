@@ -1348,6 +1348,12 @@ export const AvatarMemberListSchema = z.object({
 });
 export type AvatarMemberList = z.infer<typeof AvatarMemberListSchema>;
 
+/** `GET /api/avatars/me`: whether the caller may use the avatar editor (is an admin). */
+export const AvatarAccessSchema = z.object({
+  canEdit: z.boolean(),
+});
+export type AvatarAccess = z.infer<typeof AvatarAccessSchema>;
+
 // ---------------------------------------------------------------------------
 // The rail registry and the brief, mirrored in apps/api (services/rails.py,
 // services/brief.py) and held to tests/fixtures/{rails,brief}-golden.json.

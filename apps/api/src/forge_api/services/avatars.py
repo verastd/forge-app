@@ -32,6 +32,7 @@ from forge_api.models import (
     AVATAR_EYE_NODES,
     AVATAR_HEAD_MAX_BYTES,
     Avatar,
+    AvatarAccess,
     AvatarChestUpload,
     AvatarColors,
     AvatarHead,
@@ -43,6 +44,7 @@ from forge_api.models import (
 )
 from forge_api.services import members as members_service
 from forge_api.services.errors import ApiError
+from forge_api.services.identity import Identity, is_admin
 from forge_api.services.state import StateDB, register_schema
 
 FLAG: Final = "lobby_avatars"
@@ -311,6 +313,13 @@ def _head(row: dict[str, Any]) -> AvatarHead:
 
 def _avatar_row(db: StateDB, member_id: str) -> dict[str, Any] | None:
     return db.query_one("SELECT * FROM avatars_members WHERE member_id = ?", (member_id,))
+
+
+def access(identity: Identity) -> AvatarAccess:
+    """What `identity` may do with avatars: edit them when an admin. The editor's own routes
+    check the same rule on every call (`AdminMember`); this only tells the web whether to
+    offer the editor."""
+    return AvatarAccess(canEdit=is_admin(identity))
 
 
 def list_all(db: StateDB) -> AvatarList:
