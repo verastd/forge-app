@@ -13,7 +13,7 @@
  *   sits on the neck and its middle over it. Its eyes start where the
  *   robot's own are, on the band's front.
  * - A face accessory is sized to the face, its middle at eye height, its
- *   back on the face screen. Where an eye shows through is the admin's call
+ *   back on the face screen: the robot's own, or a replacing head's (`onto`). Where an eye shows through is the admin's call
  *   (`alignToEye`): a hole is the one thing a model can't point at.
  *
  * Given the model's triangles too, a replacing head's eyes sit on its face
@@ -33,6 +33,15 @@ export interface HeadPlacement {
   eyes?: [Point3, Point3] | null;
   /** [slant, turn, pitch] radians for the left eye, mirrored for the right (see `eyeRotations`). */
   eyeAngles?: [number, number, number] | null;
+  /** The glowing eyes' size, times their own. */
+  eyeScale?: number | null;
+  /** A shiny black LED face screen across the face opening (head frame, metres). */
+  screen?: HeadScreen | null;
+}
+
+export interface HeadScreen {
+  center: Point3;
+  size: [number, number];
 }
 
 export type HeadFitKind = 'replace' | 'accessory';
@@ -44,6 +53,17 @@ export const HEAD_FIT = Object.freeze({
   band: 0.2,
   /** The most any eye angle may be, radians (AvatarHeadPlacement's limit). */
   eyeAngle: 1.2,
+  /** A hollow this much deeper (metres) than the frame around it is an open face, to be closed with a screen. */
+  screenRecess: 0.03,
+  /** How far a face screen sits behind the frame around it, metres. */
+  screenInset: 0.004,
+  /** How far the search for the opening's edges goes from the middle, and in what steps (metres). */
+  screenSearch: 0.3,
+  screenStep: 0.005,
+  /** How much a face screen reaches past the opening on each side, behind the frame (metres). */
+  screenTuck: 0.005,
+  /** The largest a face screen may be across or down (AvatarHeadPlacement's limit), metres. */
+  screenMax: 0.6,
   /** How far an eye sits proud of the face under it, metres. */
   eyeLift: 0.004,
   /** A face accessory is this wide, metres: most of the face screen. */
@@ -69,7 +89,18 @@ function eyeHeight(): number {
  * the file's own frame, node transforms applied) are `positions`. A model
  * with no usable vertex is worn as it is.
  */
-export function autoPlacement(kind: HeadFitKind, positions: ArrayLike<number>, triangles: ArrayLike<number> = []): HeadPlacement {
+/** The face an accessory is worn on: a replacing head's eyes and its face screen, if it has one. */
+export interface WornFace {
+  eyes: [Point3, Point3];
+  screen?: HeadScreen | null;
+}
+
+export function autoPlacement(
+  kind: HeadFitKind,
+  positions: ArrayLike<number>,
+  triangles: ArrayLike<number> = [],
+  onto: WornFace | null = null,
+): HeadPlacement {
   const points = finitePoints(positions);
   if (points.length === 0) {
     return { scale: 1, offset: [0, 0, 0], ...(kind === 'replace' ? { eyes: null } : {}) };
@@ -88,6 +119,13 @@ export function autoPlacement(kind: HeadFitKind, positions: ArrayLike<number>, t
     const scale = clampScale(HEAD_FIT.headWidth / Math.max(x1 - x0, 1e-9));
     const offset = clampPoint([-scale * ((x0 + x1) / 2), -scale * bottom, -scale * ((z0 + z1) / 2)]);
     const front = scale * z1 + offset[2];
+    const screen = findScreen(triangles, scale, offset);
+    if (screen) {
+      // An open face: a screen closes it, and the eyes sit on the screen, facing straight out.
+      const z = screen.center[2] + HEAD_FIT.eyeLift;
+      const eyes = ROBOT_EYES.map((eye) => clampPoint([eye[0], eye[1], z])) as [Point3, Point3];
+      return { scale, offset, eyes, eyeAngles: [0, 0, 0], screen };
+    }
     const hits = ROBOT_EYES.map((eye) => surfaceAt(triangles, scale, offset, eye));
     const eyes = ROBOT_EYES.map((eye, i) => clampPoint([eye[0], eye[1], (hits[i]?.z ?? front) + HEAD_FIT.eyeLift])) as [Point3, Point3];
     const aims = hits.flatMap((hit, i) => (hit ? [anglesFromNormal(hit.normal, i === 0 ? 'left' : 'right')] : []));
@@ -97,9 +135,13 @@ export function autoPlacement(kind: HeadFitKind, positions: ArrayLike<number>, t
   }
   const [x0, x1] = spread(points.map((p) => p[0]));
   const [z0] = spread(points.map((p) => p[2]));
-  const scale = clampScale(HEAD_FIT.faceWidth / Math.max(x1 - x0, 1e-9));
+  // Over a replacing head, its face (screen width, eye height, eye depth); else the robot's own.
+  const faceWidth = onto?.screen ? onto.screen.size[0] * 0.9 : HEAD_FIT.faceWidth;
+  const eyeY = onto ? (onto.eyes[0][1] + onto.eyes[1][1]) / 2 : ROBOT_EYES[0][1];
+  const faceZ = onto ? Math.min(onto.eyes[0][2], onto.eyes[1][2]) : FACE_PANEL.z;
+  const scale = clampScale(faceWidth / Math.max(x1 - x0, 1e-9));
   const middle = (bottom + top) / 2;
-  const offset = clampPoint([-scale * ((x0 + x1) / 2), ROBOT_EYES[0][1] - scale * middle, FACE_PANEL.z + 0.002 - scale * z0]);
+  const offset = clampPoint([-scale * ((x0 + x1) / 2), eyeY - scale * middle, faceZ + 0.002 - scale * z0]);
   return { scale, offset };
 }
 
@@ -117,8 +159,13 @@ export function placePoint(placement: HeadPlacement, point: Readonly<Point3>): P
  * in the file's own frame (the middle of an eye hole), sits over the robot's
  * `side` eye.
  */
-export function alignToEye(placement: HeadPlacement, point: Readonly<Point3>, side: 'left' | 'right'): HeadPlacement {
-  const eye = ROBOT_EYES[side === 'left' ? 0 : 1];
+export function alignToEye(
+  placement: HeadPlacement,
+  point: Readonly<Point3>,
+  side: 'left' | 'right',
+  eyes: Readonly<[Readonly<Point3>, Readonly<Point3>]> = ROBOT_EYES,
+): HeadPlacement {
+  const eye = eyes[side === 'left' ? 0 : 1];
   const placed = placePoint(placement, point);
   return {
     ...placement,
@@ -225,6 +272,80 @@ function surfaceAt(
     best = { z, normal };
   }
   return best ? { z: scale * best.z + offset[2], normal: best.normal } : null;
+}
+
+/**
+ * The opening of an open face, if the model has one: rays along -Z between
+ * the eyes go deep into the head (its hollow), well behind the frame around
+ * them. The opening is the hollow's extent, flooded out from between the
+ * eyes over a grid of rays (islands inside it, like the model's sculpted
+ * eyes, don't stop it); the screen fills it, set just behind the frame. The
+ * renderer cuts away whatever of the model stands in front of the screen
+ * inside it, so the screen hides the model's own eyes. Null for a closed face.
+ */
+function findScreen(triangles: ArrayLike<number>, scale: number, offset: Point3): HeadScreen | null {
+  if (triangles.length < 9) return null;
+  const step = HEAD_FIT.screenStep;
+  const reach = Math.round(HEAD_FIT.screenSearch / step);
+  const middle: Point3 = [0, ROBOT_EYES[0][1], 0];
+  const cache = new Map<string, number>();
+  const depth = (i: number, j: number): number => {
+    const key = `${i},${j}`;
+    let z = cache.get(key);
+    if (z === undefined) {
+      z = surfaceAt(triangles, scale, offset, [middle[0] + i * step, middle[1] + j * step, 0])?.z ?? -Infinity;
+      cache.set(key, z);
+    }
+    return z;
+  };
+  const inside = depth(0, 0);
+  /** The extent of what `deep` admits, flooded out from between the eyes; null if it isn't framed. */
+  const flood = (deep: (z: number) => boolean): [number, number, number, number] | null => {
+    const seen = new Set<string>(['0,0']);
+    const queue: [number, number][] = [[0, 0]];
+    let [left, right, down, up] = [0, 0, 0, 0];
+    while (queue.length > 0) {
+      const [i, j] = queue.pop()!;
+      left = Math.min(left, i);
+      right = Math.max(right, i);
+      down = Math.min(down, j);
+      up = Math.max(up, j);
+      for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+        const [ni, nj] = [i + di, j + dj];
+        const key = `${ni},${nj}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        // Reaching the search's edge: not framed, so no opening.
+        if (Math.abs(ni) > reach || Math.abs(nj) > reach) return null;
+        if (deep(depth(ni, nj))) queue.push([ni, nj]);
+      }
+    }
+    return [left, right, down, up];
+  };
+  /** The frame: the middle depth of what the rays meet just outside an extent, if they mostly meet something. */
+  const frameAround = ([left, right, down, up]: [number, number, number, number], deep: (z: number) => boolean): number | null => {
+    const ring: number[] = [];
+    for (let i = left - 1; i <= right + 1; i += 1) ring.push(depth(i, down - 1), depth(i, up + 1));
+    for (let j = down; j <= up; j += 1) ring.push(depth(left - 1, j), depth(right + 1, j));
+    const framed = ring.filter((z) => Number.isFinite(z) && !deep(z)).sort((a, b) => a - b);
+    return framed.length < ring.length * 0.75 ? null : framed[Math.floor(framed.length / 2)]!;
+  };
+  // First the hollow itself, for the frame's depth; then all that lies behind the frame (a ledge, a sill).
+  const hollow = (z: number): boolean => z < inside + HEAD_FIT.screenRecess;
+  const first = flood(hollow);
+  if (first === null) return null;
+  const frame = frameAround(first, hollow);
+  if (frame === null || frame - inside < HEAD_FIT.screenRecess) return null;
+  const behind = (z: number): boolean => z < frame - HEAD_FIT.screenInset * 2;
+  const extent = flood(behind) ?? first;
+  const [left, right, down, up] = extent;
+  if (right - left < 2 || up - down < 2) return null;
+  const width = Math.min(HEAD_FIT.screenMax, (right - left + 1) * step + 2 * HEAD_FIT.screenTuck);
+  const height = Math.min(HEAD_FIT.screenMax, (up - down + 1) * step + 2 * HEAD_FIT.screenTuck);
+  return {
+    center: clampPoint([middle[0] + ((left + right) / 2) * step, middle[1] + ((down + up) / 2) * step, frame - HEAD_FIT.screenInset]),
+    size: [round(width), round(height)],
+  };
 }
 
 function clampAngle(angle: number): number {

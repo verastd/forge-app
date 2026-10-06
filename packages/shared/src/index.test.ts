@@ -3,6 +3,10 @@ import * as shared from './index.js';
 import {
   AVATAR_PLACEMENT_AS_IS,
   AVATAR_PLACEMENT_EYE_ANGLE,
+  AVATAR_PLACEMENT_EYE_SCALE_MAX,
+  AVATAR_PLACEMENT_EYE_SCALE_MIN,
+  AVATAR_PLACEMENT_SCREEN_MAX,
+  AvatarHeadOwnerSchema,
   AVATAR_PLACEMENT_REACH,
   AVATAR_PLACEMENT_SCALE_MAX,
   AVATAR_PLACEMENT_SCALE_MIN,
@@ -1090,6 +1094,8 @@ describe('AvatarHeadPlacementSchema', () => {
     offset: [-0.01, 0, -0.015],
     eyes: [[-0.052, 0.106, 0.135], [0.052, 0.106, 0.135]],
     eyeAngles: [0.2, 0.15, -0.05],
+    eyeScale: 1.3,
+    screen: { center: [0, 0.1, 0.09], size: [0.25, 0.13] },
   };
 
   it('takes a fit, with or without eyes of its own', () => {
@@ -1106,9 +1112,23 @@ describe('AvatarHeadPlacementSchema', () => {
     { ...fitted, eyes: [[0, 0, 0]] },
     { ...fitted, scale: Number.NaN },
     { ...fitted, eyeAngles: [0, 0] },
+    { ...fitted, eyeScale: AVATAR_PLACEMENT_EYE_SCALE_MIN / 2 },
+    { ...fitted, eyeScale: AVATAR_PLACEMENT_EYE_SCALE_MAX * 2 },
+    { ...fitted, screen: { center: [0, 0.1, 0.09], size: [0.25] } },
+    { ...fitted, screen: { center: [0, 0.1, 0.09], size: [AVATAR_PLACEMENT_SCREEN_MAX + 0.1, 0.1] } },
     { ...fitted, eyeAngles: [0, AVATAR_PLACEMENT_EYE_ANGLE + 0.1, 0] },
   ])('refuses %j', (bad) => {
     expect(AvatarHeadPlacementSchema.safeParse(bad).success).toBe(false);
+  });
+
+  it('gives a head to one member, or to nobody', () => {
+    expect(AvatarHeadOwnerSchema.parse({ owner: 'gh:1001' })).toEqual({ owner: 'gh:1001' });
+    expect(AvatarHeadOwnerSchema.parse({ owner: null })).toEqual({ owner: null });
+    expect(AvatarHeadOwnerSchema.safeParse({ owner: 'octocat' }).success).toBe(false);
+    expect(AvatarHeadOwnerSchema.safeParse({}).success).toBe(false);
+    const head = { id: 'bolt', name: 'Bolt', sha256: 'a'.repeat(64), bytes: 1, fit: 'replace', eyes: true, updatedAt: 'now' };
+    expect(shared.AvatarHeadSchema.parse({ ...head, owner: 'gh:1001' }).owner).toBe('gh:1001');
+    expect(shared.AvatarHeadSchema.safeParse({ ...head, owner: 'nobody' }).success).toBe(false);
   });
 
   it('wears a head from an API older than fitting as its file is', () => {

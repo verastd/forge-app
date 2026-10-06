@@ -60,6 +60,7 @@ const ROUTES: readonly Route[] = [
   },
   { method: 'DELETE', path: new RegExp(`^heads/${HEAD}$`), identity: 'required' },
   { method: 'PUT', path: new RegExp(`^heads/${HEAD}/placement$`), identity: 'required' },
+  { method: 'PUT', path: new RegExp(`^heads/${HEAD}/owner$`), identity: 'required' },
 ];
 
 interface Context {

@@ -99,15 +99,35 @@ register_schema(
             turn REAL NOT NULL,
             pitch REAL NOT NULL
         )""",
+        # A robot's face accessory, worn over whichever head it has. No row: none.
+        """CREATE TABLE IF NOT EXISTS avatars_member_accessories (
+            member_id TEXT PRIMARY KEY REFERENCES avatars_members (member_id),
+            head_id TEXT NOT NULL REFERENCES avatars_heads (id)
+        )""",
+        # Who a head was made for: only they can wear it. No row: nobody yet.
+        """CREATE TABLE IF NOT EXISTS avatars_head_owners (
+            head_id TEXT PRIMARY KEY REFERENCES avatars_heads (id),
+            member_id TEXT NOT NULL
+        )""",
+        # A fitted head's eye size and whether its model's own eyes are hidden. No row:
+        # eyes their own size, the model's eyes shown.
+        """CREATE TABLE IF NOT EXISTS avatars_head_eye_looks (
+            head_id TEXT PRIMARY KEY REFERENCES avatars_heads (id),
+            eye_scale REAL,
+            screen TEXT
+        )""",
     ],
 )
 
 #: A head with how it is worn (the placement's columns are NULL when it has none).
 _HEAD_SELECT: Final = (
     "SELECT h.*, p.scale AS p_scale, p.x AS p_x, p.y AS p_y, p.z AS p_z, p.eyes AS p_eyes, "
-    "a.slant AS a_slant, a.turn AS a_turn, a.pitch AS a_pitch "
+    "a.slant AS a_slant, a.turn AS a_turn, a.pitch AS a_pitch, "
+    "o.member_id AS o_member, l.eye_scale AS l_eye_scale, l.screen AS l_screen "
     "FROM avatars_heads h LEFT JOIN avatars_head_placements p ON p.head_id = h.id "
-    "LEFT JOIN avatars_head_eye_angles a ON a.head_id = h.id"
+    "LEFT JOIN avatars_head_eye_angles a ON a.head_id = h.id "
+    "LEFT JOIN avatars_head_owners o ON o.head_id = h.id "
+    "LEFT JOIN avatars_head_eye_looks l ON l.head_id = h.id"
 )
 
 
@@ -323,6 +343,7 @@ def _avatar(row: dict[str, Any]) -> Avatar:
             shell=row["shell"], trim=row["trim"], accent=row["accent"], eye=row["eye"]
         ),
         head=row["head_id"],
+        accessory=row["x_accessory"],
         chest=row["chest_sha256"],
         updatedAt=members_service.from_db(row["updated_at"]).isoformat(),
     )
@@ -337,6 +358,7 @@ def _head(row: dict[str, Any]) -> AvatarHead:
         fit=row["fit"],
         eyes=bool(row["eyes"]),
         placement=_placement(row),
+        owner=row["o_member"],
         updatedAt=members_service.from_db(row["updated_at"]).isoformat(),
     )
 
@@ -345,22 +367,30 @@ def _placement(row: dict[str, Any]) -> AvatarHeadPlacement:
     if row["p_scale"] is None:
         return AVATAR_PLACEMENT_AS_IS
     eyes = json.loads(row["p_eyes"]) if row["p_eyes"] is not None else None
-    angles = (
-        (row["a_slant"], row["a_turn"], row["a_pitch"]) if row["a_slant"] is not None else None
-    )
+    angles = (row["a_slant"], row["a_turn"], row["a_pitch"]) if row["a_slant"] is not None else None
+    screen = json.loads(row["l_screen"]) if row["l_screen"] is not None else None
     return AvatarHeadPlacement(
         scale=row["p_scale"],
         offset=(row["p_x"], row["p_y"], row["p_z"]),
         eyes=eyes,
         eyeAngles=angles,
+        eyeScale=row["l_eye_scale"],
+        screen=screen,
     )
 
 
 def _store_placement(db: StateDB, head_id: str, placement: AvatarHeadPlacement | None) -> None:
     db.execute("DELETE FROM avatars_head_placements WHERE head_id = ?", (head_id,))
     db.execute("DELETE FROM avatars_head_eye_angles WHERE head_id = ?", (head_id,))
+    db.execute("DELETE FROM avatars_head_eye_looks WHERE head_id = ?", (head_id,))
     if placement is None:
         return
+    if placement.eyeScale is not None or placement.screen is not None:
+        screen = None if placement.screen is None else placement.screen.model_dump_json()
+        db.execute(
+            "INSERT INTO avatars_head_eye_looks (head_id, eye_scale, screen) VALUES (?, ?, ?)",
+            (head_id, placement.eyeScale, screen),
+        )
     if placement.eyeAngles is not None:
         db.execute(
             "INSERT INTO avatars_head_eye_angles (head_id, slant, turn, pitch) VALUES (?, ?, ?, ?)",
@@ -374,12 +404,36 @@ def _store_placement(db: StateDB, head_id: str, placement: AvatarHeadPlacement |
     )
 
 
+def _store_owner(db: StateDB, head_id: str, owner: str | None) -> None:
+    """Gives a head to `owner` (None: nobody); whoever else wore it goes back to their own."""
+    db.execute("DELETE FROM avatars_head_owners WHERE head_id = ?", (head_id,))
+    if owner is not None:
+        db.execute(
+            "INSERT INTO avatars_head_owners (head_id, member_id) VALUES (?, ?)", (head_id, owner)
+        )
+    db.execute(
+        "UPDATE avatars_members SET head_id = NULL WHERE head_id = ? AND member_id IS NOT ?",
+        (head_id, owner),
+    )
+    db.execute(
+        "DELETE FROM avatars_member_accessories WHERE head_id = ? AND member_id IS NOT ?",
+        (head_id, owner),
+    )
+
+
 def _head_row(db: StateDB, head_id: str) -> dict[str, Any] | None:
     return db.query_one(f"{_HEAD_SELECT} WHERE h.id = ?", (head_id,))
 
 
+#: A dressed robot with its face accessory (NULL when it has none).
+_MEMBER_SELECT: Final = (
+    "SELECT m.*, x.head_id AS x_accessory FROM avatars_members m "
+    "LEFT JOIN avatars_member_accessories x ON x.member_id = m.member_id"
+)
+
+
 def _avatar_row(db: StateDB, member_id: str) -> dict[str, Any] | None:
-    return db.query_one("SELECT * FROM avatars_members WHERE member_id = ?", (member_id,))
+    return db.query_one(f"{_MEMBER_SELECT} WHERE m.member_id = ?", (member_id,))
 
 
 def access(identity: Identity) -> AvatarAccess:
@@ -391,7 +445,7 @@ def access(identity: Identity) -> AvatarAccess:
 
 def list_all(db: StateDB) -> AvatarList:
     """Every dressed robot and the head library, each in a stable order."""
-    avatars = db.query_all("SELECT * FROM avatars_members ORDER BY member_id")
+    avatars = db.query_all(f"{_MEMBER_SELECT} ORDER BY m.member_id")
     heads = db.query_all(f"{_HEAD_SELECT} ORDER BY h.name, h.id")
     return AvatarList(avatars=[_avatar(r) for r in avatars], heads=[_head(r) for r in heads])
 
@@ -407,12 +461,20 @@ def list_members(db: StateDB) -> AvatarMemberList:
 
 
 def set_avatar(db: StateDB, member_id: str, update: AvatarUpdate, now: datetime) -> Avatar:
-    """Paints a member's robot and picks its head (none: its own). Keeps its chestplate."""
+    """Paints a member's robot and picks its head (none: its own) and its face accessory
+    (none: none), worn over that head. Keeps its chestplate."""
     with db.transaction():
-        if update.head is not None and (
-            db.query_one("SELECT 1 FROM avatars_heads WHERE id = ?", (update.head,)) is None
-        ):
-            raise ApiError(400, {"error": "unknown_head", "fields": ["head"]})
+        for field, wanted in (("head", update.head), ("accessory", update.accessory)):
+            if wanted is None:
+                continue
+            head = _head_row(db, wanted)
+            if head is None:
+                raise ApiError(400, {"error": "unknown_head", "fields": [field]})
+            # A head is made for one member: nobody else can wear it.
+            if head["o_member"] != member_id:
+                raise ApiError(400, {"error": "head_not_theirs", "fields": [field]})
+            if field == "accessory" and head["fit"] != "accessory":
+                raise ApiError(400, {"error": "not_an_accessory", "fields": [field]})
         c = update.colors
         db.execute(
             "INSERT INTO avatars_members "
@@ -422,6 +484,12 @@ def set_avatar(db: StateDB, member_id: str, update: AvatarUpdate, now: datetime)
             "eye = excluded.eye, head_id = excluded.head_id, updated_at = excluded.updated_at",
             (member_id, c.shell, c.trim, c.accent, c.eye, update.head, members_service.to_db(now)),
         )
+        db.execute("DELETE FROM avatars_member_accessories WHERE member_id = ?", (member_id,))
+        if update.accessory is not None:
+            db.execute(
+                "INSERT INTO avatars_member_accessories (member_id, head_id) VALUES (?, ?)",
+                (member_id, update.accessory),
+            )
         row = _avatar_row(db, member_id)
     assert row is not None
     return _avatar(row)
@@ -431,6 +499,7 @@ def reset_avatar(db: StateDB, member_id: str) -> None:
     """Back to the default look (and no chestplate). Idempotent."""
     with db.transaction():
         row = _avatar_row(db, member_id)
+        db.execute("DELETE FROM avatars_member_accessories WHERE member_id = ?", (member_id,))
         db.execute("DELETE FROM avatars_members WHERE member_id = ?", (member_id,))
         _drop_unused_assets(db, [row["chest_sha256"] if row else None])
 
@@ -489,6 +558,8 @@ def put_head(db: StateDB, head_id: str, upload: AvatarHeadUpload, now: datetime)
             (head_id, name, sha, len(raw), upload.fit, int(eyes), members_service.to_db(now)),
         )
         _store_placement(db, head_id, upload.placement)
+        if upload.owner is not None:
+            _store_owner(db, head_id, upload.owner)
         _drop_unused_assets(db, [old["sha256"] if old else None])
         row = _head_row(db, head_id)
     assert row is not None
@@ -512,6 +583,22 @@ def refit_head(
     return _head(row)
 
 
+def set_head_owner(db: StateDB, head_id: str, owner: str | None, now: datetime) -> AvatarHead:
+    """Gives a head to a member, or to nobody; anyone else wearing it goes back to their own
+    head. 404 head_not_found."""
+    with db.transaction():
+        if db.query_one("SELECT 1 FROM avatars_heads WHERE id = ?", (head_id,)) is None:
+            raise ApiError(404, {"error": "head_not_found"})
+        _store_owner(db, head_id, owner)
+        db.execute(
+            "UPDATE avatars_heads SET updated_at = ? WHERE id = ?",
+            (members_service.to_db(now), head_id),
+        )
+        row = _head_row(db, head_id)
+    assert row is not None
+    return _head(row)
+
+
 def delete_head(db: StateDB, head_id: str) -> None:
     """Takes a head out of the library: robots wearing it go back to their own. 404
     head_not_found."""
@@ -520,7 +607,10 @@ def delete_head(db: StateDB, head_id: str) -> None:
         if row is None:
             raise ApiError(404, {"error": "head_not_found"})
         db.execute("UPDATE avatars_members SET head_id = NULL WHERE head_id = ?", (head_id,))
+        db.execute("DELETE FROM avatars_member_accessories WHERE head_id = ?", (head_id,))
         db.execute("DELETE FROM avatars_head_placements WHERE head_id = ?", (head_id,))
         db.execute("DELETE FROM avatars_head_eye_angles WHERE head_id = ?", (head_id,))
+        db.execute("DELETE FROM avatars_head_eye_looks WHERE head_id = ?", (head_id,))
+        db.execute("DELETE FROM avatars_head_owners WHERE head_id = ?", (head_id,))
         db.execute("DELETE FROM avatars_heads WHERE id = ?", (head_id,))
         _drop_unused_assets(db, [row["sha256"]])

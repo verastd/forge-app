@@ -30,6 +30,7 @@ from forge_api.models import (
     AvatarAccess,
     AvatarChestUpload,
     AvatarHead,
+    AvatarHeadOwner,
     AvatarHeadRefit,
     AvatarHeadUpload,
     AvatarList,
@@ -206,6 +207,23 @@ def put_head_placement(
 ) -> AvatarHead:
     """Changes how a head is worn (the editor's fitting), keeping its file."""
     return avatars_service.refit_head(db, head_id, refit.placement, now)
+
+
+@router.put(
+    "/heads/{headId}/owner",
+    response_model=AvatarHead,
+    response_model_exclude_none=True,
+    openapi_extra=body_doc(AvatarHeadOwner),
+)
+def put_head_owner(
+    admin: AdminMember,
+    db: Db,
+    now: Now,
+    head_id: HeadId,
+    body: Annotated[AvatarHeadOwner, Depends(json_body(AvatarHeadOwner))],
+) -> AvatarHead:
+    """Gives a head to the member it is for (only they can wear it), or to nobody."""
+    return avatars_service.set_head_owner(db, head_id, body.owner, now)
 
 
 @router.delete("/heads/{headId}", status_code=204, response_class=Response)

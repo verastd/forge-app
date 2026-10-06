@@ -37,7 +37,7 @@ export interface RobotPreview {
   /** The whole robot, or close in on its head. */
   setFraming(framing: 'robot' | 'head'): void;
   /** While set, the robot faces front and a click on its head is reported (null: missed it). */
-  setPicking(onPick: ((pick: HeadPick | null) => void) | null): void;
+  setPicking(onPick: ((pick: HeadPick | null) => void) | null, target?: 'head' | 'accessory'): void;
   dispose(): void;
 }
 
@@ -68,6 +68,7 @@ export function createRobotPreview(
   camera.lookAt(lookAt);
   let framing: 'robot' | 'head' = 'robot';
   let onPick: ((pick: HeadPick | null) => void) | null = null;
+  let pickTarget: 'head' | 'accessory' = 'head';
   const raycaster = new THREE.Raycaster();
 
   scene.add(new THREE.HemisphereLight(0x9fb4d8, 0x0a0d14, 0.35));
@@ -181,7 +182,7 @@ export function createRobotPreview(
     const rect = canvas.getBoundingClientRect();
     const ndc = new THREE.Vector2(((event.clientX - rect.left) / rect.width) * 2 - 1, -((event.clientY - rect.top) / rect.height) * 2 + 1);
     raycaster.setFromCamera(ndc, camera);
-    onPick(robot.pickHead(raycaster));
+    onPick(robot.pickHead(raycaster, pickTarget));
   };
   canvas.addEventListener('pointerdown', onDown);
   canvas.addEventListener('pointermove', onMove);
@@ -256,8 +257,9 @@ export function createRobotPreview(
     setFraming(next) {
       framing = next;
     },
-    setPicking(next) {
+    setPicking(next, target = 'head') {
       onPick = next;
+      pickTarget = target;
       canvas.style.cursor = next ? 'crosshair' : '';
     },
     dispose() {

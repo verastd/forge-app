@@ -106,6 +106,44 @@ describe('autoPlacement, replacing the head', () => {
   });
 });
 
+describe('autoPlacement, an open face', () => {
+  // Robot-sized already (0.37 m across), so it is worn at about its own size: a hollow box
+  // head whose face is a frame round an opening, the sculpted eyes standing out in front.
+  const back = slab([-0.185, 0, -0.15], [0.185, 0.25, -0.1]);
+  const frame = [
+    ...slab([-0.185, 0, 0.05], [0.185, 0.04, 0.1]),
+    ...slab([-0.185, 0.18, 0.05], [0.185, 0.25, 0.1]),
+    ...slab([-0.185, 0.04, 0.05], [-0.12, 0.18, 0.1]),
+    ...slab([0.12, 0.04, 0.05], [0.185, 0.18, 0.1]),
+  ];
+  const ledge = slab([-0.12, 0.04, 0.0], [0.12, 0.07, 0.07]);
+  const pills = [...slab([-0.08, 0.08, 0], [-0.04, 0.13, 0.12]), ...slab([0.04, 0.08, 0], [0.08, 0.13, 0.12])];
+  const head = [...back, ...frame, ...ledge, ...pills];
+
+  it('closes it with a screen just behind the frame, filling the opening, the eyes on it', () => {
+    const placement = autoPlacement('replace', head, head);
+    expect(placement.scale).toBeCloseTo(1, 1);
+    const screen = placement.screen!;
+    expect(screen).toBeDefined();
+    const frameFront = placePoint(placement, [0, 0, 0.1])[2];
+    expect(screen.center[2]).toBeCloseTo(frameFront - HEAD_FIT.screenInset, 2);
+    // The opening (0.24 x 0.14, ledge included) and a tuck behind the frame all round.
+    expect(screen.size[0]).toBeGreaterThan(0.24 * placement.scale);
+    expect(screen.size[1]).toBeGreaterThan(0.14 * placement.scale);
+    expect(screen.size[0]).toBeLessThan(0.3);
+    for (const eye of placement.eyes ?? []) expect(eye[2]).toBeCloseTo(screen.center[2] + HEAD_FIT.eyeLift, 4);
+    expect(placement.eyeAngles).toEqual([0, 0, 0]);
+  });
+
+  it('leaves a face alone whose hollow is not framed all round', () => {
+    // No frame at the top: the hollow runs out of the head.
+    const bottom = slab([-0.185, 0, 0.05], [0.185, 0.04, 0.1]);
+    const sides = [...slab([-0.185, 0.04, 0.05], [-0.12, 0.25, 0.1]), ...slab([0.12, 0.04, 0.05], [0.185, 0.25, 0.1])];
+    const open = [...back, ...bottom, ...sides, ...ledge];
+    expect(autoPlacement('replace', open, open).screen).toBeUndefined();
+  });
+});
+
 describe('autoPlacement, a face accessory', () => {
   const mask = solid([-0.4, 0, -0.25], [0.4, 1, 0.25]);
 
@@ -116,6 +154,22 @@ describe('autoPlacement, a face accessory', () => {
     expect(placePoint(placement, [0, 0.5, 0])[1]).toBeCloseTo(ROBOT_EYES[0][1], 3);
     expect(placePoint(placement, [0, 0.5, -0.25])[2]).toBeCloseTo(FACE_PANEL.z + 0.002, 3);
     expect(placePoint(placement, [0, 0.5, 0])[0]).toBeCloseTo(0, 3);
+  });
+
+  it('is worn on a replacing head’s face when it has one: its screen’s width, its eyes’ height and depth', () => {
+    const onto = {
+      eyes: [[-0.06, 0.12, 0.08], [0.06, 0.12, 0.08]] as [Point3, Point3],
+      screen: { center: [0, 0.12, 0.076] as Point3, size: [0.3, 0.15] as [number, number] },
+    };
+    const placement = autoPlacement('accessory', mask, [], onto);
+    expect(placement.scale).toBeCloseTo((0.3 * 0.9) / 0.8, 3);
+    expect(placePoint(placement, [0, 0.5, 0])[1]).toBeCloseTo(0.12, 3);
+    expect(placePoint(placement, [0, 0.5, -0.25])[2]).toBeCloseTo(0.082, 3);
+    const eyesOnly = autoPlacement('accessory', mask, [], { eyes: onto.eyes });
+    expect(eyesOnly.scale).toBeCloseTo(HEAD_FIT.faceWidth / 0.8, 3);
+    // An eye hole goes over that head's eye.
+    const hole: Point3 = [-0.06, 0.56, 0.1];
+    expect(placePoint(alignToEye(placement, hole, 'left', onto.eyes), hole)[0]).toBeCloseTo(-0.06, 3);
   });
 
   it('moves an eye hole over either eye, across the face only', () => {

@@ -43,6 +43,8 @@ const LIST = {
       bytes: 192_000,
       fit: 'accessory',
       eyes: false,
+      // Made for octo-alice: only her robot is offered it.
+      owner: 'gh:1001',
       updatedAt: '2026-10-05T08:00:00+00:00',
     },
   ],
@@ -71,7 +73,7 @@ async function openEditor(page: Page): Promise<void> {
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(LIST) }),
   );
   await page.goto('/me/avatars');
-  await expect(page.getByRole('heading', { name: '@octo-alice' })).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByRole('heading', { name: '@octo-alice', exact: true })).toBeVisible({ timeout: 60_000 });
 }
 
 test.describe('robots in the lobby', () => {
@@ -155,11 +157,11 @@ test.describe('the avatar editor', () => {
     await page.goto('/me/avatars');
     await expect(page.getByText('Loading members and the head library…')).toBeVisible();
     members.release(200, MEMBERS);
-    await expect(page.getByRole('heading', { name: '@octo-alice' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '@octo-alice', exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: /@bob-builds/ })).toContainText('(customised)');
     // The preview loads, then is ready (or says it can't, with a way to try again).
     await expect(page.locator('[data-preview]')).toHaveAttribute('data-preview', /^(ready|error)$/, { timeout: 60_000 });
-    await expect(page.getByRole('button', { name: /Phantom mask/ })).toContainText('Face accessory');
+    await expect(page.getByRole('group', { name: 'Face accessory' }).getByRole('button', { name: /Phantom mask/ })).toContainText('Worn over the head');
   });
 
   test('it sits under the site nav, and its old address leads to it', async ({ page, context, baseURL }) => {
@@ -206,7 +208,58 @@ test.describe('the avatar editor', () => {
     await page.goto('/me/avatars');
     await expect(page.getByText('Couldn’t reach the server.', { exact: false })).toBeVisible();
     await page.getByRole('button', { name: 'Try again' }).click();
-    await expect(page.getByRole('heading', { name: '@octo-alice' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '@octo-alice', exact: true })).toBeVisible();
+  });
+
+  test('each member is offered only their own heads; a head nobody has is given, Giving… then theirs', async ({ page, context, baseURL }) => {
+    await signInAs(context, baseURL ?? '', { sub: '4242', login: 'trent-admin' });
+    const head = { ...LIST.heads[0], fit: 'replace', eyes: false };
+    const mixed = {
+      ...LIST,
+      heads: [
+        ...LIST.heads,
+        { ...head, id: 'phantom-head', name: 'Phantom head', owner: undefined },
+        { ...head, id: 'bob-head', name: 'Bob head', owner: 'gh:1003' },
+      ],
+    };
+    await page.route('**/bff/avatars/members', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(MEMBERS) }),
+    );
+    await page.route('**/bff/avatars', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(mixed) }),
+    );
+    await page.goto('/me/avatars');
+    await expect(page.getByRole('heading', { name: '@octo-alice', exact: true })).toBeVisible({ timeout: 60_000 });
+
+    const heads = page.getByRole('group', { name: 'Head' });
+    await expect(page.getByRole('heading', { name: 'Heads for @octo-alice' })).toBeVisible();
+    await expect(page.getByText('Bob head')).toHaveCount(0);
+    await expect(heads.getByRole('button', { name: /Phantom head/ })).toHaveCount(0);
+    const nobodys = page.getByRole('list', { name: 'Heads not given to anyone' });
+    await expect(nobodys.getByText('Phantom head')).toBeVisible();
+
+    let attempts = 0;
+    const second = held();
+    await page.route('**/bff/avatars/heads/phantom-head/owner', async (route) => {
+      attempts += 1;
+      expect(route.request().postDataJSON()).toEqual({ owner: 'gh:1001' });
+      if (attempts === 1) {
+        await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'service_unreachable' }) });
+        return;
+      }
+      await second.handler(route);
+    });
+    await nobodys.getByRole('button', { name: 'Give to @octo-alice' }).click();
+    await expect(page.getByRole('alert').filter({ hasText: 'Couldn’t reach the server.' })).toBeVisible();
+    await nobodys.getByRole('button', { name: 'Give to @octo-alice' }).click();
+    const giving = nobodys.getByRole('button', { name: 'Giving…' });
+    await expect(giving).toBeVisible();
+    await expect(giving).toBeDisabled();
+    await expect(giving).toHaveAttribute('aria-busy', 'true');
+    second.release(200, { ...head, id: 'phantom-head', name: 'Phantom head', owner: 'gh:1001' });
+    await expect(heads.getByRole('button', { name: /Phantom head/ })).toBeVisible();
+    await expect(page.getByRole('list', { name: 'Heads not given to anyone' })).toHaveCount(0);
+    await expect(page.getByRole('alert').filter({ hasText: 'Couldn’t reach the server.' })).toHaveCount(0);
   });
 
   test('Save shows Saving…, then Saved; a failed save says why and tries again', async ({ page, context, baseURL }) => {
@@ -238,12 +291,13 @@ test.describe('the avatar editor', () => {
     second.release(200, {
       memberId: 'gh:1001',
       colors: { shell: '#f4f1ea', trim: '#e0457b', accent: '#ff8fb5', eye: '#ff4f8b' },
-      head: 'phantom',
+      accessory: 'phantom',
       updatedAt: '2026-10-05T09:00:00+00:00',
     });
     await expect(page.getByText(/Saved\. Everyone in the lobby sees it/)).toBeVisible();
     await expect(page.getByText('Unsaved changes')).toHaveCount(0);
-    expect(body).toEqual({ colors: { shell: '#f4f1ea', trim: '#e0457b', accent: '#ff8fb5', eye: '#ff4f8b' }, head: 'phantom' });
+    // The mask is a face accessory, so it goes up as one: the robot keeps its own head under it.
+    expect(body).toEqual({ colors: { shell: '#f4f1ea', trim: '#e0457b', accent: '#ff8fb5', eye: '#ff4f8b' }, accessory: 'phantom' });
   });
 
   test('a chestplate upload saves the colours first, then shows its progress', async ({ page, context, baseURL }) => {
@@ -433,7 +487,7 @@ test.describe('fitting a head', () => {
     );
     await page.getByLabel('Name').fill('Old API');
     await page.getByLabel(/File \(\.glb/).setInputFiles({ name: 'old-api.glb', mimeType: 'model/gltf-binary', buffer: TRIPO_HEAD });
-    await expect(page.getByRole('slider', { name: 'Size' })).toBeEnabled({ timeout: 90_000 });
+    await expect(page.getByRole('slider', { name: 'Size', exact: true })).toBeEnabled({ timeout: 90_000 });
     await page.getByRole('button', { name: 'Add to library' }).click();
     await expect(page.getByRole('alert').filter({ hasText: 'The API server is older than head fitting' })).toBeVisible();
   });
@@ -501,10 +555,10 @@ test.describe('fitting a head', () => {
     await page.goto('/me/avatars');
     const rowOf = (name: string) => page.getByRole('listitem').filter({ has: page.getByText(name, { exact: true }) });
     await rowOf('Phantom mask').getByRole('button', { name: 'Adjust fit' }).click();
-    await expect(page.getByRole('slider', { name: 'Size' })).toBeEnabled({ timeout: 90_000 });
+    await expect(page.getByRole('slider', { name: 'Size', exact: true })).toBeEnabled({ timeout: 90_000 });
     await rowOf('Phantom mask big').getByRole('button', { name: 'Adjust fit' }).click();
     await expect(page.getByRole('heading', { name: 'Fitting “Phantom mask big”' })).toBeVisible();
-    await expect(page.getByRole('slider', { name: 'Size' })).toBeEnabled({ timeout: 90_000 });
+    await expect(page.getByRole('slider', { name: 'Size', exact: true })).toBeEnabled({ timeout: 90_000 });
 
     let sent: { placement: { scale: number; offset: number[] } } | null = null;
     await page.route('**/bff/avatars/heads/phantom-big/placement', async (route) => {

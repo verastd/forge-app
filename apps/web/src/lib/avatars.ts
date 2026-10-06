@@ -125,6 +125,10 @@ export const resetAvatar = (memberId: string): Promise<void> =>
 export const removeChest = (memberId: string): Promise<Avatar> =>
   request('DELETE', `/members/${encodeURIComponent(memberId)}/chest`, AvatarSchema);
 export const deleteHead = (headId: string): Promise<void> => request('DELETE', `/heads/${encodeURIComponent(headId)}`, null);
+/** Gives a head to the member it is for (only they can wear it), or to nobody (null). */
+export const giveHead = (headId: string, owner: string | null): Promise<AvatarHead> =>
+  request('PUT', `/heads/${encodeURIComponent(headId)}/owner`, AvatarHeadSchema, { owner });
+
 /** Changes how a library head is worn, keeping its file. */
 export async function refitHead(headId: string, placement: AvatarHeadPlacement): Promise<AvatarHead> {
   try {
@@ -200,9 +204,10 @@ export async function uploadHead(
   file: File,
   onProgress: OnProgress,
   placement?: AvatarHeadPlacement,
+  owner?: string,
 ): Promise<AvatarHead> {
   const data = await fileToBase64(file);
-  const body = placement ? { name, fit, data, placement } : { name, fit, data };
+  const body = { name, fit, data, ...(placement ? { placement } : {}), ...(owner ? { owner } : {}) };
   return upload(`/heads/${encodeURIComponent(headId)}`, body, AvatarHeadSchema, onProgress);
 }
 
@@ -259,6 +264,8 @@ export function describeAvatarsError(error: unknown): string {
       return 'That file is too big.';
     case 'unknown_head':
       return 'That head is no longer in the library. Pick another.';
+    case 'head_not_theirs':
+      return 'That head was made for someone else. Pick one of this member’s heads.';
     case 'avatar_not_found':
       return 'Save this robot’s colours first.';
     case 'head_not_found':

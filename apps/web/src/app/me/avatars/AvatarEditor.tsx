@@ -34,6 +34,7 @@ import {
   describeAvatarsError,
   fetchAvatars,
   fetchMembers,
+  giveHead,
   headIdFrom,
   refitHead,
   removeChest,
@@ -106,15 +107,17 @@ type Upload =
 interface Draft {
   colors: AvatarColors;
   head: string | null;
+  /** A face accessory worn over the head. */
+  accessory: string | null;
 }
 
 function draftFor(memberId: string, list: AvatarList): Draft {
   const saved = list.avatars.find((a) => a.memberId === memberId);
-  return { colors: saved?.colors ?? defaultColors(memberId), head: saved?.head ?? null };
+  return { colors: saved?.colors ?? defaultColors(memberId), head: saved?.head ?? null, accessory: saved?.accessory ?? null };
 }
 
 function sameDraft(a: Draft, b: Draft): boolean {
-  return a.head === b.head && (Object.keys(a.colors) as (keyof AvatarColors)[]).every((k) => a.colors[k] === b.colors[k]);
+  return a.head === b.head && a.accessory === b.accessory && (Object.keys(a.colors) as (keyof AvatarColors)[]).every((k) => a.colors[k] === b.colors[k]);
 }
 
 /** Reads an image's size in the browser, to refuse one the API would before uploading it. */
@@ -303,7 +306,12 @@ export function AvatarEditor() {
         )}
       </div>
 
-      <HeadLibrary list={list} setList={setList} />
+      <HeadLibrary
+        key={selected ?? 'nobody'}
+        member={selected ? (members.find((m) => m.memberId === selected) ?? { memberId: selected, login: selected }) : null}
+        list={list}
+        setList={setList}
+      />
     </div>
   );
 }
@@ -341,13 +349,18 @@ function RobotEditor({ member, list, setList, onDirty }: RobotEditorProps) {
   useEffect(() => () => clearTimeout(savedTimer.current), []);
 
   const head = draft.head ? (list.heads.find((h) => h.id === draft.head) ?? null) : null;
+  const accessory = draft.accessory ? (list.heads.find((h) => h.id === draft.accessory) ?? null) : null;
   const look: RobotLook = useMemo(
-    () => ({ id: member.memberId, name: member.login, colors: draft.colors, head, chest: saved?.chest ?? null }),
-    [member.memberId, member.login, draft.colors, head, saved?.chest],
+    () => ({ id: member.memberId, name: member.login, colors: draft.colors, head, accessory, chest: saved?.chest ?? null }),
+    [member.memberId, member.login, draft.colors, head, accessory, saved?.chest],
   );
 
   const commit = useCallback(async (): Promise<Avatar> => {
-    const result = await saveAvatar(member.memberId, { colors: draft.colors, ...(draft.head ? { head: draft.head } : {}) });
+    const result = await saveAvatar(member.memberId, {
+      colors: draft.colors,
+      ...(draft.head ? { head: draft.head } : {}),
+      ...(draft.accessory ? { accessory: draft.accessory } : {}),
+    });
     setList((current) => ({ ...current, avatars: [...current.avatars.filter((a) => a.memberId !== result.memberId), result] }));
     return result;
   }, [member.memberId, draft, setList]);
@@ -370,7 +383,7 @@ function RobotEditor({ member, list, setList, onDirty }: RobotEditorProps) {
     resetAvatar(member.memberId).then(
       () => {
         setList((current) => ({ ...current, avatars: current.avatars.filter((a) => a.memberId !== member.memberId) }));
-        setDraft({ colors: defaultColors(member.memberId), head: null });
+        setDraft({ colors: defaultColors(member.memberId), head: null, accessory: null });
         setBusy({ kind: 'idle' });
       },
       (error: unknown) => setBusy({ kind: 'error', message: describeAvatarsError(error), retry: reset }),
@@ -437,6 +450,8 @@ function RobotEditor({ member, list, setList, onDirty }: RobotEditorProps) {
   const uploading = chestUpload.kind === 'preparing' || chestUpload.kind === 'uploading' || chestUpload.kind === 'processing';
   const working = busy.kind === 'saving' || busy.kind === 'resetting' || uploading || removingChest;
   const missingHead = saved?.head && !list.heads.some((h) => h.id === saved.head);
+  // A head is made for one member: only theirs are offered.
+  const ownHeads = list.heads.filter((h) => h.owner === member.memberId);
 
   return (
     <section className={`card ${styles.editor}`} aria-labelledby="avatar-editor">
@@ -462,24 +477,60 @@ function RobotEditor({ member, list, setList, onDirty }: RobotEditorProps) {
               <span>Its own head</span>
               <span className={styles.headMeta}>With the face screen</span>
             </button>
-            {list.heads.map((h) => (
-              <button
-                key={h.id}
-                type="button"
-                className={styles.headChoice}
-                aria-pressed={draft.head === h.id}
-                onClick={() => setDraft((d) => ({ ...d, head: h.id }))}
-              >
-                <span>{h.name}</span>
-                <span className={styles.headMeta}>
-                  {FIT_LABEL[h.fit]}
-                  {h.fit === 'replace' && !h.eyes ? ' · no eyes' : ''}
-                </span>
-              </button>
-            ))}
+            {ownHeads
+              .filter((h) => h.fit === 'replace' || h.id === draft.head)
+              .map((h) => (
+                <button
+                  key={h.id}
+                  type="button"
+                  className={styles.headChoice}
+                  aria-pressed={draft.head === h.id}
+                  onClick={() => setDraft((d) => ({ ...d, head: h.id }))}
+                >
+                  <span>{h.name}</span>
+                  <span className={styles.headMeta}>
+                    {FIT_LABEL[h.fit]}
+                    {h.fit === 'replace' && !h.eyes && !h.placement.eyes ? ' · no eyes' : ''}
+                  </span>
+                </button>
+              ))}
           </div>
-          {list.heads.length === 0 && <p className={styles.hint}>Upload heads and face accessories in the library below.</p>}
+          {ownHeads.length === 0 && (
+            <p className={styles.hint}>No heads made for @{member.login} yet: add one in “Heads for @{member.login}” below.</p>
+          )}
           {missingHead && <p className={styles.hint}>The head this robot wore was taken out of the library.</p>}
+        </fieldset>
+
+        <fieldset className={styles.fieldset}>
+          <legend className={styles.legend}>Face accessory</legend>
+          <div className={styles.heads}>
+            <button
+              type="button"
+              className={styles.headChoice}
+              aria-pressed={draft.accessory === null}
+              onClick={() => setDraft((d) => ({ ...d, accessory: null }))}
+            >
+              <span>None</span>
+              <span className={styles.headMeta}>Just the head</span>
+            </button>
+            {ownHeads
+              .filter((h) => h.fit === 'accessory')
+              .map((h) => (
+                <button
+                  key={h.id}
+                  type="button"
+                  className={styles.headChoice}
+                  aria-pressed={draft.accessory === h.id}
+                  onClick={() => setDraft((d) => ({ ...d, accessory: h.id }))}
+                >
+                  <span>{h.name}</span>
+                  <span className={styles.headMeta}>Worn over the head</span>
+                </button>
+              ))}
+          </div>
+          {!ownHeads.some((h) => h.fit === 'accessory') && (
+            <p className={styles.hint}>No face accessories made for @{member.login} yet (a mask, a visor): add one below as a Face accessory.</p>
+          )}
         </fieldset>
 
         <fieldset className={styles.fieldset}>
@@ -619,11 +670,23 @@ function RobotEditor({ member, list, setList, onDirty }: RobotEditorProps) {
 }
 
 interface HeadLibraryProps {
+  /** Whose heads: uploads are made for them, and only theirs are listed. Null: nobody chosen yet. */
+  member: AvatarMember | null;
   list: AvatarList;
   setList: (update: (list: AvatarList) => AvatarList) => void;
 }
 
-function HeadLibrary({ list, setList }: HeadLibraryProps) {
+function HeadLibrary({ member, list, setList }: HeadLibraryProps) {
+  const [giving, setGiving] = useState<string | null>(null);
+  const theirs = member ? list.heads.filter((h) => h.owner === member.memberId) : [];
+  // Whose robot fittings are shown on: their saved colours and the replacing head they wear.
+  const wearer = useMemo(() => {
+    if (!member) return null;
+    const saved = list.avatars.find((a) => a.memberId === member.memberId);
+    const head = saved?.head ? (list.heads.find((h) => h.id === saved.head) ?? null) : null;
+    return { colors: saved?.colors ?? defaultColors(member.memberId), head };
+  }, [member, list]);
+  const unassigned = list.heads.filter((h) => !h.owner);
   const [name, setName] = useState('');
   const [fit, setFit] = useState<AvatarHeadFit>('replace');
   const [file, setFile] = useState<File | null>(null);
@@ -642,7 +705,7 @@ function HeadLibrary({ list, setList }: HeadLibraryProps) {
   const taken = !replacing && list.heads.some((h) => h.id === id);
   const busy = upload.kind === 'preparing' || upload.kind === 'uploading' || upload.kind === 'processing';
   const refitting = refit.kind === 'saving';
-  const ready = name.trim().length > 0 && idValid && !taken && file !== null && placement !== null && !busy;
+  const ready = member !== null && name.trim().length > 0 && idValid && !taken && file !== null && placement !== null && !busy;
   const fitSource = useMemo(
     () => (file ? { kind: 'file' as const, file } : adjusting ? { kind: 'library' as const, head: adjusting } : null),
     [file, adjusting],
@@ -722,6 +785,7 @@ function HeadLibrary({ list, setList }: HeadLibraryProps) {
         file,
         (progress) => setUpload(progress >= 1 ? { kind: 'processing' } : { kind: 'uploading', progress }),
         placement ?? undefined,
+        member?.memberId,
       );
       setList((current) => ({
         ...current,
@@ -735,6 +799,22 @@ function HeadLibrary({ list, setList }: HeadLibraryProps) {
     } catch (error) {
       setUpload({ kind: 'error', message: describeAvatarsError(error) });
     }
+  };
+
+  const give = (h: AvatarHead): void => {
+    if (!member) return;
+    setGiving(h.id);
+    setRowError(null);
+    giveHead(h.id, member.memberId).then(
+      (head) => {
+        setList((current) => ({ ...current, heads: current.heads.map((x) => (x.id === head.id ? head : x)) }));
+        setGiving(null);
+      },
+      (error: unknown) => {
+        setGiving(null);
+        setRowError(describeAvatarsError(error));
+      },
+    );
   };
 
   const remove = (h: AvatarHead): void => {
@@ -763,8 +843,12 @@ function HeadLibrary({ list, setList }: HeadLibraryProps) {
     <section className={`card ${styles.library}`} aria-labelledby="head-library">
       <div>
         <h2 id="head-library" className="section-title">
-          Head library
+          {member ? `Heads for @${member.login}` : 'Heads'}
         </h2>
+        <p className="muted">
+          Each head is made for one member: only they can wear it, and it is only offered on their robot.{' '}
+          {member ? '' : 'Choose a member above to see and add theirs.'}
+        </p>
         <p className="muted">
           Heads are .glb files (binary glTF 2.0, self-contained), straight from Tripo or any modeller, facing +Z. Pick one and the
           fitting tool sizes it and sets it on a robot; nudge it there, then add it. <strong>Adjust fit</strong> changes a head
@@ -783,11 +867,11 @@ function HeadLibrary({ list, setList }: HeadLibraryProps) {
         </ul>
       </div>
 
-      {list.heads.length === 0 ? (
-        <p className="muted">No heads yet.</p>
+      {!member ? null : theirs.length === 0 ? (
+        <p className="muted">No heads made for @{member.login} yet.</p>
       ) : (
-        <ul className={styles.libraryRows}>
-          {list.heads.map((h) => (
+        <ul className={styles.libraryRows} aria-label={`Heads for @${member.login}`}>
+          {theirs.map((h) => (
             <li key={h.id} className={styles.libraryRow}>
               <span style={{ flex: 1, minWidth: 140 }}>
                 <strong>{h.name}</strong> <span className={styles.headMeta}>· {h.id}</span>
@@ -822,6 +906,43 @@ function HeadLibrary({ list, setList }: HeadLibraryProps) {
           ))}
         </ul>
       )}
+      {unassigned.length > 0 && (
+        <div className="stack">
+          <h3 className="card-title" style={{ margin: 0 }}>
+            Not given to anyone yet
+          </h3>
+          <ul className={styles.libraryRows} aria-label="Heads not given to anyone">
+            {unassigned.map((h) => (
+              <li key={h.id} className={styles.libraryRow}>
+                <span style={{ flex: 1, minWidth: 140 }}>
+                  <strong>{h.name}</strong> <span className={styles.headMeta}>· {h.id}</span>
+                </span>
+                <span className="chip">{FIT_LABEL[h.fit]}</span>
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  onClick={() => give(h)}
+                  disabled={!member || giving !== null || deleting !== null || busy}
+                  aria-busy={giving === h.id}
+                >
+                  {giving === h.id && <span className="spinner" aria-hidden="true" />}
+                  {giving === h.id ? 'Giving…' : member ? `Give to @${member.login}` : 'Choose a member first'}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-ghost"
+                  onClick={() => remove(h)}
+                  disabled={giving !== null || deleting !== null || busy}
+                  aria-busy={deleting === h.id}
+                >
+                  {deleting === h.id && <span className="spinner" aria-hidden="true" />}
+                  {deleting === h.id ? 'Deleting…' : 'Delete'}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {rowError && (
         <p className={styles.error} role="alert">
           {rowError}
@@ -842,6 +963,7 @@ function HeadLibrary({ list, setList }: HeadLibraryProps) {
               setRefit((current) => (current.kind === 'saved' || current.kind === 'error' ? { kind: 'idle' } : current));
             }}
             disabled={refitting}
+            wearer={wearer}
           />
           <div className={styles.actions}>
             <button type="button" className="btn btn-primary" onClick={saveFit} disabled={placement === null || refitting} aria-busy={refitting}>
@@ -870,7 +992,7 @@ function HeadLibrary({ list, setList }: HeadLibraryProps) {
 
       <form className="stack" onSubmit={(event) => void submit(event)} aria-labelledby="head-upload">
         <h3 id="head-upload" className="card-title" style={{ margin: 0 }}>
-          {replacing ? `Replace “${replacing.name}”` : 'Add a head'}
+          {replacing ? `Replace “${replacing.name}”` : member ? `Add a head for @${member.login}` : 'Add a head (choose a member first)'}
         </h3>
         <div className={styles.uploadForm}>
           <label className={styles.label}>
@@ -881,16 +1003,16 @@ function HeadLibrary({ list, setList }: HeadLibraryProps) {
               maxLength={AVATAR_HEAD_NAME_MAX}
               onChange={(event) => setName(event.target.value)}
               placeholder="Phantom mask"
-              disabled={busy}
+              disabled={busy || !member}
             />
             <span className={styles.hint}>
               {id ? <>Saved as <code>{id}</code></> : 'Letters or digits, please.'}
-              {taken ? ' — already in the library: use Replace file on it, or another name.' : ''}
+              {taken ? ' — another head already has this name: pick another.' : ''}
             </span>
           </label>
           <label className={styles.label}>
             File (.glb, up to {kb(AVATAR_HEAD_MAX_BYTES)})
-            <input ref={fileRef} className="text-input" type="file" accept=".glb,model/gltf-binary" onChange={onFile} disabled={busy} />
+            <input ref={fileRef} className="text-input" type="file" accept=".glb,model/gltf-binary" onChange={onFile} disabled={busy || !member} />
           </label>
           <div className={styles.radios} role="radiogroup" aria-label="How it fits">
             {(['replace', 'accessory'] as const).map((value) => (
@@ -908,7 +1030,7 @@ function HeadLibrary({ list, setList }: HeadLibraryProps) {
           </div>
           {fitSource?.kind === 'file' && (
             <div className={styles.fitWide}>
-              <HeadFitter source={fitSource} fit={fit} initial={null} onChange={setPlacement} disabled={busy} />
+              <HeadFitter source={fitSource} fit={fit} initial={null} onChange={setPlacement} disabled={busy} wearer={wearer} />
             </div>
           )}
           <div className={styles.actions}>

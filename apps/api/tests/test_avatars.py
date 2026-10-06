@@ -265,6 +265,7 @@ def test_changes_need_an_admin(
         ("PUT", "/api/avatars/heads/bolt"),
         ("DELETE", "/api/avatars/heads/bolt"),
         ("PUT", "/api/avatars/heads/bolt/placement"),
+        ("PUT", "/api/avatars/heads/bolt/owner"),
     ):
         response = client.request(method, path, headers=user_headers, json={"colors": COLORS})
         assert response.status_code == 403, (method, path)
@@ -364,11 +365,12 @@ def test_heads_go_into_the_library_and_onto_robots(
     response = client.put(
         "/api/avatars/heads/bolt",
         headers=admin_headers,
-        json={"name": "  Bolt ", "fit": "replace", "data": b64(raw)},
+        json={"name": "  Bolt ", "fit": "replace", "data": b64(raw), "owner": MEMBER},
     )
     assert response.status_code == 200
     head = response.json()
     assert head["id"] == "bolt" and head["name"] == "Bolt" and head["eyes"] is True
+    assert head["owner"] == MEMBER
     assert head["bytes"] == len(raw)
 
     asset = client.get(f"/api/avatars/assets/{head['sha256']}")
@@ -393,7 +395,7 @@ def test_replacing_a_head_keeps_its_wearers_and_drops_the_old_file(
     first = client.put(
         "/api/avatars/heads/bolt",
         headers=admin_headers,
-        json={"name": "Bolt", "fit": "replace", "data": b64(glb())},
+        json={"name": "Bolt", "fit": "replace", "data": b64(glb()), "owner": MEMBER},
     ).json()
     client.put(
         f"/api/avatars/members/{MEMBER}",
@@ -406,6 +408,8 @@ def test_replacing_a_head_keeps_its_wearers_and_drops_the_old_file(
         json={"name": "Bolt 2", "fit": "accessory", "data": b64(glb(eyes=False))},
     ).json()
     assert second["sha256"] != first["sha256"] and second["eyes"] is False
+    # A new file without an owner keeps the one it had.
+    assert second["owner"] == MEMBER
     assert first["fit"] == "replace" and second["fit"] == "accessory"
     assert client.get(f"/api/avatars/assets/{first['sha256']}").status_code == 404
     assert client.get("/api/avatars").json()["avatars"][0]["head"] == "bolt"
@@ -417,7 +421,7 @@ def test_deleting_a_head_puts_its_wearers_back_in_their_own(
     head = client.put(
         "/api/avatars/heads/bolt",
         headers=admin_headers,
-        json={"name": "Bolt", "fit": "replace", "data": b64(glb())},
+        json={"name": "Bolt", "fit": "replace", "data": b64(glb()), "owner": MEMBER},
     ).json()
     client.put(
         f"/api/avatars/members/{MEMBER}",
@@ -430,6 +434,192 @@ def test_deleting_a_head_puts_its_wearers_back_in_their_own(
     assert client.get(f"/api/avatars/assets/{head['sha256']}").status_code == 404
     again = client.delete("/api/avatars/heads/bolt", headers=admin_headers)
     assert again.status_code == 404 and again.json() == {"error": "head_not_found"}
+
+
+OTHER = "gh:2002"
+
+
+def test_a_head_is_worn_only_by_the_member_it_was_made_for(
+    client: TestClient, admin_headers: dict[str, str]
+) -> None:
+    client.put(
+        "/api/avatars/heads/bolt",
+        headers=admin_headers,
+        json={"name": "Bolt", "fit": "replace", "data": b64(glb())},
+    )
+    # Nobody's head: nobody can wear it.
+    nobody = client.put(
+        f"/api/avatars/members/{MEMBER}",
+        headers=admin_headers,
+        json={"colors": COLORS, "head": "bolt"},
+    )
+    assert nobody.status_code == 400
+    assert nobody.json() == {"error": "head_not_theirs", "fields": ["head"]}
+
+    given = client.put(
+        "/api/avatars/heads/bolt/owner", headers=admin_headers, json={"owner": MEMBER}
+    )
+    assert given.status_code == 200 and given.json()["owner"] == MEMBER
+    worn = client.put(
+        f"/api/avatars/members/{MEMBER}",
+        headers=admin_headers,
+        json={"colors": COLORS, "head": "bolt"},
+    )
+    assert worn.status_code == 200 and worn.json()["head"] == "bolt"
+    theirs = client.put(
+        f"/api/avatars/members/{OTHER}",
+        headers=admin_headers,
+        json={"colors": COLORS, "head": "bolt"},
+    )
+    assert theirs.status_code == 400 and theirs.json()["error"] == "head_not_theirs"
+
+    # Given to someone else: its old wearer goes back to their own head.
+    moved = client.put(
+        "/api/avatars/heads/bolt/owner", headers=admin_headers, json={"owner": OTHER}
+    )
+    assert moved.json()["owner"] == OTHER
+    listed = client.get("/api/avatars").json()
+    assert "head" not in next(a for a in listed["avatars"] if a["memberId"] == MEMBER)
+    assert listed["heads"][0]["owner"] == OTHER
+
+    # Taken back: nobody's.
+    back = client.put("/api/avatars/heads/bolt/owner", headers=admin_headers, json={"owner": None})
+    assert back.status_code == 200 and "owner" not in back.json()
+
+
+def test_a_robot_wears_a_head_and_a_face_accessory_over_it(
+    client: TestClient, admin_headers: dict[str, str]
+) -> None:
+    for head_id, fit in (("phantom", "replace"), ("mask", "accessory")):
+        client.put(
+            f"/api/avatars/heads/{head_id}",
+            headers=admin_headers,
+            json={"name": head_id, "fit": fit, "data": b64(glb()), "owner": MEMBER},
+        )
+    both = client.put(
+        f"/api/avatars/members/{MEMBER}",
+        headers=admin_headers,
+        json={"colors": COLORS, "head": "phantom", "accessory": "mask"},
+    )
+    assert both.status_code == 200
+    assert both.json()["head"] == "phantom" and both.json()["accessory"] == "mask"
+    assert client.get("/api/avatars").json()["avatars"][0]["accessory"] == "mask"
+
+    # Only a face accessory goes in that slot, and only the member's own.
+    not_one = client.put(
+        f"/api/avatars/members/{MEMBER}",
+        headers=admin_headers,
+        json={"colors": COLORS, "accessory": "phantom"},
+    )
+    assert not_one.status_code == 400
+    assert not_one.json() == {"error": "not_an_accessory", "fields": ["accessory"]}
+    missing = client.put(
+        f"/api/avatars/members/{MEMBER}",
+        headers=admin_headers,
+        json={"colors": COLORS, "accessory": "ghost"},
+    )
+    assert missing.json() == {"error": "unknown_head", "fields": ["accessory"]}
+    theirs = client.put(
+        f"/api/avatars/members/{OTHER}",
+        headers=admin_headers,
+        json={"colors": COLORS, "accessory": "mask"},
+    )
+    assert theirs.json() == {"error": "head_not_theirs", "fields": ["accessory"]}
+
+    # Saved without one: none.
+    plain = client.put(
+        f"/api/avatars/members/{MEMBER}",
+        headers=admin_headers,
+        json={"colors": COLORS, "head": "phantom"},
+    )
+    assert "accessory" not in plain.json()
+
+
+def test_an_accessory_goes_when_it_is_deleted_given_away_or_the_robot_reset(
+    client: TestClient, admin_headers: dict[str, str]
+) -> None:
+    def wear() -> None:
+        client.put(
+            "/api/avatars/heads/mask",
+            headers=admin_headers,
+            json={"name": "Mask", "fit": "accessory", "data": b64(glb()), "owner": MEMBER},
+        )
+        response = client.put(
+            f"/api/avatars/members/{MEMBER}",
+            headers=admin_headers,
+            json={"colors": COLORS, "accessory": "mask"},
+        )
+        assert response.json()["accessory"] == "mask"
+
+    def worn() -> str | None:
+        avatars = client.get("/api/avatars").json()["avatars"]
+        return avatars[0].get("accessory") if avatars else None
+
+    wear()
+    client.put("/api/avatars/heads/mask/owner", headers=admin_headers, json={"owner": OTHER})
+    assert worn() is None
+    client.put("/api/avatars/heads/mask/owner", headers=admin_headers, json={"owner": MEMBER})
+    wear()
+    assert client.delete("/api/avatars/heads/mask", headers=admin_headers).status_code == 204
+    assert worn() is None
+    wear()
+    assert client.delete(f"/api/avatars/members/{MEMBER}", headers=admin_headers).status_code == 204
+    assert client.get("/api/avatars").json()["avatars"] == []
+
+
+def test_giving_a_head_is_checked(client: TestClient, admin_headers: dict[str, str]) -> None:
+    missing = client.put(
+        "/api/avatars/heads/ghost/owner", headers=admin_headers, json={"owner": MEMBER}
+    )
+    assert missing.status_code == 404 and missing.json() == {"error": "head_not_found"}
+    client.put(
+        "/api/avatars/heads/bolt",
+        headers=admin_headers,
+        json={"name": "Bolt", "fit": "replace", "data": b64(glb())},
+    )
+    for body in ({"owner": "octocat"}, {}, {"owner": MEMBER, "extra": 1}):
+        response = client.put("/api/avatars/heads/bolt/owner", headers=admin_headers, json=body)
+        assert response.status_code == 400, body
+    bad_upload = client.put(
+        "/api/avatars/heads/bolt",
+        headers=admin_headers,
+        json={"name": "Bolt", "fit": "replace", "data": b64(glb()), "owner": "octocat"},
+    )
+    assert bad_upload.status_code == 400
+
+
+def test_eye_size_and_face_screen_round_trip(
+    client: TestClient, admin_headers: dict[str, str]
+) -> None:
+    client.put(
+        "/api/avatars/heads/bolt",
+        headers=admin_headers,
+        json={"name": "Bolt", "fit": "replace", "data": b64(glb())},
+    )
+    looks = {**FITTED, "eyeScale": 1.3, "screen": {"center": [0, 0.1, 0.09], "size": [0.25, 0.13]}}
+    response = client.put(
+        "/api/avatars/heads/bolt/placement", headers=admin_headers, json={"placement": looks}
+    )
+    assert response.json()["placement"] == looks
+    shown = {**FITTED, "eyeScale": 0.8}
+    assert (
+        client.put(
+            "/api/avatars/heads/bolt/placement", headers=admin_headers, json={"placement": shown}
+        ).json()["placement"]
+        == shown
+    )
+    for bad in (
+        {**FITTED, "eyeScale": 0.2},
+        {**FITTED, "eyeScale": 3},
+        {**FITTED, "screen": {"center": [0, 0.1, 0.09], "size": [0.25]}},
+        {**FITTED, "screen": {"center": [0, 0.1, 0.09], "size": [0.7, 0.1]}},
+        {**FITTED, "screen": {"center": [0, 0.1], "size": [0.2, 0.1]}},
+    ):
+        bad_response = client.put(
+            "/api/avatars/heads/bolt/placement", headers=admin_headers, json={"placement": bad}
+        )
+        assert bad_response.status_code == 400, bad
+    assert client.delete("/api/avatars/heads/bolt", headers=admin_headers).status_code == 204
 
 
 AS_IS = {"scale": 1.0, "offset": [0.0, 0.0, 0.0]}
@@ -708,6 +898,8 @@ def zod_fields(name: str) -> list[str]:
         models.AvatarHeadUpload,
         models.AvatarHeadPlacement,
         models.AvatarHeadRefit,
+        models.AvatarHeadOwner,
+        models.AvatarHeadScreen,
         models.AvatarMember,
         models.AvatarMemberList,
         models.AvatarAccess,
@@ -733,6 +925,10 @@ def test_the_limits_match_the_zod_side() -> None:
         "AVATAR_PLACEMENT_SCALE_MAX",
         "AVATAR_PLACEMENT_REACH",
         "AVATAR_PLACEMENT_EYE_ANGLE",
+        "AVATAR_PLACEMENT_EYE_SCALE_MIN",
+        "AVATAR_PLACEMENT_EYE_SCALE_MAX",
+        "AVATAR_PLACEMENT_SCREEN_MIN",
+        "AVATAR_PLACEMENT_SCREEN_MAX",
     ):
         match = re.search(rf"export const {name} = ([0-9.]+);", source)
         assert match is not None, name

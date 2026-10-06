@@ -24,8 +24,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
-import { alignToEye, anglesFromNormal, autoPlacement, defaultColors, nudge, rescale } from '@forge/lobby';
-import type { HeadPlacement, Point3 } from '@forge/lobby';
+import { HEAD_FIT, ROBOT_EYES, alignToEye, anglesFromNormal, autoPlacement, defaultColors, nudge, rescale } from '@forge/lobby';
+import type { AvatarColors, HeadPlacement, HeadScreen, Point3, WornFace } from '@forge/lobby';
 import type { AvatarHead, AvatarHeadFit, AvatarHeadPlacement } from '@forge/shared';
 
 import { createRobotPreview } from '../../../components/lobby/scene/robot/preview';
@@ -44,6 +44,11 @@ export interface HeadFitterProps {
   onChange: (placement: AvatarHeadPlacement | null) => void;
   /** While the page uploads or saves: the controls hold still. */
   disabled: boolean;
+  /**
+   * Whose robot it is fitted on: their colours, and the replacing head they
+   * wear, which a face accessory is fitted over (and lined up with its eyes).
+   */
+  wearer?: { colors: AvatarColors; head: AvatarHead | null } | null;
 }
 
 type Reading = { kind: 'reading' } | { kind: 'ready'; measure: HeadMeasure } | { kind: 'error'; message: string };
@@ -73,19 +78,42 @@ function toWire(placement: HeadPlacement): AvatarHeadPlacement {
     offset: placement.offset,
     ...(placement.eyes ? { eyes: placement.eyes } : {}),
     ...(placement.eyeAngles ? { eyeAngles: placement.eyeAngles } : {}),
+    ...(placement.eyeScale && placement.eyeScale !== 1 ? { eyeScale: placement.eyeScale } : {}),
+    ...(placement.screen ? { screen: placement.screen } : {}),
   };
+}
+
+/** A face screen for a head that found no opening of its own: robot-face sized, just behind its eyes. */
+function defaultScreen(placement: HeadPlacement): HeadScreen {
+  const eyes = placement.eyes ?? [ROBOT_EYES[0] as Point3, ROBOT_EYES[1] as Point3];
+  const z = Math.round((Math.min(eyes[0][2], eyes[1][2]) - HEAD_FIT.eyeLift) * 10_000) / 10_000;
+  return { center: [0, eyes[0][1], z], size: [0.25, 0.15] };
 }
 
 const degrees = (radians: number): number => Math.round((radians * 180) / Math.PI);
 
-function firstGuess(fit: AvatarHeadFit, measure: HeadMeasure): HeadPlacement {
-  const guess = autoPlacement(fit, measure.positions, measure.triangles);
-  // A head that brings its own EyeL/EyeR keeps them.
-  return fit === 'replace' && measure.hasEyes ? { scale: guess.scale, offset: guess.offset } : guess;
-  // (Its own EyeL/EyeR bring their own angles, too.)
+/** The face an accessory is fitted over: a replacing head's, when the wearer has one with placed eyes. */
+function wornFace(fit: AvatarHeadFit, worn: AvatarHead | null): WornFace | null {
+  if (fit !== 'accessory' || worn?.fit !== 'replace' || !worn.placement.eyes) return null;
+  return { eyes: worn.placement.eyes, screen: worn.placement.screen ?? null };
 }
 
-export default function HeadFitter({ source, fit, initial, onChange, disabled }: HeadFitterProps) {
+function firstGuess(fit: AvatarHeadFit, measure: HeadMeasure, onto: WornFace | null = null): HeadPlacement {
+  const guess = autoPlacement(fit, measure.positions, measure.triangles, onto);
+  // A head that brings its own EyeL/EyeR keeps them (and their angles); a face screen it found stays.
+  if (fit === 'replace' && measure.hasEyes) {
+    return { scale: guess.scale, offset: guess.offset, ...(guess.screen ? { screen: guess.screen } : {}) };
+  }
+  return guess;
+}
+
+export default function HeadFitter({ source, fit, initial, onChange, disabled, wearer = null }: HeadFitterProps) {
+  // A face accessory is fitted over the replacing head its wearer has.
+  const worn = fit === 'accessory' && wearer?.head?.fit === 'replace' ? wearer.head : null;
+  const ontoRef = useRef<{ fit: AvatarHeadFit; worn: AvatarHead | null }>({ fit, worn });
+  ontoRef.current = { fit, worn };
+  const guessFor = (f: AvatarHeadFit, measure: HeadMeasure): HeadPlacement =>
+    firstGuess(f, measure, wornFace(f, f === ontoRef.current.fit ? ontoRef.current.worn : null));
   const hostRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<RobotPreview | null>(null);
   const [previewState, setPreviewState] = useState<PreviewState>('loading');
@@ -165,7 +193,7 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled }:
         }
         lastFit.current = fitRef.current;
         setReading({ kind: 'ready', measure });
-        setPlacement(initialRef.current ?? firstGuess(fitRef.current, measure));
+        setPlacement(initialRef.current ?? guessFor(fitRef.current, measure));
       },
       () => {
         if (!live) return;
@@ -189,37 +217,45 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled }:
     // Until the head is read there is nothing to redo: it is guessed for the fit it lands with.
     if (reading.kind !== 'ready' || lastFit.current === fit) return;
     lastFit.current = fit;
-    setPlacement(firstGuess(fit, reading.measure));
-    setBase(firstGuess(fit, reading.measure));
+    setPlacement(guessFor(fit, reading.measure));
+    setBase(guessFor(fit, reading.measure));
     setPicking(null);
     setNote(null);
   }, [fit, reading]);
 
-  // The robot wears it as it stands, and the page hears every change.
+  // The page hears every change.
   useEffect(() => {
     onChangeRef.current(placement ? toWire(placement) : null);
+  }, [placement]);
+
+  // The robot wears it as it stands (over the wearer's head, for an accessory), in the wearer's colours.
+  const wearerColors = wearer?.colors ?? null;
+  const colorKey = wearerColors ? `${wearerColors.shell}${wearerColors.trim}${wearerColors.accent}${wearerColors.eye}` : '';
+  useEffect(() => {
     const preview = previewRef.current;
     if (!preview || reading.kind !== 'ready' || !placement) return;
+    const fitted: AvatarHead = {
+      id: 'fitting',
+      name: 'Fitting',
+      sha256: headKey,
+      bytes: 0,
+      fit,
+      eyes: reading.measure.hasEyes,
+      placement: toWire(placement),
+      updatedAt: '',
+    };
     const look: RobotLook = {
       id: FITTING_LOOK_ID,
       name: 'Fitting',
-      colors: defaultColors(FITTING_LOOK_ID),
+      colors: wearerColors ?? defaultColors(FITTING_LOOK_ID),
       chest: null,
-      head: {
-        id: 'fitting',
-        name: 'Fitting',
-        sha256: headKey,
-        bytes: 0,
-        fit,
-        eyes: reading.measure.hasEyes,
-        placement: toWire(placement),
-        updatedAt: '',
-      },
+      ...(worn ? { head: worn, accessory: fitted } : { head: fitted }),
     };
     preview.setLook(look);
-  }, [placement, fit, headKey, reading]);
+    // Colours by value: the page hands over a new object every render.
+  }, [placement, fit, headKey, reading, worn, colorKey]);
 
-  const auto = reading.kind === 'ready' ? firstGuess(fit, reading.measure) : null;
+  const auto = reading.kind === 'ready' ? guessFor(fit, reading.measure) : null;
   // What Size and Move measure from: where this fitting started (a library head's saved fit, or the first guess).
   const [base, setBase] = useState<HeadPlacement | null>(null);
   useEffect(() => {
@@ -227,7 +263,7 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled }:
       setBase(null);
       return;
     }
-    setBase(initialRef.current ?? firstGuess(lastFit.current, reading.measure));
+    setBase(initialRef.current ?? guessFor(lastFit.current, reading.measure));
   }, [reading]);
 
   const placementRef = useRef(placement);
@@ -245,7 +281,8 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled }:
           return;
         }
         const side = pick.head[0] < 0 ? 'left' : 'right';
-        setPlacement(alignToEye(current, pick.file, side));
+        const face = wornFace('accessory', ontoRef.current.worn);
+        setPlacement(face ? alignToEye(current, pick.file, side, face.eyes) : alignToEye(current, pick.file, side));
         setNote({ tone: 'ok', text: `Lined the hole up with the ${side} eye.` });
         setPicking(null);
         return;
@@ -274,7 +311,7 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled }:
   useEffect(() => {
     const preview = previewRef.current;
     if (!preview) return undefined;
-    preview.setPicking(picking ? handlePick : null);
+    preview.setPicking(picking ? handlePick : null, worn ? 'accessory' : 'head');
     if (!picking) return undefined;
     const onKey = (event: KeyboardEvent): void => {
       if (event.key === 'Escape') setPicking(null);
@@ -290,6 +327,7 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled }:
   const ready = reading.kind === 'ready' && placement !== null && auto !== null && base !== null;
   const locked = !ready || disabled;
   const sizePercent = ready ? Math.round((placement.scale / base.scale) * 100) : 100;
+  const eyeSizePercent = Math.round((placement?.eyeScale ?? 1) * 100);
 
   const onSize = (event: ChangeEvent<HTMLInputElement>): void => {
     const percent = Number(event.target.value);
@@ -303,6 +341,30 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled }:
       const delta: Point3 = [0, 0, 0];
       delta[index] = base.offset[index] + wanted - current.offset[index];
       return nudge(current, delta);
+    });
+  };
+
+  const onEyeSize = (event: ChangeEvent<HTMLInputElement>): void => {
+    const size = Number(event.target.value) / 100;
+    setPlacement((current) => (current ? { ...current, eyeScale: size } : current));
+  };
+
+  const onScreen = (event: ChangeEvent<HTMLInputElement>): void => {
+    const on = event.target.checked;
+    setPlacement((current) => {
+      if (!current) return current;
+      if (!on) return { ...current, screen: null };
+      return { ...current, screen: auto?.screen ?? defaultScreen(current) };
+    });
+  };
+
+  const onScreenSize = (index: 0 | 1) => (event: ChangeEvent<HTMLInputElement>): void => {
+    const metres = Number(event.target.value) / 100;
+    setPlacement((current) => {
+      if (!current?.screen) return current;
+      const size: [number, number] = [...current.screen.size];
+      size[index] = metres;
+      return { ...current, screen: { ...current.screen, size } };
     });
   };
 
@@ -415,6 +477,58 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled }:
                 Use the file’s eyes
               </button>
             )}
+            <label className={`${styles.label} ${styles.fitFull}`}>
+              <span className={styles.sliderHead} aria-hidden="true">
+                Eye size <span className={styles.sliderValue}>{eyeSizePercent}%</span>
+              </span>
+              <input
+                type="range"
+                min={50}
+                max={250}
+                step={1}
+                value={eyeSizePercent}
+                onChange={onEyeSize}
+                disabled={locked}
+                aria-label="Eye size, both eyes"
+                aria-valuetext={`${eyeSizePercent}% of their own size`}
+              />
+            </label>
+            <label className={`${styles.radio} ${styles.fitFull}`}>
+              <input type="checkbox" checked={Boolean(placement?.screen)} onChange={onScreen} disabled={locked} />
+              <span>
+                Face screen (shiny black LED)
+                <br />
+                <span className={styles.hint}>
+                  {placement?.screen
+                    ? 'Closes the face and covers the model’s own eyes; the glowing eyes sit on it.'
+                    : auto?.screen
+                      ? 'Off: the model’s open face shows.'
+                      : 'This model has a face of its own. Switch on to put a screen over it.'}
+                </span>
+              </span>
+            </label>
+            {placement?.screen &&
+              (['Screen width', 'Screen height'] as const).map((label, index) => {
+                const cm = Math.round(placement.screen!.size[index]! * 100);
+                return (
+                  <label key={label} className={`${styles.label} ${styles.fitFull}`}>
+                    <span className={styles.sliderHead} aria-hidden="true">
+                      {label} <span className={styles.sliderValue}>{cm} cm</span>
+                    </span>
+                    <input
+                      type="range"
+                      min={2}
+                      max={50}
+                      step={1}
+                      value={cm}
+                      onChange={onScreenSize(index as 0 | 1)}
+                      disabled={locked}
+                      aria-label={label}
+                      aria-valuetext={`${cm} centimetres`}
+                    />
+                  </label>
+                );
+              })}
             {EYE_ANGLES.map((control) => {
               const value = ready ? degrees((placement.eyeAngles ?? [0, 0, 0])[control.index]) : 0;
               const words = value === 0 ? 'straight' : `${Math.abs(value)}° ${value < 0 ? control.less : control.more}`;
