@@ -2,7 +2,9 @@
  * The GitHub side of sign-in: the authorize redirect, the code-for-token
  * exchange and `GET /user`, and revoking a token once it has done its one
  * job. Nothing here keeps the token. The callback trades it for the profile
- * and drops it, because Phase 1 stores no GitHub token.
+ * and drops it, because Phase 1 stores no GitHub token. The same calls serve
+ * the OAuth App behind "your copy" and "Send for review" (Phase 7), whose
+ * authorize URL (`publicRepoAuthorizeUrl`) asks for `public_repo` and no more.
  *
  * GitHub's profile formats live here too. A session carries a GitHub
  * identity, so the session and the API assertion validate with these same
@@ -87,6 +89,33 @@ export function authorizeUrl({ clientId, redirectUri, state, codeChallenge }: Au
     state,
     code_challenge: codeChallenge,
     code_challenge_method: 'S256',
+  });
+  return `${AUTHORIZE_URL}?${query.toString()}`;
+}
+
+/**
+ * The one scope FORGE's OAuth App ever asks for: enough to make the person's
+ * copy of a public repository (a fork), keep it up to date, create a branch in
+ * it and open a pull request from it, on public repositories only.
+ */
+export const PUBLIC_REPO_SCOPE = 'public_repo';
+
+/**
+ * GitHub's authorize URL for one OAuth App attempt that acts on the person's
+ * public repositories ("your copy" and "Send for review"): the S256 PKCE
+ * challenge as for sign-in, `scope=public_repo` and nothing wider (fixed here,
+ * so no caller can ask for more), and `allow_signup=false`, since only a
+ * signed-in GitHub account gets this far.
+ */
+export function publicRepoAuthorizeUrl({ clientId, redirectUri, state, codeChallenge }: AuthorizeUrlParams): string {
+  const query = new URLSearchParams({
+    client_id: clientId,
+    redirect_uri: redirectUri,
+    state,
+    scope: PUBLIC_REPO_SCOPE,
+    code_challenge: codeChallenge,
+    code_challenge_method: 'S256',
+    allow_signup: 'false',
   });
   return `${AUTHORIZE_URL}?${query.toString()}`;
 }
@@ -188,9 +217,11 @@ export interface RevokeTokenParams {
 }
 
 /**
- * Revokes a user access token this GitHub App issued, once it has done the
- * one job it was asked for: `DELETE /applications/{client_id}/token`, with the
- * App's client id and secret as Basic auth and the token in the body.
+ * Revokes a user access token this GitHub App (or OAuth App) issued, once it
+ * has done the one job it was asked for: `DELETE /applications/{client_id}/token`,
+ * with the issuing app's own client id and secret as Basic auth and the token
+ * in the body. The OAuth App's one-time tokens go back with the OAuth App's
+ * credentials, never the sign-in App's.
  *
  * Best effort, and it never throws: it resolves true only when GitHub says it
  * is done (204), so the caller can log that much and no more. Like the calls

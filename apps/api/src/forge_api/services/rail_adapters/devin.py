@@ -74,7 +74,7 @@ def _org_path(credential: RailCredential) -> str:
 
 def _connect_sentence(fork: str) -> str:
     return (
-        f"Devin couldn't start on your fork. Check the organization ID at app.devin.ai "
+        f"Devin couldn't start on your copy. Check the organization ID at app.devin.ai "
         f"(Settings > Devin API), and connect GitHub in Devin with access to {fork}."
     )
 

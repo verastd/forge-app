@@ -13,7 +13,7 @@ response_model_exclude_none everywhere: @forge/shared declares optional fields w
 from typing import Annotated, Any
 
 import httpx
-from fastapi import APIRouter, Depends, Header, Request
+from fastapi import APIRouter, Depends, Header, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import PlainTextResponse
 
@@ -23,11 +23,14 @@ from forge_api.models import (
     ClaimRequest,
     ClaimResponse,
     ContributorProfile,
+    CopyResult,
     DispatchRequest,
     DispatchResult,
     FeedbackResponse,
     ForkStatus,
     RailList,
+    RepoActionRequest,
+    ReviewResult,
     SavedCredentialList,
     SubmitRequest,
     TaskDetail,
@@ -43,6 +46,8 @@ from forge_api.services.identity import Identity, require_identity
 FLAG = "contribute_bridge"
 #: The largest /dispatch body read (a credential is at most ~5 KB).
 MAX_DISPATCH_BODY = 16 * 1024
+#: The largest /copy or /review body read (the one-time token is at most 4096 characters).
+MAX_REPO_ACTION_BODY = 16 * 1024
 
 
 def _require_bridge_enabled() -> None:
@@ -67,8 +72,9 @@ def get_bridge(
     source: Annotated[TaskSource, Depends(bridge_service.get_task_source)],
     github: Annotated[GitHubReads, Depends(bridge_service.get_github_reads)],
     client: Annotated[httpx.Client, Depends(bridge_service.get_rail_client)],
+    repo_client: Annotated[httpx.Client, Depends(bridge_service.get_repo_client)],
 ) -> Bridge:
-    return Bridge(store, source, github, client)
+    return Bridge(store, source, github, client, repo_client)
 
 
 #: Every route but the saved-key ones: 404 while the kill switch is off.
@@ -98,11 +104,14 @@ def task_detail(task_id: int, bridge: BridgeDep, user: MaybeUser) -> TaskDetail:
 
 
 @_gated.get("/tasks/{task_id}/brief", response_class=PlainTextResponse)
-def brief(task_id: int, bridge: BridgeDep, login: str | None = None) -> PlainTextResponse:
+def brief(
+    task_id: int, bridge: BridgeDep, login: str | None = None, copy: str | None = None
+) -> PlainTextResponse:
     """The brief as plain text, for Claude Code's `prompt_url`: readable from any origin,
-    no credentials. An invalid login gets the generic brief."""
+    no credentials. An invalid login gets the generic brief; `copy` (the contributor's copy,
+    `owner/name`) counts only when its owner is `login`."""
     return PlainTextResponse(
-        bridge.brief(task_id, login),
+        bridge.brief(task_id, login, copy),
         headers={
             "Access-Control-Allow-Origin": "*",
             "Cache-Control": "public, max-age=60",
@@ -134,18 +143,21 @@ def _inline(schema: Any, defs: dict[str, Any]) -> Any:
     return schema
 
 
+def _body_doc(schema: dict[str, Any]) -> dict[str, Any]:
+    """The OpenAPI requestBody of a route that reads its own body."""
+    return {
+        "requestBody": {
+            "required": True,
+            "content": {"application/json": {"schema": _inline(schema, schema.get("$defs", {}))}},
+        }
+    }
+
+
 _DISPATCH_SCHEMA = DispatchRequest.model_json_schema()
 #: /dispatch reads its own body (so a pasted key is never echoed); this documents it.
-_DISPATCH_BODY: dict[str, Any] = {
-    "requestBody": {
-        "required": True,
-        "content": {
-            "application/json": {
-                "schema": _inline(_DISPATCH_SCHEMA, _DISPATCH_SCHEMA.get("$defs", {}))
-            }
-        },
-    }
-}
+_DISPATCH_BODY: dict[str, Any] = _body_doc(_DISPATCH_SCHEMA)
+#: /copy and /review read theirs too (the one-time token is in it).
+_REPO_ACTION_BODY: dict[str, Any] = _body_doc(RepoActionRequest.model_json_schema())
 
 
 async def _read_capped(request: Request, limit: int) -> bytes:
@@ -168,6 +180,39 @@ async def _read_capped(request: Request, limit: int) -> bytes:
 async def dispatch(request: Request, bridge: BridgeDep, user: User) -> DispatchResult:
     parsed = bridge_service.parse_dispatch(await _read_capped(request, MAX_DISPATCH_BODY))
     return await run_in_threadpool(bridge.dispatch, user, parsed)
+
+
+@_gated.post(
+    "/copy",
+    response_model=CopyResult,
+    response_model_exclude_none=True,
+    openapi_extra=_REPO_ACTION_BODY,
+)
+async def copy(request: Request, bridge: BridgeDep, user: User) -> CopyResult:
+    """Set up the holder's copy of verastd/forge-app and the task's branch in it, with
+    GitHub's one-time token for this one action (Phase 7 contract §3). The web server only."""
+    parsed = bridge_service.parse_repo_action(await _read_capped(request, MAX_REPO_ACTION_BODY))
+    return await run_in_threadpool(bridge.copy, user, parsed)
+
+
+@_gated.post(
+    "/review",
+    response_model=ReviewResult,
+    response_model_exclude_none=True,
+    status_code=201,
+    openapi_extra=_REPO_ACTION_BODY,
+    responses={200: {"model": ReviewResult, "description": "A pull request was already open"}},
+)
+async def review(
+    request: Request, response: Response, bridge: BridgeDep, user: User
+) -> ReviewResult:
+    """Open the pull request from the task's branch in the holder's copy, as them: 201, or
+    200 with `created: false` when one is open already (Phase 7 contract §3)."""
+    parsed = bridge_service.parse_repo_action(await _read_capped(request, MAX_REPO_ACTION_BODY))
+    result = await run_in_threadpool(bridge.review, user, parsed)
+    if not result.created:
+        response.status_code = 200
+    return result
 
 
 @_gated.get("/status/{task_id}", response_model=BridgeStatus, response_model_exclude_none=True)

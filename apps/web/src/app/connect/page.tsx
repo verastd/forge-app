@@ -138,7 +138,7 @@ function Guide({ url }: { url: string }) {
             <InRepo file={IN_REPO_CONFIG.claudeCode}>
               {(file) => (
                 <>
-                  In your fork of forge-app it’s already in {file}: approve it when Claude Code asks, then type{' '}
+                  In your copy of FORGE’s code it’s already in {file}: approve it when Claude Code asks, then type{' '}
                   <code>/mcp</code>.
                 </>
               )}
@@ -156,7 +156,7 @@ function Guide({ url }: { url: string }) {
             <InRepo file={IN_REPO_CONFIG.codex}>
               {(file) => (
                 <>
-                  In your fork of forge-app it’s already in {file}, which Codex reads once you trust the project,
+                  In your copy of FORGE’s code it’s already in {file}, which Codex reads once you trust the project,
                   so only the second is needed there.
                 </>
               )}
@@ -171,7 +171,7 @@ function Guide({ url }: { url: string }) {
             </p>
             <p className="muted">Confirm the install in VS Code, then sign in to FORGE when it asks.</p>
             <InRepo file={IN_REPO_CONFIG.vscode}>
-              {() => 'Already set up when you open your fork in VS Code 1.140 or newer; use this button for other folders.'}
+              {() => 'Already set up when you open your copy of FORGE’s code in VS Code 1.140 or newer; use this button for other folders.'}
             </InRepo>
           </Client>
 
@@ -182,12 +182,12 @@ function Guide({ url }: { url: string }) {
               </a>
             </p>
             <p className="muted">Confirm the install in Cursor, then sign in to FORGE when it asks.</p>
-            <InRepo file={IN_REPO_CONFIG.cursor}>{(file) => <>In your fork of forge-app it’s already in {file}.</>}</InRepo>
+            <InRepo file={IN_REPO_CONFIG.cursor}>{(file) => <>In your copy of FORGE’s code it’s already in {file}.</>}</InRepo>
           </Client>
 
           <Client id="antigravity" title="Google Antigravity">
             <InRepo file={IN_REPO_CONFIG.antigravity}>
-              {(file) => <>In your fork of forge-app it’s already in {file}.</>}
+              {(file) => <>In your copy of FORGE’s code it’s already in {file}.</>}
             </InRepo>
             <p className="muted">
               Anywhere else, open <strong>…</strong> → MCP Servers → Manage MCP Servers → View raw config in the

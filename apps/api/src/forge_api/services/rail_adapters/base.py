@@ -140,11 +140,14 @@ class AdapterRequest:
     branch: str
     login: str
     credential: RailCredential
+    #: The contributor's copy (`owner/name`) once FORGE has set it up (Phase 7), which may
+    #: be named otherwise (forge-app-1); None: `<login>/forge-app`, as before.
+    repo: str | None = None
 
     @property
     def fork(self) -> str:
-        """`<login>/forge-app`."""
-        return f"{self.login}/{FORK_REPO_NAME}"
+        """The repository the agent works in: the copy, else `<login>/forge-app`."""
+        return self.repo if self.repo is not None else f"{self.login}/{FORK_REPO_NAME}"
 
     @property
     def fork_url(self) -> str:
@@ -243,6 +246,14 @@ class TransportFailure(Exception):
         super().__init__(reason)
         self.status = status
         self.reason = reason
+
+
+class ResponseTooLarge(TransportFailure):
+    """The answer was bigger than the call allows (a TransportFailure like any other, for
+    callers that need to tell this one apart)."""
+
+    def __init__(self) -> None:
+        super().__init__(STATUS_BAD_GATEWAY, "response too large")
 
 
 #: When the call this thread is sending must be over (time.monotonic()); bounded_send
@@ -387,13 +398,13 @@ def bounded_send(
                 raise TransportFailure(STATUS_BAD_GATEWAY, "compressed response refused")
             declared = response.headers.get("content-length", "")
             if declared.isdigit() and int(declared) > limit:
-                raise TransportFailure(STATUS_BAD_GATEWAY, "response too large")
+                raise ResponseTooLarge()
             chunks: list[bytes] = []
             size = 0
             for chunk in response.iter_bytes():  # no decoding: encoded answers are refused
                 size += len(chunk)
                 if size > limit:
-                    raise TransportFailure(STATUS_BAD_GATEWAY, "response too large")
+                    raise ResponseTooLarge()
                 if clock() > deadline:
                     raise TransportFailure(STATUS_TIMEOUT, "timed out")
                 chunks.append(chunk)

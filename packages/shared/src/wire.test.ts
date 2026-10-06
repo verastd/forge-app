@@ -193,6 +193,15 @@ describe('wire shapes, against tests/fixtures/wire-golden.json', () => {
     }
   });
 
+  it('covers every Phase 7 schema: the copy, its request and both results', () => {
+    const covered = new Set(Object.keys(golden.models));
+    for (const name of ['RepoCopy', 'RepoActionRequest', 'CopyResult', 'PullRequestRef', 'ReviewResult']) {
+      expect(covered.has(name), name).toBe(true);
+    }
+    expect(golden.models.TaskDetail?.copy).toEqual({ type: 'object', ref: 'RepoCopy', optional: true });
+    expect(golden.models.TaskDetail?.canSendForReview).toEqual({ type: 'boolean', optional: true });
+  });
+
   it('covers every house model schema, and the detail that carries it', () => {
     const covered = new Set(Object.keys(golden.models));
     for (const name of ['HouseSpec', 'HouseDraft']) {

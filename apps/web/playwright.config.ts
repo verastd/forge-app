@@ -22,7 +22,8 @@ const SWIFTSHADER_ARGS = ['--use-angle=swiftshader', '--enable-unsafe-swiftshade
  *   Runs `live-*.spec.ts`: `live-mode.spec.ts` (nothing is ever substituted)
  *   and `live-auth.spec.ts` (real-shaped GitHub sign-in, sealed directly —
  *   this project alone gets a fake GitHub App config, so the OAuth start and
- *   callback error paths are testable without GitHub).
+ *   callback error paths are testable without GitHub), and `live-repo.spec.ts`
+ *   (the task page's three steps, and "your copy" through a fake OAuth App).
  *
  * Specs live at the repo root (`tests/e2e`) per PRD Appendix A.1.
  *
@@ -85,6 +86,9 @@ export default defineConfig({
         FORGE_API_ASSERTION_SECRET: ASSERTION_SECRET,
         FORGE_PUBLIC_ORIGIN: DEMO_URL,
         FORGE_API_URL: `http://127.0.0.1:${DEMO_API_PORT}`,
+        // Never the machine's own OAuth App: empty counts as unset (the practice build has no GitHub sign-in anyway).
+        GITHUB_REPO_CLIENT_ID: '',
+        GITHUB_REPO_CLIENT_SECRET: '',
         // Never the machine's own LiveKit settings: empty counts as unset, so the token route answers 503.
         LIVEKIT_URL: '',
         LIVEKIT_API_KEY: '',
@@ -107,6 +111,11 @@ export default defineConfig({
         // ever reaching github.com.
         GITHUB_APP_CLIENT_ID: 'Iv1.e2e0000000000000',
         GITHUB_APP_CLIENT_SECRET: 'e2e-fake-client-secret',
+        // Live-only: a fake OAuth App for "your copy" and "Send for review",
+        // so the task page offers them and POST /auth/github/repo and its
+        // callback's error paths are testable without GitHub (live-repo.spec.ts).
+        GITHUB_REPO_CLIENT_ID: 'Ov23e2e0000000000000',
+        GITHUB_REPO_CLIENT_SECRET: 'e2e-fake-repo-client-secret',
         // Live-only: dummy LiveKit settings, so POST /api/lobby/token mints a
         // real token (live-lobby.spec.ts). The room URL never resolves
         // (`.invalid`), so a lobby that tries to join fails as it would with

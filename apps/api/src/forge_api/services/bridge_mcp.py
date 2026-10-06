@@ -29,7 +29,7 @@ from forge_api.services.bridge import (
     iso,
     parse_pr_url,
 )
-from forge_api.services.brief import UPSTREAM_REPO, branch_name, compile_brief
+from forge_api.services.brief import UPSTREAM_REPO, branch_name
 from forge_api.services.errors import ApiError
 from forge_api.services.mcp_types import PromptDef, ToolContext, ToolDef, ToolError, ToolOutput
 from forge_api.services.rail_adapters.base import FORK_REPO_NAME
@@ -269,10 +269,6 @@ def _run(
 # --- shared text --------------------------------------------------------------------
 
 
-def _fork(login: str) -> str:
-    return f"{login}/{FORK_REPO_NAME}"
-
-
 def _card_line(card: TaskCard) -> str:
     reward = f", reward {card.rewardClass}" if card.rewardClass != "none" else ""
     state = f"claimed by {card.claimedBy}" if card.claimedBy else "open"
@@ -402,14 +398,15 @@ def _get_task(ctx: ToolContext, args: dict[str, Any]) -> ToolOutput:
 
     def act(bridge: Bridge) -> ToolOutput:
         task = bridge.task(task_id)
-        login = ctx.identity.login
         branch = branch_name(task.id, task.title)
-        brief = compile_brief(task, task.acceptanceCriteria, login)
+        # Phase 7: the contributor's copy once FORGE has set it up, else <login>/forge-app.
+        fork = bridge.work_repo(ctx.identity)
+        brief = bridge.brief_for(task, ctx.identity)
         lease, lease_line, link = _lease_state(bridge, task, ctx)
         lines = [
             brief,
             "",
-            f"Your fork: {_fork(login)} (https://github.com/{_fork(login)}). Branch: {branch}.",
+            f"Your fork: {fork} (https://github.com/{fork}). Branch: {branch}.",
             lease_line,
         ]
         if link is not None:
@@ -421,7 +418,7 @@ def _get_task(ctx: ToolContext, args: dict[str, Any]) -> ToolOutput:
             "brief": brief,
             "acceptanceCriteria": list(task.acceptanceCriteria),
             "branch": branch,
-            "fork": _fork(login),
+            "fork": fork,
             "issueUrl": task.url,
             "lease": lease,
         }
@@ -440,7 +437,7 @@ def _claim_task(ctx: ToolContext, args: dict[str, Any]) -> ToolOutput:
         claimed = bridge.claim(ctx.identity, task_id)
         task = bridge.task(task_id)
         branch = branch_name(task.id, task.title)
-        fork = _fork(ctx.identity.login)
+        fork = bridge.work_repo(ctx.identity)  # Phase 7: the copy, once FORGE knows it
         text = (
             f"Task #{task_id} is yours until {claimed.leaseEndsAt} ({claimed.leaseHours} hours). "
             f"Work in {fork} on the branch {branch} (create it from main if it doesn't exist). "
@@ -772,11 +769,12 @@ def _render_forge_task(ctx: ToolContext, args: dict[str, str]) -> list[dict[str,
     if not _DIGITS.fullmatch(raw):
         raise ToolError("task_id must be a FORGE task number, like 12.")
     task_id = int(raw)
+    bridge = _bridge(ctx)
     try:
-        task = _bridge(ctx).task(task_id)
+        task = bridge.task(task_id)
     except ApiError as exc:
         raise _explain(exc, task_id, ctx.identity.login) from None
-    brief = compile_brief(task, task.acceptanceCriteria, ctx.identity.login)
+    brief = bridge.brief_for(task, ctx.identity)
     text = (
         f"Start FORGE task #{task_id}.\n\n"
         f"Use the FORGE tools: claim_task with task_id {task_id} before you change anything, "

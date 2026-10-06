@@ -1,5 +1,8 @@
 """What the Bridge reads from GitHub (contract §7): a task's pull request, its checks, a
-pull request by number (for submit), and whether the caller has a fork.
+pull request by number (for submit), whether the caller has a fork, and (Phase 7) how far
+the task's branch in the holder's copy is ahead of upstream main, and the protocol rules on
+upstream main (`.github/forge-protocol.json`) a diff is checked against before FORGE sends
+it for review.
 
 Reads are anonymous unless FORGE_GITHUB_READ_TOKEN is set; a read-only token raises
 GitHub's limit from 60 to 5,000 requests an hour, and production needs one (every status
@@ -21,23 +24,30 @@ Same outbound rules as the rail adapters (rail_adapters/base.py): no redirects, 
 1 MB read.
 """
 
+import base64
+import binascii
+import json
 import logging
 import os
 import re
 import threading
 import time
 from collections import OrderedDict
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal
+from urllib.parse import quote
 
 import httpx
 
 from forge_api.models import CheckRun, CheckRunStatus, CheckState, ForkStatus
-from forge_api.services.brief import UPSTREAM_REPO, is_valid_login
+from forge_api.services.brief import UPSTREAM_REPO, is_valid_copy, is_valid_login
 from forge_api.services.rail_adapters.base import (
     FORK_REPO_NAME,
+    STATUS_TIMEOUT,
     USER_AGENT,
     OutboundCall,
     TransportFailure,
@@ -57,6 +67,16 @@ PULL_TTL_SECONDS = 60.0
 CHECKS_TTL_SECONDS = 60.0
 SEARCH_TTL_SECONDS = 60.0
 FORK_TTL_SECONDS = 300.0
+COMPARE_TTL_SECONDS = 60.0
+#: The rules are read at one commit, whose content never changes: kept for an hour.
+RULES_TTL_SECONDS = 3600.0
+REPOSITORY_TTL_SECONDS = 300.0
+#: Where upstream declares its protocol rules, and the most of it FORGE reads.
+PROTOCOL_PATH = ".github/forge-protocol.json"
+PROTOCOL_MAX_BYTES = 256 * 1024
+#: Foreman's bounds on each list (manifest.ts): at most 200 entries of 500 characters.
+PROTOCOL_MAX_ENTRIES = 200
+PROTOCOL_MAX_ENTRY_CHARS = 500
 #: A failed read is remembered this long: asking again fails at once.
 FAILURE_TTL_SECONDS = 60.0
 #: After this many failed reads in a row, GitHub isn't asked at all for BREAKER_SECONDS.
@@ -72,6 +92,8 @@ MAX_BODY_SCAN = 20_000
 #: Conclusions that let a pull request through; everything else completed is a failure.
 PASSING = frozenset({"success", "neutral", "skipped"})
 _SHA = re.compile(r"[0-9a-f]{7,64}")
+#: A full commit id, as the protocol rules are read at.
+_COMMIT = re.compile(r"[0-9a-f]{40}")
 #: `[#12]` in a pull request title: AGENTS.md rule 8's `[#<issue>] <goal>`.
 _TITLE_REF = re.compile(r"\[#([1-9][0-9]{0,9})\]")
 #: "Fixes #12", "closes: #12", "Resolves #12" in a description: the link Foreman's G0 gate
@@ -83,6 +105,101 @@ PullState = Literal["open", "closed"]
 
 class GitHubUnavailable(Exception):
     """GitHub didn't give a usable answer (network, rate limit, an unexpected status)."""
+
+
+class OutOfTime(GitHubUnavailable):
+    """A contributor action's time ran out before or during a read (`within`). Says nothing
+    about GitHub, so it is neither remembered as a failure nor counted by the breaker."""
+
+
+#: When the contributor action under way must be over (time.monotonic()), or None: the
+#: public reads it makes (its claim lookup, the protocol rules) fit its budget too.
+_action_deadline: ContextVar[float | None] = ContextVar("forge_action_deadline", default=None)
+
+
+@contextmanager
+def within(seconds: float) -> Iterator[None]:
+    """Every read in this block (this thread's) is cut to what is left of `seconds` from now,
+    and none starts after them (OutOfTime). Phase 7's copy and review run in one."""
+    token = _action_deadline.set(time.monotonic() + seconds)
+    try:
+        yield
+    finally:
+        _action_deadline.reset(token)
+
+
+@dataclass(frozen=True)
+class Repository:
+    """A repository as GitHub names it now, found by its id (Phase 7: the contributor's copy,
+    which keeps its id through a rename of the repository or of its owner)."""
+
+    full_name: str
+    owner_id: int
+    fork: bool
+    #: `owner/name` of the repository it was forked from, lowercased; "" for none.
+    parent: str
+
+
+@dataclass(frozen=True)
+class ProtocolRules:
+    """Upstream main's `.github/forge-protocol.json`, as Foreman and
+    tools/forge/test-mod-detector.sh read it: where tests live (`testGlobs`, globs) and the
+    paths only the core team may change (`protectedPaths`: a trailing `/` is a directory,
+    anything else one exact path)."""
+
+    test_globs: tuple[str, ...]
+    protected_paths: tuple[str, ...]
+
+
+#: What JavaScript's String.prototype.trim() strips (Foreman's manifest.ts), where Python's
+#: str.strip() differs: it also takes U+FEFF.
+_JS_TRIM = (
+    "\t\n\v\f\r \u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007"
+    "\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
+)
+
+
+def _rule_list(value: object) -> tuple[str, ...] | None:
+    """A non-empty list of non-blank one-line strings within Foreman's bounds, or None. An
+    entry blank to either Python (the detector) or JavaScript (Foreman) is refused, so the
+    three readers never apply different lists."""
+    if not isinstance(value, list) or not 0 < len(value) <= PROTOCOL_MAX_ENTRIES:
+        return None
+    if not all(
+        isinstance(entry, str)
+        and entry.strip()
+        and entry.strip(_JS_TRIM)
+        and len(entry) <= PROTOCOL_MAX_ENTRY_CHARS
+        and "\n" not in entry
+        and "\r" not in entry
+        for entry in value
+    ):
+        return None
+    return tuple(value)
+
+
+def _no_constant(name: str) -> Any:
+    """NaN and Infinity aren't JSON: JavaScript's JSON.parse refuses them, so FORGE does."""
+    raise ValueError(f"{name} isn't JSON")
+
+
+def parse_protocol(raw: bytes) -> ProtocolRules | None:
+    """The rules in a manifest, or None for ANY defect, exactly where Foreman's
+    parseProtocolManifest and the detector refuse one: not a JSON object, a version other
+    than 1, or a missing, empty or malformed list."""
+    try:
+        doc = json.loads(raw.decode("utf-8"), parse_constant=_no_constant)
+    except (ValueError, UnicodeDecodeError):
+        return None
+    if not isinstance(doc, dict):
+        return None
+    version = doc.get("version")
+    if isinstance(version, bool) or version != 1:
+        return None
+    tests, protected = _rule_list(doc.get("testGlobs")), _rule_list(doc.get("protectedPaths"))
+    if tests is None or protected is None:
+        return None
+    return ProtocolRules(test_globs=tests, protected_paths=protected)
 
 
 @dataclass(frozen=True)
@@ -107,6 +224,11 @@ class PullRequest:
     merged_at: datetime | None = None
     #: Task numbers it names: `[#<n>]` in its title, "Closes #<n>" in its description.
     refs: frozenset[int] = frozenset()
+    #: GitHub user id of the account that opened it (anyone may open a pull request from a
+    #: public fork's branch, so this isn't always the fork's owner).
+    author_id: int | None = None
+    #: The branch it asks to merge into.
+    base_ref: str = ""
 
     @property
     def is_open(self) -> bool:
@@ -160,6 +282,8 @@ def _parse_pull(raw: Any) -> PullRequest | None:
     base = raw.get("base")
     base_repo = base.get("repo") if isinstance(base, dict) else None
     base_name = base_repo.get("full_name") if isinstance(base_repo, dict) else None
+    base_ref = base.get("ref") if isinstance(base, dict) else None
+    author = raw.get("user")
     title = raw.get("title")
     merged = raw.get("merged") is True or isinstance(raw.get("merged_at"), str)
     return PullRequest(
@@ -177,7 +301,15 @@ def _parse_pull(raw: Any) -> PullRequest | None:
         closed_at=_time(raw.get("closed_at")),
         merged_at=_time(raw.get("merged_at")),
         refs=task_refs(title, raw.get("body")),
+        author_id=_positive_int(author.get("id")) if isinstance(author, dict) else None,
+        base_ref=base_ref if isinstance(base_ref, str) else "",
     )
+
+
+def parse_pull(raw: Any) -> PullRequest | None:
+    """A pull request as GitHub's REST API answers it, or None when it isn't one. The same
+    reading every read here uses, for the pull requests services/copies.py opens or finds."""
+    return _parse_pull(raw)
 
 
 def best_pull(pulls: Iterable[PullRequest]) -> PullRequest | None:
@@ -358,6 +490,13 @@ class GitHubReads:
         return response
 
     def _send(self, path: str, params: Mapping[str, str] | None, token: str) -> VendorResponse:
+        timeout = self._timeout
+        deadline = _action_deadline.get()
+        if deadline is not None:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                raise OutOfTime("the action's time ran out")
+            timeout = min(timeout, left)
         headers = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": API_VERSION}
         if token:
             headers["Authorization"] = f"Bearer {token}"
@@ -369,8 +508,10 @@ class GitHubReads:
             secret_headers=frozenset({"Authorization"}),
         )
         try:
-            return bounded_send(self.client, call, total_timeout=self._timeout)
+            return bounded_send(self.client, call, total_timeout=timeout)
         except TransportFailure as exc:
+            if timeout < self._timeout and exc.status == STATUS_TIMEOUT:
+                raise OutOfTime("the action's time ran out during a read") from None
             raise GitHubUnavailable(f"GitHub didn't answer ({exc.reason})") from None
 
     @staticmethod
@@ -411,6 +552,8 @@ class GitHubReads:
             raise GitHubUnavailable("GitHub can't be reached right now")
         try:
             value = fetch()
+        except OutOfTime:
+            raise
         except GitHubUnavailable as exc:
             self._count(failed=True)
             self._cache.put(key, _Failure(str(exc)), FAILURE_TTL_SECONDS)
@@ -551,3 +694,88 @@ class GitHubReads:
 
         found = self._cached(("fork", login.lower()), FORK_TTL_SECONDS, fetch)
         return found if isinstance(found, ForkStatus) else ForkStatus(exists=False)
+
+    def ahead_by(self, owner: str, branch: str) -> int | None:
+        """How many commits `<owner>:<branch>` has that upstream main doesn't (GitHub's
+        compare, cached for 60 s), or None when there is no such branch. For the holder's
+        "Send for review" (TaskDetail.canSendForReview); GitHubUnavailable when unknown."""
+        if not is_valid_login(owner):
+            return None
+
+        def fetch() -> int | None:
+            # Only the count is needed. GitHub lists the changed files, with their patches,
+            # on a comparison's first page alone, so the second page (one commit a page)
+            # carries `ahead_by` without them and stays small whatever the diff.
+            response = self._get(
+                f"/repos/{UPSTREAM_REPO}/compare/main...{owner}:{quote(branch, safe='/')}",
+                {"per_page": "1", "page": "2"},
+            )
+            if response.status == 404:
+                return None
+            if not response.ok:
+                raise GitHubUnavailable(f"GitHub answered {response.status}")
+            raw = self._json(response)
+            ahead = raw.get("ahead_by") if isinstance(raw, dict) else None
+            if not isinstance(ahead, int) or isinstance(ahead, bool) or ahead < 0:
+                raise GitHubUnavailable("GitHub's comparison had no commit count")
+            return ahead
+
+        found = self._cached(("ahead", owner.lower(), branch), COMPARE_TTL_SECONDS, fetch)
+        return found if isinstance(found, int) else None
+
+    def repository(self, repo_id: int) -> Repository | None:
+        """Repository `repo_id` as GitHub names it now (`GET /repositories/{id}`, a public
+        read cached for 5 minutes), or None when there is no such public repository.
+        GitHubUnavailable when GitHub can't say."""
+
+        def fetch() -> Repository | None:
+            response = self._get(f"/repositories/{repo_id}")
+            if response.status == 404:
+                return None
+            if not response.ok:
+                raise GitHubUnavailable(f"GitHub answered {response.status}")
+            raw = self._json(response)
+            if not isinstance(raw, dict):
+                raise GitHubUnavailable("GitHub's repository answer wasn't an object")
+            name, owner, parent = raw.get("full_name"), raw.get("owner"), raw.get("parent")
+            owner_id = _positive_int(owner.get("id")) if isinstance(owner, dict) else None
+            if not is_valid_copy(name) or owner_id is None:
+                raise GitHubUnavailable("GitHub's repository answer had no usable name or owner")
+            return Repository(
+                full_name=name,
+                owner_id=owner_id,
+                fork=raw.get("fork") is True,
+                parent=str(parent.get("full_name", "")).lower() if isinstance(parent, dict) else "",
+            )
+
+        found = self._cached(("repository", str(repo_id)), REPOSITORY_TTL_SECONDS, fetch)
+        return found if isinstance(found, Repository) else None
+
+    def protocol_rules(self, ref: str) -> ProtocolRules | None:
+        """The protocol rules as they are at upstream commit `ref` (40 lowercase hex: the
+        main a comparison was made against), or None when the file there isn't a manifest
+        Foreman would take, or `ref` isn't a commit id. GitHubUnavailable when it can't be
+        read at all. Cached by commit, whose content never changes, so a comparison is never
+        checked against the rules of another main; read from upstream, never from a pull
+        request, so a diff can't loosen the rules it is checked against."""
+        if not _COMMIT.fullmatch(ref):
+            return None
+
+        def fetch() -> ProtocolRules | None:
+            response = self._get(f"/repos/{UPSTREAM_REPO}/contents/{PROTOCOL_PATH}", {"ref": ref})
+            if not response.ok:
+                raise GitHubUnavailable(f"GitHub answered {response.status}")
+            raw = self._json(response)
+            content = raw.get("content") if isinstance(raw, dict) else None
+            if not isinstance(content, str) or raw.get("encoding") != "base64":
+                raise GitHubUnavailable("GitHub sent the protocol file in a form FORGE can't read")
+            try:
+                data = base64.b64decode(content, validate=False)
+            except (binascii.Error, ValueError):
+                raise GitHubUnavailable("GitHub sent the protocol file garbled") from None
+            if len(data) > PROTOCOL_MAX_BYTES:
+                return None
+            return parse_protocol(data)
+
+        found = self._cached(("rules", ref), RULES_TTL_SECONDS, fetch)
+        return found if isinstance(found, ProtocolRules) else None

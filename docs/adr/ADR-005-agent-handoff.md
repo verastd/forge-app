@@ -15,7 +15,11 @@ Accepted (Phase 4). The start rails ship switched off (`agent_start` off,
 its live test in [`live-tests.md`](../live-tests.md). Supersedes the
 "guided handoff" (copy, open the agent, paste) design in PRD Appendix I.3
 (as verified Aug 2026); the PRD, in the private core repo, has its
-Appendix I revised to match.
+Appendix I revised to match. Amended 2026-10-05 by
+[ADR-008](ADR-008-copy-and-review.md): FORGE now sets up the
+contributor's copy (their fork) and the task's branch in it, and opens the
+pull request in their name when they press Send for review; it still never
+writes code.
 
 ## Context
 

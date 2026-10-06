@@ -28,6 +28,7 @@ import {
   ConnectedAgentListSchema,
   ConnectedAgentSchema,
   ContributorProfileSchema,
+  CopyResultSchema,
   CredentialKindSchema,
   CredentialSchema,
   DispatchRequestSchema,
@@ -50,6 +51,10 @@ import {
   RailMetaSchema,
   RailModeSchema,
   RailSchema,
+  REPO_ACTION_ERRORS,
+  RepoActionRequestSchema,
+  RepoCopySchema,
+  ReviewResultSchema,
   SIZES,
   START_RAILS,
   SalesVolumeDaySchema,
@@ -330,8 +335,8 @@ const JULES_META = {
   mode: 'start',
   label: 'Google Jules',
   vendor: 'Google',
-  blurb: "Google's Gemini agent works in your fork and opens a pull request.",
-  setup: ['Fork forge-app on GitHub.'],
+  blurb: "Google's Gemini agent works in your copy and opens a pull request.",
+  setup: ['Press Get started on the task page, and FORGE makes your copy of its code.'],
   credential: 'api_key',
   keyUrl: 'https://jules.google.com/settings',
   plan: 'Free for 15 tasks a day.',
@@ -385,6 +390,16 @@ describe('TaskListSchema / TaskDetailSchema / ForkStatusSchema', () => {
     const detail = { task: CARD, acceptanceCriteria: ['It works'], branch: 'task/7-x', brief: 'FORGE task #7: x' };
     expect(TaskDetailSchema.safeParse(detail).success).toBe(true);
     expect(TaskDetailSchema.safeParse({ ...detail, brief: undefined }).success).toBe(false);
+  });
+
+  it('a task detail may carry the holder\'s copy and whether there is something to send for review', () => {
+    const detail = { task: CARD, acceptanceCriteria: [], branch: 'task/7-x', brief: 'FORGE task #7: x' };
+    const copy = { fullName: 'maya/forge-app-1', syncedAt: '2026-10-05T12:00:00Z' };
+    expect(TaskDetailSchema.safeParse({ ...detail, copy, canSendForReview: true }).success).toBe(true);
+    expect(TaskDetailSchema.safeParse({ ...detail, copy: null }).success).toBe(false);
+    expect(TaskDetailSchema.safeParse({ ...detail, canSendForReview: null }).success).toBe(false);
+    expect(TaskDetailSchema.safeParse({ ...detail, copy: { fullName: 'maya/forge-app' } }).success).toBe(false);
+    expect(RepoCopySchema.safeParse(copy).success).toBe(true);
   });
 
   it('a fork status has an optional url', () => {
@@ -552,7 +567,17 @@ describe('BridgeStatusSchema / BridgeEventSchema', () => {
   it('declares the progress stages, event kinds and sources', () => {
     expect(PROGRESS_STAGES).toEqual(['started', 'working', 'pushed', 'pr_opened', 'blocked', 'done']);
     expect(ProgressStageSchema.options).toEqual([...PROGRESS_STAGES]);
-    expect(BRIDGE_EVENT_KINDS).toEqual(['claimed', 'dispatched', 'opened', 'progress', 'submitted', 'released', 'relayed']);
+    expect(BRIDGE_EVENT_KINDS).toEqual([
+      'claimed',
+      'dispatched',
+      'opened',
+      'progress',
+      'submitted',
+      'released',
+      'relayed',
+      'copy_ready',
+      'review_sent',
+    ]);
     expect(BridgeEventKindSchema.options).toEqual([...BRIDGE_EVENT_KINDS]);
     expect(BRIDGE_EVENT_SOURCES).toEqual(['forge', 'agent']);
     expect(BridgeEventSourceSchema.options).toEqual([...BRIDGE_EVENT_SOURCES]);
@@ -998,5 +1023,55 @@ describe('UPLAND const tuples', () => {
     expect(UPLAND_INTERVALS).toEqual(['hour', 'day', 'week']);
     expect(UPLAND_PROPERTY_SORTS).toEqual(['sales', 'price']);
     expect(UPLAND_EXPORT_TYPES).toEqual(['actions', 'sales']);
+  });
+});
+
+describe('Phase 7: RepoActionRequestSchema / CopyResultSchema / ReviewResultSchema', () => {
+  it('takes a task and a one-time token of 1 to 4096 characters', () => {
+    expect(RepoActionRequestSchema.safeParse({ taskId: 7, token: 't' }).success).toBe(true);
+    expect(RepoActionRequestSchema.safeParse({ taskId: 7, token: 't'.repeat(4096) }).success).toBe(true);
+    expect(RepoActionRequestSchema.safeParse({ taskId: 7, token: '' }).success).toBe(false);
+    expect(RepoActionRequestSchema.safeParse({ taskId: 7, token: 't'.repeat(4097) }).success).toBe(false);
+    expect(RepoActionRequestSchema.safeParse({ taskId: 7.5, token: 't' }).success).toBe(false);
+    expect(RepoActionRequestSchema.safeParse({ token: 't' }).success).toBe(false);
+  });
+
+  it('a copy result says what FORGE did', () => {
+    const result = {
+      fullName: 'maya/forge-app',
+      branch: 'task/7-x',
+      synced: true,
+      branchCreated: true,
+      branchFromLatest: true,
+    };
+    expect(CopyResultSchema.safeParse(result).success).toBe(true);
+    expect(CopyResultSchema.safeParse({ ...result, synced: undefined }).success).toBe(false);
+  });
+
+  it('a review result carries the pull request and whether FORGE opened it now', () => {
+    const pullRequest = { number: 12, url: 'https://github.com/verastd/forge-app/pull/12' };
+    expect(ReviewResultSchema.safeParse({ pullRequest, created: true }).success).toBe(true);
+    expect(ReviewResultSchema.safeParse({ pullRequest, created: false }).success).toBe(true);
+    expect(ReviewResultSchema.safeParse({ pullRequest: { number: 12 }, created: true }).success).toBe(false);
+  });
+
+  it('lists the error codes the API answers with, in apps/api models.py order', () => {
+    expect(REPO_ACTION_ERRORS).toEqual([
+      'not_holder',
+      'already_shipped',
+      'rate_limited',
+      'wrong_account',
+      'copy_not_ready',
+      'copy_mismatch',
+      'no_copy',
+      'branch_missing',
+      'no_changes',
+      'too_large',
+      'tests_modified',
+      'protected_paths',
+      'checks_unavailable',
+      'head_taken',
+      'github_failed',
+    ]);
   });
 });

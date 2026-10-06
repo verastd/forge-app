@@ -85,6 +85,11 @@ export function SetupSteps({
               <a href={link.href} target="_blank" rel="noopener noreferrer" className={styles.inlineLink}>
                 {step}
               </a>
+            ) : link.href.startsWith('#') ? (
+              // A place on this page (step 1's Get started): a plain anchor moves keyboard focus there too.
+              <a href={link.href} className={styles.inlineLink}>
+                {step}
+              </a>
             ) : (
               <Link href={link.href} className={styles.inlineLink}>
                 {step}

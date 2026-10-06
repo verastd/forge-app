@@ -3,13 +3,14 @@
  * module load, so one build serves whatever each server is configured with.
  *
  * Edge-safe on purpose: the middleware imports this module, so it may import
- * nothing but `@forge/auth` and the dependency-free `./api-url` (no
- * `@forge/flags`, no `node:` built-ins).
+ * nothing but `@forge/auth` and the dependency-free `./api-url` and
+ * `./repo-app` (no `@forge/flags`, no `node:` built-ins).
  */
 import { MIN_SECRET_LENGTH, resolveSessionKeys } from '@forge/auth';
 import type { SessionKeys } from '@forge/auth';
 
 import { usableApiBase } from './api-url';
+import { repoAppSettings } from './repo-app';
 
 /** Production picks the `__Host-` cookies and `Secure`. */
 export function isProduction(): boolean {
@@ -94,6 +95,25 @@ export function githubAppConfig(): GitHubAppConfig | null {
   const origin = publicOrigin();
   if (!clientId || !clientSecret || origin === null) return null;
   return { clientId, clientSecret, origin };
+}
+
+/**
+ * FORGE's OAuth App behind "your copy" and "Send for review" (Phase 7):
+ * GITHUB_REPO_CLIENT_ID and GITHUB_REPO_CLIENT_SECRET, with the public origin
+ * its callback (`/auth/github/repo/callback`) lives on. Null when any of
+ * them is unset or unusable, which switches the feature off: the task page
+ * says setting up a copy isn't available yet and works as it did before. No
+ * flag besides. Server-side only, like the GitHub App's settings: the secret
+ * is used for the code exchange and to revoke each token, and goes nowhere
+ * else.
+ */
+export function githubRepoConfig(): GitHubAppConfig | null {
+  return repoAppSettings({
+    clientId: process.env.GITHUB_REPO_CLIENT_ID,
+    clientSecret: process.env.GITHUB_REPO_CLIENT_SECRET,
+    signInClientId: process.env.GITHUB_APP_CLIENT_ID,
+    origin: publicOrigin(),
+  });
 }
 
 /**

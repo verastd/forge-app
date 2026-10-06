@@ -24,6 +24,11 @@
 
 /.github/                                      @verastd @forge-cold
 /CODEOWNERS                                    @verastd @forge-cold
+/Makefile                                      @verastd @forge-cold
+/tools/forge/check-lockfile-diff.sh             @verastd @forge-cold
+/tools/forge/coverage-gate.sh                   @verastd @forge-cold
+/tools/forge/changed_line_coverage.py           @verastd @forge-cold
+/tools/forge/test-mod-detector.sh               @verastd @forge-cold
 /contracts/                                    @verastd @forge-cold
 /apps/api/src/forge_api/routers/auth*          @verastd @forge-cold
 /apps/api/src/forge_api/routers/pay*           @verastd @forge-cold
@@ -82,6 +87,8 @@
 /apps/web/src/components/contribute/           @verastd @forge-cold
 /apps/api/src/forge_api/services/bridge.py     @verastd @forge-cold
 /apps/api/src/forge_api/routers/bridge.py      @verastd @forge-cold
+/apps/api/src/forge_api/services/copies.py     @verastd @forge-cold
+/apps/api/src/forge_api/services/github_reads.py @verastd @forge-cold
 /apps/api/src/forge_api/models.py              @verastd @forge-cold
 /apps/api/src/forge_api/main.py                @verastd @forge-cold
 # The Propose floor's rules: who may second, consent, object, vote and publish,

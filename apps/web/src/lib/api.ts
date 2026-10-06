@@ -50,6 +50,7 @@ import {
   type ClaimResponse,
   type ConnectedAgentList,
   type ContributorProfile,
+  type CopyResult,
   type Credential,
   type DispatchResult,
   type FeedbackResponse,
@@ -68,10 +69,12 @@ import { isDemoMode } from './mode';
 import {
   localChecks,
   localClaim,
+  localCopy,
   localDispatch,
   localFeedback,
   localRails,
   localRelease,
+  localReview,
   localStatus,
   localTaskDetail,
   type PracticeTask,
@@ -361,10 +364,15 @@ export async function fetchTasks(): Promise<Loaded<TaskCard[]>> {
   return { data: result.data.tasks, degraded: result.degraded };
 }
 
-/** The task, its criteria and its brief (personalized when `identified`). */
+/**
+ * The task, its criteria and its brief (personalized when `identified`), and
+ * for the holder their copy and whether "Send for review" has anything to send.
+ */
 export async function fetchTaskDetail(taskId: number, identified: boolean): Promise<Loaded<TaskDetail>> {
   if (isDemoMode()) {
-    return load(`${apiBase}/api/bridge/tasks/${taskId}`, TaskDetailSchema, () => localTaskDetail(requireTask(taskId)));
+    return load(`${apiBase}/api/bridge/tasks/${taskId}`, TaskDetailSchema, () =>
+      localTaskDetail(requireTask(taskId), practiceTasks.get(taskId)),
+    );
   }
   return { data: await call(readUrl(`/tasks/${taskId}`, identified), TaskDetailSchema), degraded: false };
 }
@@ -512,6 +520,38 @@ export async function submitPullRequest(taskId: number, prUrl: string): Promise<
     data: await call(`${BFF_BRIDGE}/submit/${taskId}`, BridgeStatusSchema, postJson({ prUrl }), WRITE_TIMEOUT_MS),
     degraded: false,
   };
+}
+
+/*
+ * "Your copy" and "Send for review" go through GitHub (`/auth/github/repo`, a
+ * form post: GitHub's approval page has to be a top-level navigation), never
+ * through these. Only the practice app, which has nobody on GitHub, does them
+ * here, in the tab.
+ */
+
+/** "Get started" or "Refresh your copy" in the practice app: a pretend copy, with nothing sent. */
+export async function practiceCopy(taskId: number): Promise<Loaded<CopyResult>> {
+  if (!isDemoMode()) {
+    throw new ApiError(`practice task ${taskId}`, 400, 'not_practice');
+  }
+  await pause(PRACTICE_START_MS);
+  const { result, practice } = localCopy(requireTask(taskId), requirePractice(taskId));
+  practiceTasks.set(taskId, practice);
+  return degradedResult(result);
+}
+
+/** "Send for review" in the practice app: the pretend work goes on to its checks, with nothing sent. */
+export async function practiceReview(taskId: number): Promise<Loaded<{ sent: true }>> {
+  if (!isDemoMode()) {
+    throw new ApiError(`practice task ${taskId}`, 400, 'not_practice');
+  }
+  await pause(PRACTICE_START_MS);
+  const reviewed = localReview(requirePractice(taskId));
+  if ('refused' in reviewed) {
+    throw new ConflictError(reviewed.refused);
+  }
+  practiceTasks.set(taskId, reviewed.practice);
+  return degradedResult({ sent: true });
 }
 
 /* --- your agent keys and connected agents (/me) ------------------------------------ */

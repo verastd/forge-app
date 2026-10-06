@@ -24,16 +24,16 @@ incomplete), `experimental` (scaffold/stub only).
 | Path | Purpose | Owners | Stability | Tier-floor notes |
 |---|---|---|---|---|
 | `apps/web` | Next.js 15 App Router, TypeScript strict. The app itself, including the Bridge's `/contribute` surface, GitHub sign-in (`src/app/auth/`, `src/app/bff/`), the FORGE connector's consent page (`src/app/oauth/`) and setup page (`src/app/connect/`), the Apps lobby at `/apps` (`src/components/lobby/`, with its LiveKit token route in `src/app/api/lobby/`), and the Propose floor at `/propose` (`src/app/propose/`) with its bell (`src/components/NotificationBell.tsx`) | `@verastd`; `src/app/auth/`, `src/app/bff/`, `src/app/oauth/`, `src/app/connect/`, `src/app/api/lobby/`, `src/middleware.ts`, `src/lib/session.ts`, `src/lib/auth/`, `src/lib/launch.ts`, `src/lib/mode.ts`, `src/lib/bff-forward.ts`, `src/lib/handoff.ts`, `src/lib/api.ts`, `src/components/contribute/` and `next.config.mjs` need cold-account approval | beta — live and demo builds both work end to end; no unit-test runner yet, so it's exempt from the changed-line coverage gate | Open to all tiers per task; the cold-account sub-paths above are effectively T2+ in practice |
-| `apps/api` | FastAPI (Python 3.12, `uv`), package `forge_api`. App backend, the Bridge's server-side service, the FORGE connector (OAuth + MCP), the Propose floor's rules, members and notifications, and the house model that drafts a passed proposal's task (`services/house.py`, with its eval in `tools/house_eval.py`) | `@verastd`; `routers/auth*`, `routers/pay*`, `routers/oauth.py`, `routers/mcp.py`, `routers/bridge.py`, `services/identity.py`, `services/oauth.py`, `services/mcp_server.py`, `services/vault.py`, `services/rail_adapters/`, `services/bridge_mcp.py`, `services/bridge.py`, `services/brief.py`, `services/rails.py`, `models.py`, `main.py`, `fixtures/`, the Propose floor's `services/proposals.py`, `services/members.py`, `services/notifications.py` and their three routers, and the house model's `services/house.py`, `tools/house_eval.py` and eval cases (`tests/fixtures/house-eval/`) need cold-account approval | beta — `health`, `flags`, `bridge`, `oauth`, `mcp`, `upland`/`upland_scrape`, and `proposals`/`notifications`/`members` routers are live, each with pytest coverage; the house model is tested against a fake client and against Anthropic's real SDK over an in-process transport, never the network, and its eval runs the real model by hand; `auth*`/`pay*` don't exist yet (identity verification lives in `services/identity.py`, consumed by the routers' dependencies, not a dedicated router) | `auth*`/`pay*`/`services/identity.py`, the connector, vault, rail and brief paths, the Bridge's key-carrying code, the task fixtures, the Propose floor's rules and the house model's code and eval cases: cold-account approval, effectively T2+ in practice |
+| `apps/api` | FastAPI (Python 3.12, `uv`), package `forge_api`. App backend, the Bridge's server-side service (with its GitHub calls as a contributor, `services/copies.py`: their copy and Send for review), the FORGE connector (OAuth + MCP), the Propose floor's rules, members and notifications, and the house model that drafts a passed proposal's task (`services/house.py`, with its eval in `tools/house_eval.py`) | `@verastd`; `routers/auth*`, `routers/pay*`, `routers/oauth.py`, `routers/mcp.py`, `routers/bridge.py`, `services/identity.py`, `services/oauth.py`, `services/mcp_server.py`, `services/vault.py`, `services/rail_adapters/`, `services/bridge_mcp.py`, `services/bridge.py`, `services/copies.py`, `services/github_reads.py`, `services/brief.py`, `services/rails.py`, `models.py`, `main.py`, `fixtures/`, the Propose floor's `services/proposals.py`, `services/members.py`, `services/notifications.py` and their three routers, and the house model's `services/house.py`, `tools/house_eval.py` and eval cases (`tests/fixtures/house-eval/`) need cold-account approval | beta — `health`, `flags`, `bridge`, `oauth`, `mcp`, `upland`/`upland_scrape`, and `proposals`/`notifications`/`members` routers are live, each with pytest coverage; the house model is tested against a fake client and against Anthropic's real SDK over an in-process transport, never the network, and its eval runs the real model by hand; `auth*`/`pay*` don't exist yet (identity verification lives in `services/identity.py`, consumed by the routers' dependencies, not a dedicated router) | `auth*`/`pay*`/`services/identity.py`, the connector, vault, rail and brief paths, the Bridge's key- and token-carrying code, the task fixtures, the Propose floor's rules and the house model's code and eval cases: cold-account approval, effectively T2+ in practice |
 | `packages/shared` | zod schemas — reference copy of the web/API contract, hand-mirrored and test-locked against `apps/api`'s Pydantic models; also the rail registry (`src/rails.ts`) and the brief every agent gets (`src/brief.ts`), mirrored by `services/rails.py` and `services/brief.py` and held to golden fixtures in `tests/fixtures/` | `@verastd`; `src/rails.ts` and `src/brief.ts` need cold-account approval | stable — schemas populated, mirrored field-for-field by `models.py`, locked by contract tests | Open; `src/rails.ts` and `src/brief.ts`: cold-account approval |
-| `packages/auth` | Sign-in with GitHub: PKCE, sealed session/transaction cookies, the API assertion, and revoking the Copilot rail's one-time GitHub token once it is used. Built on `jose` and Web Crypto only (no `node:` imports), so Next's Edge middleware can import it — see [ADR-003](adr/ADR-003-github-app-signin.md) | `@verastd` `@forge-cold` (cold-account approval) | stable — 100% coverage enforced in `vitest.config.ts`, includes the RFC 7636 PKCE test vector | **Tier floor T2** |
+| `packages/auth` | Sign-in with GitHub: PKCE, sealed session/transaction cookies (a sign-in, agent or repo attempt), the API assertion, the authorize URL of FORGE's OAuth App (fixed to `public_repo`), and revoking each one-time GitHub token, the Copilot rail's and the OAuth App's, once it is used. Built on `jose` and Web Crypto only (no `node:` imports), so Next's Edge middleware can import it — see [ADR-003](adr/ADR-003-github-app-signin.md) | `@verastd` `@forge-cold` (cold-account approval) | stable — 100% coverage enforced in `vitest.config.ts`, includes the RFC 7636 PKCE test vector | **Tier floor T2** |
 | `packages/flags` | Feature-flag client; layered load, fail-closed. `config/flags.json` -> `FORGE_FLAGS_PATH` -> `FORGE_FLAGS_JSON` | `@verastd` | stable — `csv_export`, `contribute_bridge`, `upland_data`, `github_signin`, `apps_lobby`, `mcp_connector` (the FORGE connector), `agent_start` (FORGE starting agents through vendor APIs; off in `config/flags.json` until those rails pass their live tests), `proposals` (the Propose floor and its notifications) and `house_spec` (the house model, which also needs `ANTHROPIC_API_KEY` on the API), all real gates | Open |
 | `packages/lobby` | The Apps lobby's pure logic: the wall's geometry, the free-roam camera and how it is saved, the app registry and the rules every entry must pass (slots, routes, and the sandbox and CSP for framed apps), which page chrome a route gets, and the presence packet, ranges and name rules. No DOM, no three.js and no runtime dependencies (its `tsconfig.json` and `eslint.config.mjs` enforce it) — see [ADR-004](adr/ADR-004-apps-lobby.md) | `@verastd` | stable — unit-tested in Node at full line coverage; the framed-app rules are enforced, though nothing framed ships yet | Open |
 | `packages/contracts-client` | The only module allowed to import a chain SDK. Mock-only isolation layer | `@verastd` `@forge-cold` (cold-account approval) | experimental — mock-only; `mode: 'live'` throws, no chain wiring | **Tier floor T2** |
 | `contracts/` | On-chain code, if any lands in-repo | `@verastd` `@forge-cold` (cold-account approval) | placeholder — no contract source yet | **Tier floor T2** |
 | `tests/acceptance/issue-<N>/` | Per-task acceptance tests, one directory per issue | Spec author (core team, or a T3 steward once delegated) | stable pattern, structurally enforced by G0 and the Gauntlet | Never written by the implementer |
 | `tests/e2e` | Playwright end-to-end tests, one project per build (demo + live) | `@verastd` | stable | Open |
-| `tools/forge` | The `forge` CLI (`tasks`/`claim`/`status`) and the Gauntlet's gate scripts (`check-lockfile-diff.sh`, `coverage-gate.sh` + `changed_line_coverage.py`, `test-mod-detector.sh`) | `@verastd` | stable — all three gates enforce | Open |
+| `tools/forge` | The `forge` CLI (`tasks`/`claim`/`status`) and the Gauntlet's gate scripts (`check-lockfile-diff.sh`, `coverage-gate.sh` + `changed_line_coverage.py`, `test-mod-detector.sh`) | `@verastd` `@forge-cold` (cold-account approval), like the root `Makefile`: the Gauntlet runs both from the pull request's own checkout, so a pull request could otherwise rewrite the checks run on it | stable — all three gates enforce | T3-only (protected paths since Phase 7) |
 | `.github/workflows` | `gauntlet.yml` (the four unprivileged jobs: `hygiene`/`tests`/`security`/`e2e`), `foreman-annotate.yml` (privileged: posts the merge decision brief once the Gauntlet finishes, never checks out fork code), plus `agents-md-lint.yml` and `deploy-staging.yml` | `@verastd` `@forge-cold` (cold-account approval via CODEOWNERS on `.github/`) | beta — the four Gauntlet jobs run and are merge-queue-safe; G0 runs inside Foreman and doesn't post its own commit status here yet | T3-only |
 | `.github/rulesets` | Importable branch-protection ruleset JSON (`main-protection.json`) | `@verastd` `@forge-cold` | beta — schema is current, not yet imported into a live repo | Cold-account approval |
 | Agent config: `.codex/`, `.agents/`, `.cursor/`, `.github/agents/`, `.gemini/`, `CLAUDE.md` | Points contributors' agents at `AGENTS.md` and the FORGE connector (see [The FORGE connector](#the-forge-connector)). The repo doesn't include `.mcp.json` yet; until it does, add the connector to Claude Code with `claude mcp add --transport http forge <url>` (or VS Code's button on `/connect`) | `@verastd` `@forge-cold` (cold-account approval) | beta — each file follows its client's docs as read on 2026-10-01; Antigravity 2.0 and Claude Code on the web are still to be live-tested ([`live-tests.md`](live-tests.md)) | T3-only (protected paths) |
@@ -164,12 +164,14 @@ The rules are one pure function, `resolveSessionKeys` in
 |---|---|---|---|
 | `GITHUB_APP_CLIENT_ID` | web — `lib/auth/config.ts`'s `githubAppConfig()` | For real GitHub sign-in | The GitHub App's client ID; sign-in reads as `'unavailable'` without it |
 | `GITHUB_APP_CLIENT_SECRET` | web, same | For real GitHub sign-in | Never sent to the browser or logged; only used server-side in the `/auth/callback` code exchange |
-| `GITHUB_APP_SLUG` | web — the Copilot rail's "Install FORGE's GitHub app on your fork" link (`https://github.com/apps/<slug>/installations/new`) on the task page | For that link | The App's URL name, as in `https://github.com/apps/<slug>`: lowercase letters, digits and inner dashes, anything else counts as unset. Unset, the install step is shown as plain text with no link. Server-side only, never `NEXT_PUBLIC_*`: the task page reads it on every request and hands it to the page as a prop, so a change needs no rebuild |
-| `FORGE_PUBLIC_ORIGIN` | web — `publicOrigin()` (the OAuth `redirect_uri`, the callback's final redirect) and `isTrustedOrigin()` (the Origin check on `POST /auth/signout`, `POST /auth/demo`, `POST /bff/upland/*` and the other state-changing routes); API — the FORGE connector's public URLs (the OAuth metadata, the `iss` it sends back, the `<origin>/mcp` resource every token is bound to), the Origin check on `/mcp`, and the link a task published from a proposal carries (`<origin>/propose/<id>`) | Web: required outside `next dev`; optional in `next dev` only, where an unset value falls back to the request's own origin. API: required for the connector, which answers `503 connector_unavailable` without it; without a usable value, a published task links to a bare `/propose/<id>` | An `http(s)` URL with no path, query, fragment or credentials, e.g. `https://forge.example` (not `.../` ) — a set-but-invalid value refuses every state-changing request rather than guessing. On the API it must also be `https`, except `http` on a loopback host (`http://localhost:3000`) for development; anything else answers `503 connector_unavailable`. The same value on web and API: production is `https://forge-app-eta-mocha.vercel.app`; it is the connector's OAuth issuer and its address is this plus `/mcp`, so changing it disconnects every agent |
+| `GITHUB_APP_SLUG` | web — the Copilot rail's "Install FORGE's GitHub app on your copy." link (`https://github.com/apps/<slug>/installations/new`) on the task page | For that link | The App's URL name, as in `https://github.com/apps/<slug>`: lowercase letters, digits and inner dashes, anything else counts as unset. Unset, the install step is shown as plain text with no link. Server-side only, never `NEXT_PUBLIC_*`: the task page reads it on every request and hands it to the page as a prop, so a change needs no rebuild |
+| `GITHUB_REPO_CLIENT_ID` | web — `lib/auth/config.ts`'s `githubRepoConfig()`: FORGE's OAuth App, behind Get started, Refresh your copy and Send for review on the task page (`/auth/github/repo`; see [Your copy and Send for review](#your-copy-and-send-for-review)) | For those three buttons. Without a usable pair (or without GitHub sign-in, or a usable `FORGE_PUBLIC_ORIGIN`), step 1 says setting up a copy isn't available yet, step 3 isn't shown, and the task page hands the task to an agent as before. There is no flag besides | The client ID of a classic OAuth App the operator registers for this alone, with its callback URL set to `<FORGE_PUBLIC_ORIGIN>/auth/github/repo/callback`: a letter or digit, then up to 99 letters, digits, `.`, `_` or `-`; anything else counts as unset, and so does the sign-in App's own client ID (`GITHUB_APP_CLIENT_ID`). Read on every request, server-side only, so a change needs no rebuild |
+| `GITHUB_REPO_CLIENT_SECRET` | web, same — the code exchange at `/auth/github/repo/callback`, and revoking each one-time token afterwards (`DELETE /applications/{client_id}/token`, as Basic auth) | Same | The OAuth App's client secret: 1 to 200 printable ASCII characters with no spaces, anything else counts as unset. Never sent to the browser or logged, and used for nothing else |
+| `FORGE_PUBLIC_ORIGIN` | web — `publicOrigin()` (the OAuth `redirect_uri`s, sign-in's `/auth/callback` and the OAuth App's `/auth/github/repo/callback`, and the callback's final redirect) and `isTrustedOrigin()` (the Origin check on `POST /auth/signout`, `POST /auth/demo`, `POST /bff/upland/*`, `POST /auth/github/repo` and the other state-changing routes); API — the FORGE connector's public URLs (the OAuth metadata, the `iss` it sends back, the `<origin>/mcp` resource every token is bound to), the Origin check on `/mcp`, and the link a task published from a proposal carries (`<origin>/propose/<id>`) | Web: required outside `next dev`; optional in `next dev` only, where an unset value falls back to the request's own origin. API: required for the connector, which answers `503 connector_unavailable` without it; without a usable value, a published task links to a bare `/propose/<id>` | An `http(s)` URL with no path, query, fragment or credentials, e.g. `https://forge.example` (not `.../` ) — a set-but-invalid value refuses every state-changing request rather than guessing. On the API it must also be `https`, except `http` on a loopback host (`http://localhost:3000`) for development; anything else answers `503 connector_unavailable`. The same value on web and API: production is `https://forge-app-eta-mocha.vercel.app`; it is the connector's OAuth issuer and its address is this plus `/mcp`, so changing it disconnects every agent |
 | `FORGE_SESSION_SECRET` | web — seals and (with `_PREVIOUS`) opens session and transaction cookies | Required outside `next dev` | >= 32 characters, ASCII (`MIN_SECRET_LENGTH` in `@forge/auth`). Unset or empty under `next dev` only: the public dev secret, for practice sessions only, and the BFF never mints (see The development secret, above). Set but shorter than 32 characters: sign-in is disabled in every mode, with one logged warning |
 | `FORGE_SESSION_SECRET_PREVIOUS` | web, same | Optional | Same constraints; set only while rotating (see Operations) |
 | `FORGE_API_ASSERTION_SECRET` | web — mints the BFF's assertion; API — `verify_assertion` checks it | Required for `/apps/data` to work end to end; its absence (or weakness) on the web side answers `503 not_configured` rather than pretending the Data app is merely down | >= 32 characters, ASCII, used exactly as stored (not trimmed); must be byte-for-byte identical on web and API |
-| `FORGE_API_URL` | web — `apiUrl()`, where the BFF forwards `/bff/upland/*`, `/bff/bridge/*`, `/bff/oauth/*`, `/bff/proposals*` and `/bff/notifications*`, and where the consent page, the Copilot callback and the sign-in callback's members hello call the API; and `next.config.mjs`, which rewrites the connector's paths (`/mcp`, `/oauth/register`, `/oauth/token`, `/oauth/revoke`, `/.well-known/oauth-*`, and the fallback `/register` and `/token`) to it | Optional for the BFF; required for the connector | Unset, the BFF uses `NEXT_PUBLIC_API_URL`, then `http://localhost:8000`. Whichever it uses must be `https`, or plain `http` only to `localhost`, `127.0.0.1` or `::1`, with no credentials, query or fragment, because pasted keys, the Copilot token and assertions go there. Anything else and the web server sends nothing to the API (the BFF answers `503 not_configured`, the consent page says "FORGE can't connect agents right now", a Copilot start fails) and logs one error, never the value. The rewrites are written when the app is built, and only if this is set to such a URL (plain `http` only to `localhost` or `127.0.0.1`): set it in Vercel before the build, or the connector's paths 404 on the web origin. The fallback `/authorize` is not a rewrite: the web app redirects it (`307`, query kept) to its own `/oauth/authorize` |
+| `FORGE_API_URL` | web — `apiUrl()`, where the BFF forwards `/bff/upland/*`, `/bff/bridge/*`, `/bff/oauth/*`, `/bff/proposals*` and `/bff/notifications*`, and where the consent page, the Copilot callback, the repo callback (a copy or a review) and the sign-in callback's members hello call the API; and `next.config.mjs`, which rewrites the connector's paths (`/mcp`, `/oauth/register`, `/oauth/token`, `/oauth/revoke`, `/.well-known/oauth-*`, and the fallback `/register` and `/token`) to it | Optional for the BFF; required for the connector | Unset, the BFF uses `NEXT_PUBLIC_API_URL`, then `http://localhost:8000`. Whichever it uses must be `https`, or plain `http` only to `localhost`, `127.0.0.1` or `::1`, with no credentials, query or fragment, because pasted keys, the one-time GitHub tokens and assertions go there. Anything else and the web server sends nothing to the API (the BFF answers `503 not_configured`, the consent page says "FORGE can't connect agents right now", a Copilot start, a copy or a review fails) and logs one error, never the value. The rewrites are written when the app is built, and only if this is set to such a URL (plain `http` only to `localhost` or `127.0.0.1`): set it in Vercel before the build, or the connector's paths 404 on the web origin. The fallback `/authorize` is not a rewrite: the web app redirects it (`307`, query kept) to its own `/oauth/authorize` |
 | `NEXT_PUBLIC_API_URL` | web, in the browser — `lib/api.ts`'s `apiBase` and the flag client (`@forge/flags/react`): every visitor's flag fetch, the Bridge's public reads while nobody is signed in (tasks, rails, status, checks), the Propose floor's public reads (`lib/proposals.ts`: the list, and a proposal's public record), and the base of the `prompt_url` Claude Code on the web fetches a long brief from (`<this>/api/bridge/tasks/<id>/brief`, used when the brief makes the link pass 7,000 characters) | Required for a deployed live build | The API's public origin, `https` in production, e.g. `https://api.forge.example` (a trailing slash is dropped). Browsers and claude.ai call it directly, so never a private address. Inlined when the app is built, like every `NEXT_PUBLIC_*`. Unset means `http://localhost:8000`. Its origin is also the API entry in the site's Content-Security-Policy `connect-src`, fixed when the app is built |
 | `FORGE_CORS_ORIGINS` | API — the browser origins allowed to call it (`main.py`'s CORS policy, with credentials) on every route but the connector's | Required in production | Comma-separated origins, blanks ignored; unset or blank means `http://localhost:3000,http://localhost:3100` (`next dev` and the Playwright server). It must include the web origin (`FORGE_PUBLIC_ORIGIN`): browsers read the flags and the Propose floor's public reads, and signed-out visitors the Bridge's public data, from the API directly, and those reads fail without it. The connector's paths and the brief behind `prompt_url` answer any origin, whatever this says |
 | `NEXT_PUBLIC_FORGE_DEMO` | web — `lib/mode.ts`'s `isDemoMode()`, read at build time only | Optional | `1` when building makes the demo build (practice sign-in, fixtures); anything else, or unset, a live build. Inlined by `next.config.mjs`'s `env`, so the value at runtime is ignored |
@@ -183,7 +185,7 @@ The rules are one pure function, `resolveSessionKeys` in
 | `FORGE_START_RAILS` | API — which start rails may run (`GET /api/bridge/rails`, `POST /api/bridge/dispatch`) | Optional | Comma-separated rail ids from `copilot`, `jules`, `cursor`, `devin`, `openhands`, `claude-routine` (case and spaces don't matter; unknown ids are ignored); unset or empty means none. A rail runs only when it is listed here AND the `agent_start` flag is on. Add a rail only after it passes its live test ([`live-tests.md`](live-tests.md)) |
 | `FORGE_MAX_ACTIVE_CLAIMS` | API — how many tasks one person may hold at once | Optional | An integer from 1 to 100; unset or anything else means 2. A task whose pull request merged no longer counts. One more claim answers `409 claim_limit` |
 | `FORGE_MCP_ALLOWED_ORIGINS` | API — the Origin check on `/mcp` | Optional | Comma-separated origins (`https://host`), allowed besides `FORGE_PUBLIC_ORIGIN` and the hosted clients' origins FORGE always accepts (listed under [The FORGE connector](#the-forge-connector)). Agents running outside a browser send no `Origin` and are unaffected; a request whose `Origin` is in none of these, or is `null`, gets `403` |
-| `FORGE_GITHUB_READ_TOKEN` | API — the GitHub reads behind status, check results, submission and the fork check (`services/github_reads.py`) | Optional in development; needed in production | A fine-grained token with read-only access to public repositories and no write permission of any kind, created by the operator and set on the API box by the operator, never pasted anywhere else; it raises GitHub's limit from 60 to 5,000 requests an hour. Without it the reads are anonymous: 60 an hour per IP, and every task someone is watching can cost two reads a minute (its pull request and its checks, each cached 60 seconds), plus a search a minute while no pull request is found on the task's branch, so a few watched tasks use the hour up and status and checks fall back to "GitHub can't be reached right now". When GitHub refuses the token (`401`: expired or revoked), each read is retried once without it and the API logs a warning that names this variable (never the token), so reads carry on at the anonymous rate until the token is replaced. The API reads only this variable, never a `GITHUB_TOKEN` that happens to be in its environment |
+| `FORGE_GITHUB_READ_TOKEN` | API — the GitHub reads behind status, check results, submission, the fork check, a contributor's copy and whether it has work to send for review, and the protocol rules Send for review checks a diff against (`services/github_reads.py`) | Optional in development; needed in production | A fine-grained token with read-only access to public repositories and no write permission of any kind, created by the operator and set on the API box by the operator, never pasted anywhere else; it raises GitHub's limit from 60 to 5,000 requests an hour. It is never a contributor's token: FORGE's calls as a contributor use their one-time token instead. Without it the reads are anonymous: 60 an hour per IP, and every task someone is watching can cost two reads a minute (its pull request and its checks, each cached 60 seconds), plus a search a minute while no pull request is found on the task's branch, and for a holder with a copy, a comparison at most once a minute, so a few watched tasks use the hour up and status and checks fall back to "GitHub can't be reached right now". When GitHub refuses the token (`401`: expired or revoked), each read is retried once without it and the API logs a warning that names this variable (never the token), so reads carry on at the anonymous rate until the token is replaced. The API reads only this variable, never a `GITHUB_TOKEN` that happens to be in its environment |
 | `ANTHROPIC_API_KEY` | API — the house model's calls to Anthropic's API, read by Anthropic's SDK (`services/house.py`; see [The house model](#the-house-model)), and the house model's eval (`tools/house_eval.py`) | For the house model; unset or blank, the house is off (`not_configured`) and admins write each draft themselves | An Anthropic API key, created by the operator and pasted by the operator into the API box's environment file only, never anywhere else. FORGE sends it only to Anthropic's API, and never logs it or puts it in a prompt |
 | `FORGE_HOUSE_MODEL` | API — the model the house model calls | Optional | A model id, passed to the API as it is, so the eval can compare models (a trailing `# comment` is ignored); unset or blank means `claude-opus-5-5`. An id the API refuses fails each job as `bad_request` |
 | `FORGE_HOUSE_EFFORT` | API — how hard the house model thinks (`output_config.effort`, sent with every call) | Optional | `low`, `medium`, `high`, `xhigh` or `max`, in any case; a trailing `# comment` is ignored. Unset or blank means `high`, and anything else logs an error and means `low`, the cheapest, so a typo never raises the spend |
@@ -234,15 +236,20 @@ web app and `/api/bridge/*` in the API. It is not a separate system. The
 work happens in the contributor's own fork, by their own agent, on their
 own account, and reaches upstream as an ordinary pull request that goes
 through the same Gauntlet as everyone else's. FORGE never pays for an
-agent, never pushes code and never opens a pull request for anyone: the
-agent does that. How a task reaches the agent without copy and paste is
-[ADR-005](adr/ADR-005-agent-handoff.md).
+agent and never writes or pushes code: the agent does that. What FORGE
+does on GitHub, it does as the contributor, when they press a button: it
+makes their copy (the fork) and the task's branch in it, and opens the pull
+request in their name when they press Send for review (see
+[Your copy and Send for review](#your-copy-and-send-for-review), and
+[ADR-008](adr/ADR-008-copy-and-review.md) for why). How a task reaches the
+agent without copy and paste is [ADR-005](adr/ADR-005-agent-handoff.md).
 
 **Components:**
 
 - [`apps/web`'s `/contribute`](../apps/web/src/app/contribute): the task
-  board, and a task page that, once you hold the claim, offers two ways to
-  hand the task to your agent (below) and then follows it: the stage, a
+  board, and a task page that, once you hold the claim, offers three steps
+  (your copy, two ways to hand the task to your agent, and Send for review;
+  below) and then follows the work: the stage, a
   short timeline of what FORGE and the agent reported, the pull request and
   its checks, and "Notes for your agent" when checks fail. While no pull
   request is known, a closed "Opened a pull request FORGE can't see?" box
@@ -261,7 +268,8 @@ agent does that. How a task reaches the agent without copy and paste is
   closed) and the whole surface is a plain-language notice instead.
 - `apps/api`'s Bridge service
   ([`routers/bridge.py`](../apps/api/src/forge_api/routers/bridge.py),
-  `services/bridge.py`): tasks, claims, hand-offs, the progress timeline,
+  `services/bridge.py`): tasks, claims, hand-offs, the contributor's copy
+  and Send for review (with `services/copies.py`), the progress timeline,
   check results and submission, kept in the state database (see
   [State, keys and GitHub reads](#state-keys-and-github-reads)). The
   caller is identified by the BFF's assertion on the web's side and by an
@@ -278,8 +286,11 @@ agent does that. How a task reaches the agent without copy and paste is
 
   *Pull requests.* A pull request counts for a claim only when all of
   these hold: it targets `verastd/forge-app`; it comes from the holder's
-  own fork (matched by GitHub user id, not login); it was opened after the
-  claim (and, for a claim whose time ran out, before it did); and it names
+  own fork and the holder opened it (both matched by GitHub user id, not
+  login: anyone can open a pull request from a public fork's branch, so
+  one an agent's bot account opens upstream doesn't count); it was opened
+  after the claim (and, for a claim whose time ran out, before it did);
+  and it names
   the task: it comes from the task's branch, or has `[#N]` in its title or
   `Closes`, `Fixes` or `Resolves #N` in its description. It counts for one
   task at most. FORGE looks on the task's branch first, then through
@@ -297,10 +308,15 @@ agent does that. How a task reaches the agent without copy and paste is
   alone), *agent working* (a hand-off, an agent's report, or a pull
   request closed without merging), *ready to submit* (the agent says it
   pushed, opened the pull request or is done, but none is found upstream
-  yet), *in checks* (an upstream pull request whose checks are pending or
-  failing), *in review* (every check passed), *shipped* (merged). Status
+  yet; for a holder with a copy, the page reads "Your agent says the work
+  is ready. Send it for review above: FORGE opens the pull request in your
+  name." and the API's own detail says to press Send for review on the
+  task page), *in checks* (an upstream pull request whose checks are
+  pending or failing, including one FORGE opened with Send for review),
+  *in review* (every check passed), *shipped* (merged). Status
   shows the newest 50 events (a task keeps its newest 200), and events an
-  agent sent (`source: "agent"`) only to the holder. The same flag 404s
+  agent sent (`source: "agent"`), and FORGE's note about the holder's copy
+  (`copy_ready`), only to the holder. The same flag 404s
   every route with `{"error": "bridge-disabled"}`, except `GET` and
   `DELETE /api/bridge/me/keys`, so people can still see and remove their
   saved keys.
@@ -313,17 +329,22 @@ agent does that. How a task reaches the agent without copy and paste is
   pitch, and the admin reads and edits it before publishing. Reading tasks
   from GitHub issues waits for the Foreman claim linkage; until then no
   issue author's text reaches a brief.
-- Not built: FORGE doesn't fork, branch or open pull requests for anyone
-  (the agent works in a fork the contributor already has, and the only
-  GitHub writes FORGE makes are starting Copilot, on the contributor's
-  one-time authorization, and revoking that authorization afterwards), and
-  there are no webhooks, no notifications about tasks (the bell is the
-  Propose floor's) and no automatic retries of a failed start. **Not joined
-  yet:** the Bridge's claims live in FORGE's own database, while Foreman's
-  G0 claim check reads `/claim` leases on GitHub, so once Foreman runs, a
-  Bridge contributor's pull request fails claim linkage until the two are
-  joined. The Bridge holds no merge or deploy authority of any kind and
-  never will.
+- Not built: FORGE never writes code or pushes a commit, and it acts on
+  GitHub only as the contributor, each time on a one-time authorization
+  they give by pressing a button, revoked once its one action is done:
+  starting Copilot (ADR-005), and making their copy, bringing it up to
+  date, making the task's branch in it and opening their pull request
+  ([Your copy and Send for review](#your-copy-and-send-for-review)). It
+  never opens a pull request on its own, for instance because an agent
+  reported the work done. There are no webhooks, no notifications about
+  tasks (the bell is the Propose floor's) and no automatic retries of a
+  failed start. **Not joined yet:** the Bridge's claims live in FORGE's own
+  database, while Foreman's G0 claim check reads `/claim` leases on GitHub,
+  so once Foreman runs, a Bridge contributor's pull request fails claim
+  linkage until the two are joined, now including the ones FORGE opens in
+  their name with Send for review (G0 closes them and ledgers a strike
+  against their author). The Bridge holds no merge or deploy authority of
+  any kind and never will.
 
 **Demo mode versus live mode.**
 [`apps/web/src/lib/mode.ts`](../apps/web/src/lib/mode.ts) is the single
@@ -338,6 +359,7 @@ so the live app and the demo app are different build artifacts.
 | Status polling | holds the last server-reported stage | advances the simulation |
 | "Start it for me" | FORGE calls the vendor | nothing is sent, and the page says so ("Practice: nothing was sent") |
 | "Open my agent" | real links | real links |
+| "Get started", "Send for review" | GitHub's approval, then FORGE does it as you | a pretend copy (`you/forge-app`, never linked) and a pretend review; nothing is sent, and the page says so |
 | `contribute_bridge` off | Bridge closed | forced open (demonstrating it is the job) |
 | Labeling | none needed | persistent banner: practice data, nothing real or saved |
 
@@ -352,14 +374,25 @@ order, mirrored in Python (`services/rails.py`) and TypeScript
 `tests/fixtures/rails-golden.json`. Every agent gets the same text, the
 *brief* (`services/brief.py` and `packages/shared/src/brief.ts`,
 byte-identical, held to `tests/fixtures/brief-golden.json`): the task and
-why it matters, when it's done, the fork and branch to work in, the rules,
-how to open the pull request, and which FORGE tools to call if the agent
-has them. The task page uses the API's own copy of it (`TaskDetail.brief`);
-only the practice app compiles its own. Once you hold the claim, the task
-page offers two buttons.
+why it matters, when it's done, the copy and branch to work in, the rules,
+how to finish, and which FORGE tools to call if the agent has them. Once
+FORGE has set up the contributor's copy, the agent works in it, on the
+branch FORGE made there, pushes, and tells FORGE, and the person sends the
+work for review from the task page (an agent that can open pull requests
+may still open one itself). Without a copy, the agent works in
+`<login>/forge-app`, the brief asks the person to press Get started first
+(an agent that can fork may fork), and the agent opens the pull request.
+The brief says "your copy" and names it a fork once, for the agent. The
+task page uses the API's own copy of it (`TaskDetail.brief`); only the
+practice app compiles its own. Once you hold the claim, the task page's
+step 2, "Your agent", offers two buttons. Every agent's first setup step
+is "Press Get started on the task page, and FORGE makes your copy of its
+code.", linked to step 1.
 
 **Start it for me** (start rails): FORGE calls the vendor's API and the
-agent starts in the contributor's fork, on their own account and plan. A
+agent starts in the contributor's fork, on their own account and plan:
+their copy (`{owner}/{name}` below) once FORGE has set it up, else
+`<login>/forge-app`. A
 rail runs only when the `agent_start` flag is on AND its id is in the API's
 `FORGE_START_RAILS` (empty by default), and each one stays off until it
 passes its live test ([`live-tests.md`](live-tests.md)). The calls, as
@@ -367,12 +400,12 @@ documented by each vendor on 2026-10-01:
 
 | Rail | What FORGE calls | What the contributor needs |
 |---|---|---|
-| GitHub Copilot | `POST https://api.github.com/agents/repos/{login}/forge-app/tasks` with `X-GitHub-Api-Version: 2026-03-10` (public preview) | Copilot Pro, Pro+, Max, Business or Enterprise, and FORGE's GitHub app installed on the fork. Nothing to paste: FORGE asks GitHub for a one-time authorization at each start (GitHub may not show a page to someone who approved FORGE before), uses the token only to check it is the signed-in account's and to make that one start, never stores it, and revokes it straight after (`DELETE /applications/{client_id}/token`) |
-| Google Jules | `POST https://jules.googleapis.com/v1alpha/sessions` | The Jules GitHub app on the fork, and an API key from <https://jules.google.com/settings> |
+| GitHub Copilot | `POST https://api.github.com/agents/repos/{owner}/{name}/tasks` with `X-GitHub-Api-Version: 2026-03-10` (public preview) | Copilot Pro, Pro+, Max, Business or Enterprise, and FORGE's GitHub app installed on the copy. Nothing to paste: FORGE asks GitHub for a one-time authorization at each start (GitHub may not show a page to someone who approved FORGE before), uses the token only to check it is the signed-in account's and to make that one start, never stores it, and revokes it straight after (`DELETE /applications/{client_id}/token`) |
+| Google Jules | `POST https://jules.googleapis.com/v1alpha/sessions` | The Jules GitHub app on the copy, and an API key from <https://jules.google.com/settings> |
 | Cursor cloud agent | `POST https://api.cursor.com/v1/agents` | A paid Cursor plan with GitHub connected, and an API key from <https://cursor.com/dashboard> (Integrations) |
 | Devin | `POST https://api.devin.ai/v3/organizations/{org_id}/sessions` | GitHub connected in Devin, and an API key and organization ID from <https://app.devin.ai/settings> |
 | OpenHands Cloud | `POST https://app.all-hands.dev/api/v1/app-conversations` | GitHub connected at <https://app.all-hands.dev>, and an API key from its settings |
-| Claude Code routine | `POST https://api.anthropic.com/v1/claude_code/routines/{trig_id}/fire` with `anthropic-version: 2023-06-01` and `anthropic-beta: experimental-cc-routine-2026-04-01` (research preview) | A routine they create once in Claude Code for their fork, with FORGE's routine prompt and an API trigger: its URL and token |
+| Claude Code routine | `POST https://api.anthropic.com/v1/claude_code/routines/{trig_id}/fire` with `anthropic-version: 2023-06-01` and `anthropic-beta: experimental-cc-routine-2026-04-01` (research preview) | A routine they create once in Claude Code for their copy, with FORGE's routine prompt and an API trigger: its URL and token |
 
 A start rail's key is used for the call the contributor asked for, and is
 never logged or echoed (`/dispatch` reads its own body, so not even a
@@ -440,16 +473,17 @@ claim_task first.").
 **Open my agent** (open rails): a link that opens the agent with the brief
 already typed in; the contributor presses send. Always on, except Google
 Antigravity, which works only through the connector and so is offered only
-while `mcp_connector` is on.
+while `mcp_connector` is on. Below, `<repo>` is the contributor's copy
+(`owner/name`) once FORGE has set it up, else `<login>/forge-app`.
 
 | Rail | How it opens |
 |---|---|
-| Claude Code on the web | `https://claude.ai/code?prompt=<brief>&repositories=<login>/forge-app`. When that would pass 7,000 characters, `prompt_url=` points at the API's `GET /api/bridge/tasks/<id>/brief?login=<login>` instead (plain text, readable from any origin) |
-| Claude Code on your computer | `claude-cli://open?repo=<login>/forge-app&q=<brief>` (5,000-character cap; over it the link opens without the brief and the steps say "ask it: Start FORGE task #N") |
-| Codex app | `codex://new?prompt=<brief>&originUrl=https://github.com/<login>/forge-app.git` (the desktop app, with the fork cloned) |
+| Claude Code on the web | `https://claude.ai/code?prompt=<brief>&repositories=<repo>`. When that would pass 7,000 characters, `prompt_url=` points at the API's `GET /api/bridge/tasks/<id>/brief?login=<login>` instead (plain text, readable from any origin), with `&copy=<owner/name>` when the copy is the login's own; the API ignores a `copy` whose owner isn't `login` |
+| Claude Code on your computer | `claude-cli://open?repo=<repo>&q=<brief>` (5,000-character cap; over it the link opens without the brief and the steps say "ask it: Start FORGE task #N") |
+| Codex app | `codex://new?prompt=<brief>&originUrl=https://github.com/<repo>.git` (the desktop app, with the copy cloned) |
 | VS Code agents | `vscode://agents/new?prompt=<brief>` (VS Code 1.140 or newer; the contributor picks Copilot, Claude or Codex and sends) |
 | Cursor app | `cursor://anysphere.cursor-deeplink/prompt?text=<brief>` (10,000-character cap) |
-| Google Antigravity | No link exists, so the page gives steps: press Sync fork on GitHub first if the fork is older than October 2026 (so it has `.agents/mcp_config.json`), open the fork in Antigravity, sign in to FORGE the first time (Settings → Customizations, Authenticate next to `forge`, then paste back the code the browser shows), and ask it "Start FORGE task #N" |
+| Google Antigravity | No link exists, so the page gives steps. The first gets the copy in step with forge-app (so it has `.agents/mcp_config.json`) the way the page can: "Press Get started on this page first, …" before the copy, "If your copy is older than October 2026, press Refresh your copy on this page first, …" after it, and "… bring it up to date on GitHub first, …" while the feature is off. Then: open the copy in Antigravity (named, once FORGE knows it), sign in to FORGE the first time (Settings → Customizations, Authenticate next to `forge`, then paste back the code the browser shows), and ask it "Start FORGE task #N" |
 
 An agent opened this way has the brief; with the FORGE connector (below) it
 can also claim, report progress and read check results by itself. Copy and
@@ -457,18 +491,347 @@ paste survives only in closed fallbacks: "Using another agent? Copy the
 brief", and "Using another agent? Copy the notes" under failed checks.
 
 The Bridge changes the pipeline's *reachability*, never its
-*permeability*: whatever reaches upstream is a fork pull request, which
-lands in the same Gauntlet and protocol checks that already assume hostile
-authors. A full compromise of FORGE is still worse for contributors than it
-used to be. Whoever holds the state database and `FORGE_VAULT_KEY` holds
-every saved vendor key, and each works on whatever that vendor account can
-reach, not only the fork; whoever controls the API can send connected agents
-misleading task text. That is why keys are saved only when asked, can be
-removed on `/me` (even with the Bridge or the vault switched off), and are
-encrypted under a key that lives only on the API box; why no GitHub token is
-ever stored, and the Copilot rail's one-time token is revoked once used; and
-why the agent config, the connector, vault and rail code, the task fixtures,
-and every file a key passes through on its way there are protected paths.
+*permeability*: whatever reaches upstream is a fork pull request, the ones
+FORGE opens with Send for review included, which lands in the same Gauntlet
+and protocol checks that already assume hostile authors. A full compromise
+of FORGE is still worse for contributors than it used to be. Whoever holds
+the state database and `FORGE_VAULT_KEY` holds every saved vendor key, and
+each works on whatever that vendor account can reach, not only the fork;
+whoever controls the API can send connected agents misleading task text;
+and whoever controls the web server or the API while people press Get
+started or Send for review gets their one-time GitHub tokens, each good for
+every public repository that person can write to until they remove FORGE's
+OAuth App. That is why keys are saved only when asked, can be removed on
+`/me` (even with the Bridge or the vault switched off), and are encrypted
+under a key that lives only on the API box; why no GitHub token is ever
+stored, and every one-time token (the Copilot rail's and the OAuth App's)
+is revoked once used; and why the agent config, the connector, vault and
+rail code, the task fixtures, FORGE's copy and review code, and every file
+a key or a token passes through on its way there are protected paths.
+
+### Your copy and Send for review
+
+Since Phase 7 a contributor never needs to know what a fork is
+([ADR-008](adr/ADR-008-copy-and-review.md) has why, and why it is an OAuth
+App). Once they hold the claim, the task page shows three steps, and FORGE
+does the GitHub parts as them, each time with a one-time token from
+FORGE's OAuth App:
+
+1. **Your copy.** **Get started** makes their copy of `verastd/forge-app`
+   (a GitHub fork, with the default branch only), brings it up to date,
+   and makes the task's branch in it. Afterwards the step reads "Your copy
+   is ready: <owner/name>, up to date <time ago>." with a quiet **Refresh
+   your copy**, which does the same again. The page never says "fork",
+   except in the step's closed "What's this?". A copy carries over to the
+   next task the person claims, whose branch is made by Refresh your copy,
+   or by the agent (the brief says how).
+2. **Your agent.** Start it for me and Open my agent, as above, pointed at
+   the copy. Before step 1 they still work, with "Your agent needs your
+   copy first: press Get started above."
+3. **Send for review.** Until there is something to send it says so, with
+   **Check again**. Once there is a copy, it offers **Send for review**
+   when the task says the branch has work on it (`canSendForReview`), or
+   the agent reported `pushed` or `done` and the status shows no pull
+   request, and says beside the button what the pull request will say for
+   the person: "FORGE opens the pull request in your name. It says, for
+   you, that your agent didn't change or delete any existing tests (FORGE
+   checks that first) and that an AI agent did the work." Afterwards it
+   links the pull request, and the stages follow it like any other.
+
+**No flag.** The steps work while the web server has a usable OAuth App
+(`GITHUB_REPO_CLIENT_ID` and `GITHUB_REPO_CLIENT_SECRET`; see
+[Identity](#identity)) and sign-in is GitHub. Without it, step 1 says
+"Setting up your copy isn't available yet. You can still hand the task to
+your agent below.", step 3 isn't shown, and the hand-off works as before.
+The API's two routes sit behind `contribute_bridge`, like every Bridge
+route.
+
+**The round trip** (`apps/web/src/app/auth/github/repo/`). Each button is
+a plain form post, because GitHub's approval page needs a top-level
+navigation:
+
+1. `POST /auth/github/repo` with `taskId` and `action`: `copy` for Get
+   started and Refresh your copy, `review` for Send for review. It answers
+   `403 bad_origin` unless the form came from this origin (an `Origin`
+   matching `FORGE_PUBLIC_ORIGIN`, or `Sec-Fetch-Site: same-origin`),
+   `413 too_large` for a body over 1 KiB, `400 bad_request` unless the task
+   matches `^[1-9][0-9]{0,8}$` and the action is one of the two, and
+   `403 practice_session` for the practice account. Signed out, it sends
+   the browser to `/signin?next=/contribute/task/<id>`; with the feature
+   off, back to the task page with `?repo_error=not_configured`. Otherwise
+   it seals a `repo` attempt (a fresh state and PKCE verifier, the task and
+   the action) into the transaction cookie and answers `303` to
+   `https://github.com/login/oauth/authorize` with the OAuth App's
+   `client_id`, `redirect_uri=<FORGE_PUBLIC_ORIGIN>/auth/github/repo/callback`,
+   `state`, `scope=public_repo` (fixed in `@forge/auth`'s
+   `publicRepoAuthorizeUrl`, so no caller can widen it), the S256
+   `code_challenge` and `allow_signup=false`. A `repo` attempt is a third
+   kind beside sign-in and agent attempts: each kind's fields belong to it
+   alone, the sign-in callback refuses a `repo` attempt, and the repo
+   callback refuses the other two. After the first approval GitHub
+   normally sends the browser straight back without its page.
+2. `GET /auth/github/repo/callback` opens the attempt and clears its cookie,
+   whatever happens next (one use). With no `repo` attempt (none, expired,
+   or another kind's) it goes to the board, `/contribute?repo_error=expired`;
+   every other way out goes to the sealed task's page and nowhere else. In
+   order: the `state`, compared in constant time (`github_failed`);
+   GitHub's own `error` (`github_denied`); the feature still on
+   (`not_configured`); still signed in with GitHub (`signed_out`); a
+   `code` (`github_failed`). The code is exchanged with the OAuth App's
+   client id and secret and the PKCE verifier (`github_failed`, logged as
+   GitHub's error code).
+3. The token is used once (`withOneTimeToken`, which the Copilot rail
+   shares): `GET /user` must give the signed-in account's id
+   (`wrong_account`, and nothing is done), then the API does the action
+   (`POST /api/bridge/copy` or `/review`, with the assertion and
+   `{taskId, token}`). Whatever happened, the token is then revoked with
+   the OAuth App's own credentials (`DELETE /applications/{client_id}/token`).
+   The revocation starts as soon as the action is over, and Next's
+   `after()` is handed it running, so the redirect doesn't wait on GitHub
+   and a browser that has already left can't stop it. The log says "repo
+   authorization: one-time GitHub token revoked", or warns "repo
+   authorization: GitHub did not confirm the one-time token was revoked".
+4. The browser lands on `/contribute/task/<id>` with `?copy=ready` (plus
+   `&synced=0` when the copy couldn't be brought up to date, `&latest=0`
+   when the branch was made from the copy's own main),
+   `?review=sent&pr=<n>`, or `?repo_error=<code>` (plus `&status=<n>` with
+   GitHub's status, `&files=<n>` with how many files the API named for a
+   refused review, never which, and `&pr=<n>` for `head_taken`). When the
+   API couldn't be asked, the code is the web's own: `not_configured`,
+   `service_unreachable`, `upstream_timeout` ("it may have gone through"),
+   or `api_failed` for a refusal with no code. The page says each in one
+   plain sentence, once, and drops it from the address bar. A success
+   shows only when the task backs it up (the copy is there; the status
+   shows that pull request), and nothing from the query string is ever
+   shown as text.
+
+The token is never logged (only codes are), stored, put in a URL or a
+cookie, or sent anywhere but GitHub and the API. The callback's
+`maxDuration` is 60 seconds: it waits for the API at most 45, less what
+the exchange and `GET /user` took, so 12 are always left for the
+revocation (10 at most) and the redirect.
+
+**The API** (`routers/bridge.py`; every GitHub call is
+`services/copies.py`'s). `POST /api/bridge/copy` and
+`POST /api/bridge/review` take `RepoActionRequest {taskId, token}`, read by
+the route itself so no answer can echo the token: at most 16 KiB, with a
+token of 1 to 4,096 printable ASCII characters and no spaces. Only the web
+server calls them: the BFF forwards neither, and both need its assertion.
+In about the order they are checked (nothing reaches GitHub before the
+hourly limit):
+
+| Status | `error` | When | With |
+|---|---|---|---|
+| 404 | `bridge-disabled` | `contribute_bridge` is off | |
+| 401 | `unauthenticated` | no assertion, or a bad one | |
+| 413, 400, 422 | `body_too_large`, `invalid_request` | the body is over 16 KiB, nested more than 32 levels deep, or wrong in any other way (field names only) | `limit`, `fields` |
+| 404 | `task_not_found` | no such task | `taskId` |
+| 409, 403, 409 | `not_claimed`, `not_holder`, `already_shipped` | the caller doesn't hold the task (an active claim, or one held past its clock by its open pull request), or its pull request merged | `taskId` |
+| 429 | `rate_limited` | 10 copies, or 10 reviews, by this person in the last hour (counted apart, failed ones included) | `limit`, `retryAfter`, and a `Retry-After` header |
+| 403 | `wrong_account` | `GET /user` says the token is another account's | |
+| 409 | `copy_mismatch` | copy: GitHub named a repository that isn't the caller's own fork of `verastd/forge-app` (its owner, `fork`, or its parent) | |
+| 504 | `copy_not_ready` | copy: GitHub is still making a new copy after 15 seconds (pressing again is safe) | |
+| 409 | `no_copy` | review: no copy FORGE can vouch for (none recorded, or GitHub no longer says it is the caller's fork of `verastd/forge-app`), or its owner isn't the token's account now | |
+| 409 | `branch_missing` | review: the task's branch isn't in the copy | |
+| 409 | `no_changes` | review: the branch has no commits beyond upstream main, or no changed files | |
+| 409 | `too_large` | review: the comparison is over 8 MiB, lists 300 files (GitHub's cap, so it may be cut short), or changes more than 20,000 lines (Foreman's G0.4 cap) | |
+| 503 | `checks_unavailable` | review: upstream main's rules can't be read, aren't a manifest Foreman would take, or use glob syntax FORGE won't guess at | |
+| 409 | `tests_modified` | review: an existing test was changed (the pre-check, below) | `paths` |
+| 409 | `protected_paths` | review: a protected path was touched (the pre-check, below) | `paths` |
+| 409 | `head_taken` | review: an open pull request from the task's branch into main was opened by another account | `prNumber` |
+| 502 | `github_failed` | GitHub refused or failed: its HTTP status (401 when the token is dead), 502 for an answer FORGE can't use (not JSON, malformed, too big, a redirect), 504 when none came in time | `status` |
+
+`paths` lists at most 10 files, in diff order, each once, cut to 200
+characters, with control characters stripped. A GitHub failure is logged
+as "GitHub <endpoint> failed for a contributor's action (HTTP <n>)" and
+nothing more. Pressing again is always safe: GitHub hands back the copy
+that exists, a branch that exists is left alone, and an open pull request
+is returned rather than doubled.
+
+*Get started* (`copy`), as the contributor, after `GET /user`:
+
+1. `POST /repos/verastd/forge-app/forks` with `default_branch_only: true`
+   and nothing else (no organization, no new name). GitHub answers with the
+   new copy, or the one the person already has, perhaps under another name
+   (`forge-app-1`). It must be the caller's (`copy_mismatch`).
+2. `GET /repos/{copy}` every 2 seconds, for at most 15, while GitHub makes
+   it (`copy_not_ready`). It must be a fork owned by the caller whose
+   `parent` is `verastd/forge-app` (`copy_mismatch`): `merge-upstream`
+   syncs with the parent, so a fork of someone else's fork would bring in
+   theirs.
+3. `POST /repos/{copy}/merge-upstream` for its default branch: 200 is up
+   to date; 409 or 422 means it has changes of its own, which stops
+   nothing.
+4. `GET /repos/verastd/forge-app/git/ref/heads/main`, then
+   `GET /repos/{copy}/git/ref/heads/<task branch>`. A branch that is there
+   is left alone. A missing one is made with `POST /repos/{copy}/git/refs`
+   at upstream main's commit or, when GitHub refuses that commit there
+   (422), at the copy's own default branch, read the same way, and the
+   page then says the branch may be behind FORGE's latest code.
+5. FORGE records the copy (its name, and GitHub's ids for it and its
+   owner) and, while the caller still holds the task, adds "FORGE set up
+   your copy, <owner/name>, and the branch <branch>." to the task's
+   timeline: once for the same text, and shown to the holder only.
+   It answers `200 CopyResult {fullName, branch, synced, branchCreated,
+   branchFromLatest}`.
+
+*Send for review* (`review`), as the contributor, after `GET /user`:
+
+1. A claim with an open pull request already recorded gets it back,
+   `200 {pullRequest, created: false}`, and nothing more is asked.
+2. The copy, found as below, owned by the token's current login
+   (`no_copy`).
+3. `GET /repos/verastd/forge-app/compare/main...{owner}:{branch}?per_page=1`,
+   read up to 8 MiB: the commits ahead, the changed files (GitHub lists
+   them on the first page only) and the head commit the comparison was
+   made at (from its `permalink_url`; without one, `github_failed`).
+4. The rules, `.github/forge-protocol.json` as it is at the very main
+   commit the comparison was made against (its `base_commit`; without one,
+   `checks_unavailable`), read publicly (below), never from the branch and
+   never with the contributor's token; then the pre-check. So a change to
+   the rules can never be checked against older ones.
+5. `GET /repos/verastd/forge-app/pulls?head={owner}:{branch}&base=main&state=open`:
+   the caller's own open pull request from the branch is returned
+   (`200`, `created: false`) and recorded for the claim when it counts; one
+   anyone else opened is `head_taken`, with nothing recorded or attested.
+6. The claim is checked again, since it may have ended while GitHub
+   answered. Then `POST /repos/verastd/forge-app/pulls` with
+   `head: <owner>:<branch>`, `base: main`, `maintainer_can_modify: true`,
+   and FORGE's title and description. FORGE records the pull request for
+   the claim like any other (the rules under *Pull requests*, above) and,
+   once it is recorded, adds "Sent for review: pull request #N." to the
+   timeline, with "Its branch changed after FORGE checked it at <commit>:
+   the pull request opened at <commit>." when the head moved in between.
+   It answers `201 {pullRequest: {number, url}, created: true}`.
+
+**The pre-check.** Before FORGE lists or opens any pull request, it checks
+the comparison against the rules as Foreman's G0 and the Gauntlet's
+test-mod detector read them:
+
+- **Size.** 300 files (GitHub's cap, so the list may be cut), or more than
+  20,000 changed lines, additions and deletions together (Foreman's
+  `MAX_PR_TOTAL_CHANGES`; exactly 20,000 passes), is `too_large`, and so is
+  a comparison over 8 MiB.
+- **Existing tests.** A file whose status is anything but `added` or
+  `unchanged` (modified, removed, renamed, copied, changed, or a status
+  GitHub adds later), with either of its names matching `testGlobs`, is
+  `tests_modified`. A renamed file counts by both names, so moving a test
+  out and moving a file into a test location both count. New test files
+  are welcome. G0 only flags a changed test; FORGE won't send one, because
+  the attestation it writes would be false.
+- **Protected paths.** Any file, whatever its status, with either name in
+  `protectedPaths` is `protected_paths`. An entry ending in `/` is a
+  directory, any other one exact path, and case counts, as in Foreman.
+- **Fail closed.** The rules must be a manifest Foreman would take: a JSON
+  object, `version` 1, and non-empty `testGlobs` and `protectedPaths`
+  lists of at most 200 one-line, non-blank entries of up to 500
+  characters, in a file of at most 256 KiB. Glob syntax that minimatch
+  (Foreman) and git pathspecs (the detector) could read differently
+  (character classes, braces, extglobs, escapes, a leading `!` or `#`, an
+  empty segment) isn't guessed at. Either way it is
+  `checks_unavailable`, and nothing is opened. A test holds FORGE's
+  matcher to minimatch's and git's answers.
+
+**The pull request FORGE writes.** The title is `[#N] <task title>`, with
+control characters stripped and `"` as `'`. The description puts FORGE's
+own lines first, because G0 takes the first match of the link, the
+attestation and the disclosure:
+
+```text
+Closes #N
+
+## Tests
+
+- [x] I did not modify or delete any existing file under `tests/acceptance/` or any other pre-existing test. Any new tests I added are new files, not edits to existing ones. FORGE checked the diff at <commit> before sending it.
+
+## AI-assistance disclosure
+
+- [x] This PR was produced with the assistance of a coding agent / LLM.
+
+## Summary
+
+Sent for review through FORGE by @<login>; their agent did the work.
+
+FORGE task #N: <task title>
+<task link>
+
+## Acceptance criteria
+
+- <criterion>
+```
+
+The attestation is the pull request template's line, word for word and
+checked, written only after the pre-check passed, and it names the commit
+FORGE checked (seven characters). The criteria section is left out when a
+task has none. The task's title, link and criteria come from the task
+alone, never from an agent or a member, and are neutralised: one line
+each; `&` as `&amp;` first, so no typed entity decodes into anything; a
+zero-width space after every `@` and between `#` and a digit, so no
+mention and no issue reference; `<` as `&lt;` and `[` as `&#91;`, so no
+HTML comment or tag, no checkbox and no link. A test runs G0's own
+patterns over hostile titles and criteria and gets FORGE's lines every
+time.
+
+**Limits.** 5 seconds to connect and 8 for each GitHub call, and 40 for a
+whole action, its claim lookup and public reads included: no call starts
+after that, and each is cut to what is left. Either action takes 40
+seconds at worst, and usually a few. Answers are read up to 1 MiB (8 MiB
+for the comparison), and the client keeps no cookies. GitHub itself keeps
+at most ten tokens for one person, app and scope, and creates at most ten
+an hour, so someone who presses more than ten times in an hour may meet
+GitHub's limit before FORGE's.
+
+**What the task page reads.** `GET /api/bridge/tasks/<id>` gives the
+holder (an active claim that's theirs) two more fields, and gives nobody
+else either:
+
+- `copy: {fullName, syncedAt}`, once FORGE has set up their copy and
+  still finds it theirs (below). `syncedAt` moves only when GitHub actually
+  brought the copy up to date (and is set when it is first recorded either
+  way).
+- `canSendForReview`: false while an open or merged pull request is
+  recorded for the claim (no GitHub read); otherwise whether the task's
+  branch in the copy is ahead of upstream main, from GitHub's comparison,
+  read publicly (its second page, which carries the count without the file
+  list) and cached for 60 seconds; absent when GitHub can't say.
+
+The page reads the task again, without the loading screen, on Check again,
+when the stage changes, and on coming back to the tab after a minute.
+
+**The copy everywhere else.** Once FORGE knows the copy, the brief, the
+start rails' repository (Copilot's tasks URL, Jules's source, the
+repository Cursor, Devin and OpenHands open), the connector's `get_task`,
+`claim_task` and `forge_task` prompt, and the Open my agent links all name
+it; until then, `<login>/forge-app`. FORGE finds the copy by the
+repository id it recorded (`GET /repositories/{id}`, a public read cached
+for 5 minutes), so it follows a rename of the copy or of its owner, and it
+names the copy only while GitHub says it is a fork of `verastd/forge-app`
+owned by the person's GitHub id: after a GitHub rename the old name may be
+anyone's, and the session's login may be days old. When GitHub can't say,
+FORGE uses the name it stored, but only while its owner id is the
+person's and it is still named after the session's login. With a copy,
+the stage *ready to submit* points at Send for review, and the compare
+link to open the pull request by hand is gone.
+
+**Records.** `bridge_copies` keeps one row per GitHub user id: the copy's
+repository id, its owner's id, its full name at the last Get started or
+Refresh your copy, when FORGE first recorded it, and when it last brought
+it up to date. `bridge_repo_actions` keeps when each person set up their copy or
+sent work for review, for the hourly limit. Neither holds a token. Every
+token's revocation is in the web server's log, and should show in the
+person's GitHub security log (a token made, then deleted). After FORGE
+revokes each token
+GitHub still lists FORGE's OAuth App under the person's Settings →
+Applications → Authorized OAuth Apps (<https://github.com/settings/applications>),
+since the approval itself stays; removing it there ends every token it
+holds, and the next press shows GitHub's page again.
+
+**Practice.** The practice app goes through the three steps in the tab and
+sends nothing: Get started makes a pretend copy, `you/forge-app` (shown as
+text, never linked or handed to an agent), and a run handed to an agent
+once the copy exists waits at *ready to submit* until it is sent for
+review, then moves on one stage every 45 seconds. Each step says it was
+practice and that nothing was sent.
 
 ## The FORGE connector
 
@@ -579,11 +942,11 @@ routes, as the person the token belongs to:
 |---|---|
 | `whoami` | Which GitHub account the agent is acting for |
 | `list_tasks` | Open tasks, your own, or all (`filter`) |
-| `get_task` | One task: the brief written for you, the acceptance criteria, your fork and branch, the issue, who holds it, and the compare link |
+| `get_task` | One task: the brief written for you, the acceptance criteria, your fork (your copy once FORGE has set it up, else `<login>/forge-app`) and branch, the issue, who holds it, and the compare link |
 | `claim_task` / `release_task` | Claim the task in your name, or let it go |
 | `report_progress` | `started`, `working`, `pushed`, `pr_opened`, `blocked` or `done`, with a message of up to 500 characters and, optionally, the pull request link (which counts only if it passes the rules under [The Bridge](#the-bridge)); at most 30 an hour per task |
 | `get_check_results` | The current holder's pull request's checks, and plain notes on what failed |
-| `submit_task` | Hand in the pull request: on `verastd/forge-app`, from your fork, opened after the claim, naming the task (its branch, `[#N]` in the title or `Closes #N` in the description), and not handed in for another task; at most 10 hand-ins a minute per person, web and connector together |
+| `submit_task` | Hand in the pull request: on `verastd/forge-app`, from your fork and opened by you (one someone else opened is `not_your_pr`), after the claim, naming the task (its branch, `[#N]` in the title or `Closes #N` in the description), and not handed in for another task; at most 10 hand-ins a minute per person, web and connector together |
 
 There is one prompt, `forge_task`, and short server instructions that tell
 an agent the task flow. Anything an agent writes (progress messages, the
@@ -618,7 +981,7 @@ connector in the repo itself, for these clients:
 | Client | File | When it's used |
 |---|---|---|
 | Codex (CLI, IDE extension, ChatGPT desktop app) | `.codex/config.toml` | Only in a trusted project. Sign in once with `codex mcp login forge` |
-| Google Antigravity (CLI and IDE; 2.0 is still to be live-tested) | `.agents/mcp_config.json` | Sign in under Settings → Customizations; Antigravity shows a code to paste back once. A fork older than October 2026 gets the file with Sync fork on GitHub |
+| Google Antigravity (CLI and IDE; 2.0 is still to be live-tested) | `.agents/mcp_config.json` | Sign in under Settings → Customizations; Antigravity shows a code to paste back once. A fork older than October 2026 gets the file with Refresh your copy on the task page, or Sync fork on GitHub |
 | Cursor | `.cursor/mcp.json` | Cursor asks before it uses the server's tools |
 
 Claude Code (and VS Code 1.140+, and GitHub Copilot CLI) would read a
@@ -651,10 +1014,11 @@ installs (`apps/web/src/app/connect/`), the links that open agents
 (`apps/web/src/lib/launch.ts`), the text every agent is given (the brief,
 the rail registry with its key pages, the connector's tools, and the task
 fixtures in `apps/api/src/forge_api/fixtures/`), and the code a pasted or
-saved key or the Copilot token passes through, with the checks on the
-links shown back (`apps/web/src/lib/bff-forward.ts`, `lib/handoff.ts`,
+saved key or a one-time GitHub token passes through, with the checks on
+the links shown back (`apps/web/src/lib/bff-forward.ts`, `lib/handoff.ts`,
 `lib/api.ts`, `apps/web/src/components/contribute/`, and the API's
-`services/bridge.py`, `routers/bridge.py`, `models.py` and `main.py`).
+`services/bridge.py`, `services/copies.py`, `routers/bridge.py`,
+`models.py` and `main.py`).
 
 ## State, keys and GitHub reads
 
@@ -663,7 +1027,9 @@ links shown back (`apps/web/src/lib/bff-forward.ts`, `lib/handoff.ts`,
 on demand, git-ignored), `/var/lib/forge-api/forge.db` in production. It
 holds the Bridge's claims, hand-offs, progress events, merges and
 submissions (`bridge_` tables, with the tasks published from proposals in
-`bridge_published_tasks`), saved agent keys (`vault_`), the connector's
+`bridge_published_tasks`, and each contributor's copy and their hourly
+count of copies and reviews in `bridge_copies` and
+`bridge_repo_actions`), saved agent keys (`vault_`), the connector's
 grants, codes and token hashes (`oauth_`), and the Propose floor: its
 members (`members`), proposals with their votes, comments and timelines
 (`proposal_`), and the bell (`notifications`); and the house model's jobs,
@@ -688,7 +1054,10 @@ no state database yet; a checkout that ran an earlier build deletes its
 `var/forge-state.db` the same way. The Propose floor (Phase 5) changed no
 table: its tables are all new, so a file from Phase 4 gains them at the
 API's next start and keeps everything else. The house model (Phase 6)
-changed none either: its six `house_` tables are new.
+changed none either: its six `house_` tables are new. Nor did your copy and
+Send for review (Phase 7): `bridge_copies` and `bridge_repo_actions` are
+new. A revert to Phase 6 needs the `copy_ready` and `review_sent` timeline
+rows deleted first, since Phase 6 can't read them.
 
 **The vault.** A key a contributor asks FORGE to remember is encrypted
 with AES-256-GCM under a key of its own for each person, derived from
@@ -709,21 +1078,36 @@ offered, and starting still works with a key typed in each time; saved keys
 are still listed on `/me` (hints only, with a note that FORGE can't use
 them right now) and can still be removed. Copilot never touches the vault:
 its one-time GitHub authorization is used for that one start and then
-revoked.
+revoked. Neither do the OAuth App's one-time tokens behind Get started and
+Send for review.
 
-**GitHub reads.** The API reads public GitHub data only
-(`services/github_reads.py`): the contributor's pull request
+**GitHub reads.** Apart from the calls it makes as a contributor, with
+their one-time token ([Your copy and Send for review](#your-copy-and-send-for-review)),
+the API reads public GitHub data only (`services/github_reads.py`): the
+contributor's pull request
 (`GET /repos/verastd/forge-app/pulls?head=<login>:<branch>&state=all`; when
 none is on the task's branch, GitHub's search for the holder's pull
 requests opened since the claim,
 `repo:verastd/forge-app is:pr author:<login> created:>=<claim time>`, whose
 newest three that name the task are read in full), its check runs, a pull
-request by number at submission, and whether the contributor's fork
-exists. Results are cached for 60 seconds (the fork check for 5 minutes) in
-a bounded cache that drops its least recently used entry when full. Each
-read gets 5 seconds in all, connecting and the whole answer included. A
-failed read is remembered for 60 seconds, and after 5 failures in a row
-FORGE stops asking GitHub for 60 seconds. Production needs
+request by number at submission, whether the contributor's fork exists,
+a contributor's copy by its repository id (`GET /repositories/{id}`, for
+its current name, owner and parent), how far the task's branch in a
+holder's copy is ahead of upstream main
+(`GET /repos/verastd/forge-app/compare/main...<owner>:<branch>?per_page=1&page=2`:
+the comparison's second page, which carries the count without the changed
+files), and the rules Send for review checks a diff against
+(`GET /repos/verastd/forge-app/contents/.github/forge-protocol.json?ref=<commit>`,
+at the comparison's base commit).
+Results are cached for 60 seconds (the fork check and a copy by its id for
+5 minutes, the rules for an hour per commit, since a commit's content never
+changes) in a bounded cache that drops its least recently used entry when
+full. Each read gets 5 seconds in all, connecting and the whole answer
+included; inside a copy or a review it gets no more than what is left of
+the action's 40 seconds, and none starts after them (a read cut short that
+way isn't counted as a GitHub failure). A failed read is remembered for 60
+seconds, and after 5 failures in a row FORGE stops asking GitHub for 60
+seconds. Production needs
 `FORGE_GITHUB_READ_TOKEN`: a fine-grained token with read-only access to
 public repositories, which the operator creates and sets on the API box,
 raising GitHub's limit from 60 to 5,000 requests an hour. Anonymous reads
@@ -733,10 +1117,12 @@ token GitHub refuses (`401`, expired or revoked) doesn't stop the reads:
 each is retried once anonymously, with one warning in the API's log naming
 the variable. On the task page and in the connector, a GitHub failure,
 running out of that limit included, reads as "pending" or "GitHub can't be
-reached right now" with a plain note, never an error. Only handing in a
-pull request and the fork check, which can't go ahead without GitHub,
-answer `503 github_unavailable` (the connector's `submit_task` says so as
-a tool error).
+reached right now" with a plain note, never an error, and
+`canSendForReview` is left out. Only handing in a pull request and the
+fork check, which can't go ahead without GitHub, answer
+`503 github_unavailable` (the connector's `submit_task` says so as a tool
+error), and Send for review, which opens nothing without the rules,
+answers `503 checks_unavailable`.
 
 ## The Apps lobby
 
@@ -1897,22 +2283,28 @@ through rewrites. `apps/web` answers one API route itself,
 `POST /api/lobby/token`, the lobby's LiveKit room token (see
 [The Apps lobby](#the-apps-lobby)); it never calls `apps/api`. Its other
 server-side calls to the API (the BFF's `/bff/*`, the consent page and its
-decision route, and `/auth/callback` finishing a Copilot start or saying
-hello for a member who just signed in) carry the same short-lived
+decision route, `/auth/callback` finishing a Copilot start or saying
+hello for a member who just signed in, and `/auth/github/repo/callback`
+doing a copy or a review) carry the same short-lived
 assertion whenever they act for a signed-in person.
-Outbound, `apps/api` calls GitHub's public REST API for reads, and a
-vendor's API only when a contributor starts a start rail or has FORGE send
-the check notes. Every one of those calls follows no redirect, asks for an
-uncompressed answer and refuses a compressed one, reads at most 1 MB, and
-must finish within its budget, status line and headers included: 20
-seconds for a vendor call and 5 for a GitHub read (5 of either to
-connect). Its JSON is read only up to 32 levels deep. The API also calls
-Anthropic's API for the house model, while it is on, through Anthropic's
+Outbound, `apps/api` calls GitHub's public REST API for reads, GitHub as a
+contributor, with their one-time token, only when they press Get started,
+Refresh your copy or Send for review, and a vendor's API only when a
+contributor starts a start rail or has FORGE send the check notes. Every
+one of those calls follows no redirect, asks for an uncompressed answer and
+refuses a compressed one, reads at most 1 MB (8 MiB for the comparison
+Send for review checks), and must finish within its budget, status line
+and headers included: 20 seconds for a vendor call, 5 for a GitHub read
+and 8 for a call as a contributor, inside 40 for the whole copy or review
+(5 of any to connect). Its JSON is read only up to 32 levels deep. The API
+also calls Anthropic's API for the house model, while it is on, through
+Anthropic's
 SDK and its rules instead: one client, each call streamed, with 10
 seconds to connect, 600 between events and 600 in all, and one retry
 (see [The house model](#the-house-model)). The web server calls
-GitHub itself for sign-in, and for a Copilot start: to check whose the
-one-time token is, and to revoke it afterwards.
+GitHub itself for sign-in, and for each one-time token (a Copilot start, a
+copy or a review): to exchange the code for it, to check whose it is, and
+to revoke it afterwards.
 
 ## Flags flow
 
@@ -1999,15 +2391,19 @@ What a PR actually passes through, in order:
    closing on anything unreadable rather than guessing?), **protected
    paths** (everything in `.github/forge-protocol.json`'s
    `protectedPaths` — `.github/`, `CODEOWNERS`, `.gitleaksignore`,
-   `AGENTS.md`, `CLAUDE.md`, `.gemini/` and the other agent config
-   (`.mcp.json`, `.codex/`, `.agents/`, `.cursor/`, `.vscode/`,
-   `.claude/`), the sign-in/session paths from [Identity](#identity)
-   above, the lobby's token route, the connector, vault, rail and brief
-   code (see [The FORGE connector](#the-forge-connector)), the Bridge's
-   key-carrying code, the task fixtures, the Propose floor's rules, and
-   the house model's code and eval cases (see
-   [The house model](#the-house-model)) — needs T3 trust to
-   touch), and raises —
+   the Gauntlet's own commands and gate scripts (`Makefile`, and in
+   `tools/forge/` the four gate files, not the `forge` CLI), `AGENTS.md`, `CLAUDE.md`, `.gemini/` and the other
+   agent config (`.mcp.json`, `.codex/`, `.agents/`, `.cursor/`,
+   `.vscode/`, `.claude/`), the sign-in/session paths from
+   [Identity](#identity) above, the lobby's token route, the connector,
+   vault, rail and brief code (see
+   [The FORGE connector](#the-forge-connector)), the Bridge's key- and
+   token-carrying code, its copy and review code
+   (`services/copies.py`, and `services/github_reads.py`, which reads the
+   rules for it; see [Your copy and Send for review](#your-copy-and-send-for-review)),
+   the task fixtures, the Propose floor's rules, and the house model's
+   code and eval cases (see [The house model](#the-house-model)) — needs
+   T3 trust to touch), and raises —
    never blocks on — a **tests-modified flag** for PRs that touch an
    existing test.
 2. **The Gauntlet**, this repo's own CI
@@ -2025,6 +2421,20 @@ What a PR actually passes through, in order:
    counts as owed. See [`rewards.md`](rewards.md) for what "counts as
    owed" means today.
 
+**FORGE's pre-check.** A pull request the Bridge opens with Send for
+review has been checked once before it exists. Against upstream main's
+`.github/forge-protocol.json`, FORGE won't open it when the diff changes
+an existing test in any way but adding one (where G0 only raises its
+flag, FORGE refuses, because the attestation it writes would be false),
+touches a protected path (which G0 would close), or is bigger than G0 and
+GitHub's comparison take whole (300 files, or more than 20,000 changed
+lines); and rules it can't read the way Foreman does stop it too. Only then does it write the
+template's test attestation, checked, naming the commit it checked (see
+[Your copy and Send for review](#your-copy-and-send-for-review)). It
+replaces nothing above: G0 and the Gauntlet check FORGE's pull requests
+like anyone's, and the branch can still move after the pull request
+opens.
+
 **The per-repo contract.** G0's protected-path check and tests-modified
 flag, and the Gauntlet's tests-modified detector, need to agree on two
 things: where this repo's tests live, and which paths need T3 trust.
@@ -2035,8 +2445,11 @@ GitHub App and a CI script, this repo declares them once, in
 sides read the same file: `tools/forge/test-mod-detector.sh` reads it as
 of the PR's merge-base (so a PR can never loosen the very list that would
 let it hide a change), and Foreman reads the default branch's copy over
-the GitHub API. One declaration, two consumers, nothing to hand-sync. The
-exact globs live in that file, not here.
+the GitHub API. FORGE's pre-check is a third reader: it reads the default
+branch's copy too, publicly, and refuses one that Foreman wouldn't take
+or whose globs the other two could read apart. One declaration, three
+readers, nothing to hand-sync. The exact globs live in that file, not
+here.
 
 Some later stages the design calls for — an advisory LLM review pass, a
 hidden extended test suite, an ephemeral preview deploy — aren't wired up

@@ -1,9 +1,9 @@
 import { expect, test } from '@playwright/test';
 
-import { OPEN_RAILS, RAIL_REGISTRY, railMeta } from '../../packages/shared/dist/index.js';
+import { COPY_STEP, OPEN_RAILS, RAIL_REGISTRY, railMeta } from '../../packages/shared/dist/index.js';
 import {
   CONNECT_PATH,
-  FORK_URL,
+  COPY_STEP_ANCHOR,
   SESSION_HOSTS,
   canRelayNotes,
   credentialFields,
@@ -126,14 +126,30 @@ test.describe('the "Open my agent" links (lib/launch.ts)', () => {
     const launch = launchFor('antigravity', input({ taskId: 7 }));
     expect(launch.href).toBeNull();
     expect(launch.kind).toBe('steps');
-    // An older fork lacks the connector settings, and the connector wants a sign-in first (WEB-M6).
+    // An older copy lacks the connector settings, and the connector wants a sign-in first (WEB-M6).
     expect(launch.steps).toEqual([
-      "If your fork is older than October 2026, press Sync fork on GitHub first so it has FORGE's connector settings.",
-      'Open your fork in Antigravity. The FORGE connector is already set up in the repo.',
+      "If your copy is older than October 2026, bring it up to date on GitHub first so it has FORGE's connector settings.",
+      'Open your copy in Antigravity. The FORGE connector is already set up in it.',
       'The first time, sign in to FORGE: in Settings → Customizations, press Authenticate next to forge, then paste the code your browser shows and press Submit.',
       'Ask it: Start FORGE task #7',
     ]);
     expect(startTaskAsk(7)).toBe('Start FORGE task #7');
+    // Where the task page sets up and refreshes the copy, the steps point there, and name the copy once known.
+    expect(launchFor('antigravity', input({ taskId: 7, copyStep: 'get-started' })).steps?.slice(0, 2)).toEqual([
+      "Press Get started on this page first, so your copy has FORGE's connector settings.",
+      'Open your copy in Antigravity. The FORGE connector is already set up in it.',
+    ]);
+    expect(
+      launchFor('antigravity', input({ taskId: 7, copyStep: 'refresh', copy: 'octo-contributor/forge-app-1' })).steps?.slice(0, 2),
+    ).toEqual([
+      "If your copy is older than October 2026, press Refresh your copy on this page first so it has FORGE's connector settings.",
+      'Open your copy, octo-contributor/forge-app-1, in Antigravity. The FORGE connector is already set up in it.',
+    ]);
+    for (const copyStep of ['none', 'get-started', 'refresh'] as const) {
+      expect(launchFor('antigravity', input({ copyStep, copy: 'octo-contributor/forge-app' })).steps?.join(' '), copyStep).not.toMatch(
+        /fork/i,
+      );
+    }
   });
 
   test('every link round-trips a brief full of URL-special characters', () => {
@@ -259,10 +275,10 @@ test.describe('the hand-off helpers (lib/handoff.ts)', () => {
       ],
       [{ code: 'body_too_large' }, "That's too long to send. Check what you pasted."],
       [{ code: 'github_unavailable' }, "GitHub isn't answering FORGE just now, so nothing changed. Try again in a minute."],
-      [{ code: 'rail_setup_needed', detail: 'Connect your fork in Jules first.' }, 'Connect your fork in Jules first.'],
+      [{ code: 'rail_setup_needed', detail: 'Connect your copy in Jules first.' }, 'Connect your copy in Jules first.'],
       [
         { code: 'rail_setup_needed' },
-        "Google Jules isn't connected to your fork yet. Finish the setup steps above, then try again.",
+        "Google Jules isn't connected to your copy yet. Finish the setup steps above, then try again.",
       ],
       [{ code: 'rail_failed', upstreamStatus: 503 }, "Google didn't answer properly (error 503). Try again in a minute."],
       [{ code: 'rail_failed' }, "Google didn't answer properly. Try again in a minute."],
@@ -341,7 +357,7 @@ test.describe('the hand-off helpers (lib/handoff.ts)', () => {
   });
 
   test("the API's own setup sentence is shown as plain, short text", () => {
-    const plain = 'Install the Jules GitHub app on your fork, then try again.';
+    const plain = 'Install the Jules GitHub app on your copy, then try again.';
     expect(describeStartError({ code: 'rail_setup_needed', detail: plain }, jules)).toBe(plain);
     const sentence = describeStartError({ code: 'rail_setup_needed', detail: `Install\u202Ethe app\u0007 ${'x'.repeat(700)}` }, jules);
     expect(sentence).not.toMatch(/[\u0000-\u001F\u202E]/);
@@ -355,7 +371,7 @@ test.describe('the hand-off helpers (lib/handoff.ts)', () => {
     expect(describeClaimError('internal_error')).toContain('nothing was changed');
     expect(describeTaskError('invalid_pr_url')).toBe("That isn't a link to a pull request on verastd/forge-app.");
     expect(describeTaskError('pr_not_found')).toBe('GitHub has no pull request at that link.');
-    expect(describeTaskError('not_your_pr')).toBe("That pull request comes from someone else's fork.");
+    expect(describeTaskError('not_your_pr')).toBe("That pull request comes from someone else's copy, not yours.");
     expect(describeTaskError('internal_error')).toBe("That didn't work, so nothing changed. Please try again.");
     expect(startedSentence('Google Jules')).toBe('Google Jules is working on it.');
   });
@@ -408,14 +424,19 @@ test.describe('the hand-off helpers (lib/handoff.ts)', () => {
   });
 
   test('setup steps link where there is somewhere to go', () => {
-    expect(setupStepLink(jules, 'Fork forge-app on GitHub.', null)).toEqual({ href: FORK_URL, external: true });
-    expect(FORK_URL).toBe('https://github.com/verastd/forge-app/fork');
-    expect(setupStepLink(copilot, "Install FORGE's GitHub app on your fork.", 'forge-foreman')).toEqual({
+    // The copy step points at step 1 on the same page, where Get started is; GitHub's own page never comes into it.
+    expect(setupStepLink(jules, COPY_STEP, null)).toEqual({ href: COPY_STEP_ANCHOR, external: false });
+    expect(COPY_STEP_ANCHOR).toBe('#copy-title');
+    expect(setupStepLink(jules, 'Fork forge-app on GitHub.', null)).toBeNull();
+    for (const meta of RAIL_REGISTRY) {
+      expect(meta.setup[0], meta.id).toBe(COPY_STEP);
+    }
+    expect(setupStepLink(copilot, "Install FORGE's GitHub app on your copy.", 'forge-foreman')).toEqual({
       href: 'https://github.com/apps/forge-foreman/installations/new',
       external: true,
     });
     // No slug configured: the step stays words, never a link that leads nowhere.
-    expect(setupStepLink(copilot, "Install FORGE's GitHub app on your fork.", null)).toBeNull();
+    expect(setupStepLink(copilot, "Install FORGE's GitHub app on your copy.", null)).toBeNull();
     expect(setupStepLink(railMeta('claude-code'), 'Connect your agent to FORGE once so it can report progress.', null)).toEqual({
       href: CONNECT_PATH,
       external: false,
@@ -424,7 +445,7 @@ test.describe('the hand-off helpers (lib/handoff.ts)', () => {
       href: 'https://jules.google.com/settings',
       external: true,
     });
-    expect(setupStepLink(jules, 'Sign in at jules.google.com and connect your fork.', null)).toBeNull();
+    expect(setupStepLink(jules, 'Sign in at jules.google.com and connect your copy.', null)).toBeNull();
     // Every start rail's key step finds its key page.
     for (const meta of RAIL_REGISTRY.filter((rail) => rail.keyUrl !== undefined)) {
       expect(meta.setup.some((step) => setupStepLink(meta, step, null)?.href === meta.keyUrl), meta.id).toBe(true);
@@ -565,7 +586,7 @@ test.describe('the hand-off helpers after the Phase 4 review', () => {
       "You've handed in links too often just now. Try again in about 1 minute.",
     );
     expect(describeTaskError({ code: 'pr_not_for_task' }, 3)).toBe(
-      "That pull request isn't for this task. FORGE takes one from your fork, opened after you claimed the task, on the task's branch or with “[#3]” in its title or “Closes #3” in its description.",
+      "That pull request isn't for this task. FORGE takes one from your copy, opened after you claimed the task, on the task's branch or with “[#3]” in its title or “Closes #3” in its description.",
     );
     expect(describeTaskError('pr_not_for_task')).toContain("isn't for this task");
     // Every new code is its own sentence, never the catch-all.
@@ -590,7 +611,7 @@ test.describe('the hand-off helpers after the Phase 4 review', () => {
 
   test('a Copilot setup failure points at steps shown below it (WEB-L2)', () => {
     expect(describeStartError({ code: 'rail_setup_needed' }, railMeta('copilot'), { steps: 'below' })).toBe(
-      "GitHub Copilot isn't connected to your fork yet. Finish the setup steps below, then try again.",
+      "GitHub Copilot isn't connected to your copy yet. Finish the setup steps below, then try again.",
     );
   });
 

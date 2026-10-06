@@ -60,7 +60,7 @@ def _headers(credential: RailCredential) -> dict[str, str]:
 
 def _connect_sentence(fork: str) -> str:
     return (
-        f"OpenHands can't open your fork. At app.all-hands.dev, connect GitHub and give "
+        f"OpenHands can't open your copy. At app.all-hands.dev, connect GitHub and give "
         f"OpenHands access to {fork}, then try again."
     )
 

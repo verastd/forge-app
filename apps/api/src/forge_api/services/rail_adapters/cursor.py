@@ -57,7 +57,7 @@ def _headers(credential: RailCredential) -> dict[str, str]:
 
 def _connect_sentence(fork: str) -> str:
     return (
-        f"Cursor can't reach your fork. In Cursor, connect GitHub and give it access to "
+        f"Cursor can't reach your copy. In Cursor, connect GitHub and give it access to "
         f"{fork}, then try again."
     )
 

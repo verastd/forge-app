@@ -59,7 +59,17 @@ BridgeStage = Literal[
 #: What an agent may report through the connector's `report_progress`.
 ProgressStage = Literal["started", "working", "pushed", "pr_opened", "blocked", "done"]
 BridgeEventKind = Literal[
-    "claimed", "dispatched", "opened", "progress", "submitted", "released", "relayed"
+    "claimed",
+    "dispatched",
+    "opened",
+    "progress",
+    "submitted",
+    "released",
+    "relayed",
+    # Phase 7: FORGE set up the holder's copy and the task's branch in it, and FORGE opened
+    # the pull request as them ("Send for review"). Both FORGE's own.
+    "copy_ready",
+    "review_sent",
 ]
 BridgeEventSource = Literal["forge", "agent"]
 CheckRunStatus = Literal["queued", "in_progress", "completed"]
@@ -153,6 +163,31 @@ HOUSE_STATUSES: tuple[HouseStatus, ...] = get_args(HouseStatus)
 HOUSE_OFF_REASONS: tuple[HouseOffReason, ...] = get_args(HouseOffReason)
 HOUSE_FAILURE_REASONS: tuple[HouseFailureReason, ...] = get_args(HouseFailureReason)
 HOUSE_REASONS: tuple[HouseReason, ...] = get_args(HouseReason)
+BRIDGE_EVENT_KINDS: tuple[BridgeEventKind, ...] = get_args(BridgeEventKind)
+
+#: Every `error` code POST /api/bridge/copy and /review answer with, besides the Bridge's
+#: usual ones (bridge-disabled, unauthenticated, invalid_request, task_not_found,
+#: not_claimed, body_too_large). tests_modified and protected_paths carry `paths` (at most
+#: 10 repository paths), head_taken `prNumber` (an open pull request someone else opened from
+#: the holder's branch). REPO_ACTION_ERRORS in packages/shared, in the same order.
+RepoActionError = Literal[
+    "not_holder",
+    "already_shipped",
+    "rate_limited",
+    "wrong_account",
+    "copy_not_ready",
+    "copy_mismatch",
+    "no_copy",
+    "branch_missing",
+    "no_changes",
+    "too_large",
+    "tests_modified",
+    "protected_paths",
+    "checks_unavailable",
+    "head_taken",
+    "github_failed",
+]
+REPO_ACTION_ERRORS: tuple[RepoActionError, ...] = get_args(RepoActionError)
 
 #: A member whose proposal is in one of these can't move another (409
 #: one_active_proposal). Every other state is decided.
@@ -282,13 +317,32 @@ class RailList(BaseModel):
     vault: bool  # FORGE can save keys (FORGE_VAULT_KEY is set and valid)
 
 
+class RepoCopy(BaseModel):
+    """The contributor's copy of verastd/forge-app: the GitHub fork FORGE set up (or found)
+    for them on "Get started" (Phase 7 contract §3)."""
+
+    fullName: str  # owner/name: maya/forge-app, or another name such as maya/forge-app-1
+    syncedAt: str  # when FORGE last brought it up to date
+
+
 class TaskDetail(BaseModel):
-    """GET /api/bridge/tasks/{id}: the card plus everything an agent needs."""
+    """GET /api/bridge/tasks/{id}: the card plus everything an agent needs. The brief is
+    personalized with the caller's login, and with their copy once FORGE knows it.
+
+    `copy` would shadow BaseModel.copy(), so the field is `copy_` in Python and `copy` on
+    the wire: build it with `copy=...`, read it as `.copy_`.
+    """
+
+    model_config = ConfigDict(serialize_by_alias=True)
 
     task: TaskCard
     acceptanceCriteria: list[str]
     branch: str
     brief: str
+    copy_: RepoCopy | None = Field(default=None, alias="copy")  # holder only
+    # Holder only: the task's branch in their copy is ahead of verastd/forge-app main and
+    # no open (or merged) pull request is known for the claim. Absent when unknown.
+    canSendForReview: bool | None = None
 
 
 class ForkStatus(BaseModel):
@@ -296,6 +350,44 @@ class ForkStatus(BaseModel):
 
     exists: bool
     url: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# "Your copy" and "Send for review" (Phase 7 contract §3): the web server only, with
+# GitHub's one-time token for that one action
+# ---------------------------------------------------------------------------
+
+
+class RepoActionRequest(BaseModel):
+    """POST /api/bridge/copy and /review. `token` is a SecretStr, so it never shows up in a
+    repr, a log line or a serialized response."""
+
+    taskId: int
+    token: SecretStr = Field(min_length=1, max_length=4096)
+
+
+class CopyResult(BaseModel):
+    """200 from POST /api/bridge/copy."""
+
+    fullName: str
+    branch: str
+    synced: bool  # False: the copy has changes of its own, so its main wasn't updated
+    branchCreated: bool  # False: the branch was already there and was left alone
+    # False only when FORGE made the branch from the copy's own main, because GitHub
+    # refused verastd/forge-app's latest main.
+    branchFromLatest: bool
+
+
+class PullRequestRef(BaseModel):
+    number: int
+    url: str
+
+
+class ReviewResult(BaseModel):
+    """201 (created) or 200 (one was already open) from POST /api/bridge/review."""
+
+    pullRequest: PullRequestRef
+    created: bool
 
 
 # ---------------------------------------------------------------------------

@@ -146,7 +146,7 @@ def test_a_failed_check_exits_1() -> None:
     code, out, _ = run(
         ["--rail", "cursor", *BASE, "--check"], env={"CURSOR_API_KEY": CURSOR_KEY}, vendor=vendor
     )
-    assert code == 1 and out.splitlines()[-1].startswith("NOT OK: Cursor can't reach your fork")
+    assert code == 1 and out.splitlines()[-1].startswith("NOT OK: Cursor can't reach your copy")
 
 
 def test_go_starts_and_prints_the_link() -> None:

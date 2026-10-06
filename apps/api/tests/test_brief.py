@@ -13,8 +13,10 @@ from forge_api.services.brief import (
     UPSTREAM_REPO,
     branch_name,
     compile_brief,
+    is_valid_copy,
     is_valid_login,
     slugify,
+    work_repo,
 )
 
 GOLDEN = Path(__file__).resolve().parents[3] / "tests" / "fixtures" / "brief-golden.json"
@@ -43,7 +45,7 @@ CSV = Task(
 def test_the_brief_matches_the_golden_byte_for_byte(case: dict[str, Any]) -> None:
     task = Task(**case["task"])
     assert branch_name(task.id, task.title) == case["branch"]
-    assert compile_brief(task, case["criteria"], case["login"]) == case["brief"]
+    assert compile_brief(task, case["criteria"], case["login"], case.get("copy")) == case["brief"]
 
 
 def test_the_golden_covers_the_agreed_cases() -> None:
@@ -54,7 +56,119 @@ def test_the_golden_covers_the_agreed_cases() -> None:
         "no criteria",
         "a title with characters that slugify away",
         "a title with double quotes",
+        "with a copy",
+        "a copy under another name",
+        "a copy without a login",
+        "an invalid copy is no copy",
+        "a copy and a title with double quotes",
     } <= names
+
+
+COPY = "octo-contributor/forge-app-1"
+
+
+def test_with_a_copy_the_agent_works_there_and_the_person_sends_it_for_review() -> None:
+    brief = compile_brief(CSV, ["It works"], "octo-contributor", COPY)
+    assert (
+        "- Work in your copy, octo-contributor/forge-app-1 (a fork of verastd/forge-app), on "
+        "the branch task/1-polish-the-csv-export-in-the-data-app. FORGE made that branch from "
+        "the latest main; if it's missing, create it from verastd/forge-app's main. Push your "
+        "commits to it.\n"
+    ) in brief
+    assert "the person sends it for review from the task page." in brief
+    assert (
+        "you may open one instead, from octo-contributor:task/1-polish-the-csv-export-in-the-"
+        'data-app to verastd/forge-app main, titled "[#1] Polish the CSV export in the Data '
+        'app", with "Closes #1" in the description.'
+    ) in brief
+    assert "No copy yet?" not in brief
+    assert "octo-contributor/forge-app," not in brief
+
+
+def test_the_copys_owner_is_the_pull_request_head_whatever_the_login() -> None:
+    brief = compile_brief(CSV, [], None, "maya/forge-app")
+    assert "from maya:task/1-polish-the-csv-export-in-the-data-app to verastd/forge-app main" in (
+        brief
+    )
+    assert compile_brief(CSV, [], "someone-else", "maya/forge-app") == brief
+
+
+def test_with_a_copy_the_other_rules_and_the_connector_line_stay() -> None:
+    brief = compile_brief(CSV, [], "maya", "maya/forge-app")
+    assert "- Read AGENTS.md at the repo root before you start.\n" in brief
+    assert (
+        "- Don't edit or delete existing tests (add new test files instead). Don't change "
+        ".github/, AGENTS.md, CLAUDE.md, the files listed under protectedPaths in "
+        ".github/forge-protocol.json, or anything outside this task.\n"
+    ) in brief
+    assert "- Run make lint and make test before you push.\n" in brief
+    assert "If you have the FORGE tools (the FORGE connector), call claim_task first" in brief
+    assert brief.endswith("\n\nTask: https://github.com/verastd/forge-app/issues/1")
+
+
+@pytest.mark.parametrize("login", ["maya", None])
+def test_without_a_copy_the_brief_says_how_to_get_one(login: str | None) -> None:
+    brief = compile_brief(CSV, [], login)
+    assert (
+        "- No copy yet? Ask the person to press Get started on the task page first: FORGE "
+        "makes one. If you can fork repositories, you may fork verastd/forge-app yourself.\n"
+    ) in brief
+    assert compile_brief(CSV, [], login, None) == brief
+
+
+@pytest.mark.parametrize(
+    "copy",
+    [
+        "",
+        "maya",
+        "maya/",
+        "/forge-app",
+        "maya/forge app",
+        "maya/..",
+        "maya/.",
+        "maya/a/b",
+        "-maya/forge-app",
+        "maya/" + "r" * 101,
+        "maya/forge-app\n",
+        "ma ya/forge-app",
+    ],
+)
+def test_an_invalid_copy_reads_as_no_copy(copy: str) -> None:
+    assert not is_valid_copy(copy)
+    assert compile_brief(CSV, ["It works"], "maya", copy) == compile_brief(
+        CSV, ["It works"], "maya"
+    )
+
+
+@pytest.mark.parametrize(
+    "copy",
+    [
+        "maya/forge-app",
+        "maya/forge-app-1",
+        "Maya-2/forge.app_2",
+        "a/" + "r" * 100,
+        "maya/.github",
+        "maya/...",
+    ],
+)
+def test_valid_copies(copy: str) -> None:
+    assert is_valid_copy(copy)
+
+
+def test_non_strings_are_not_copies() -> None:
+    assert not is_valid_copy(None)
+    assert not is_valid_copy(42)
+    assert not is_valid_copy(["maya/forge-app"])
+
+
+def test_work_repo_names_the_copy_else_the_login_fork_else_nothing() -> None:
+    assert work_repo("maya", "maya/forge-app-1") == "maya/forge-app-1"
+    assert work_repo(None, "maya/forge-app-1") == "maya/forge-app-1"
+    assert work_repo("maya", None) == "maya/forge-app"
+    assert work_repo("maya") == "maya/forge-app"
+    assert work_repo("maya", "maya/../x") == "maya/forge-app"
+    assert work_repo(None, None) is None
+    assert work_repo("not a login", "not a copy") is None
 
 
 def test_a_double_quote_in_the_title_cannot_close_the_quoted_pull_request_title() -> None:
@@ -72,11 +186,14 @@ def test_a_double_quote_in_the_title_cannot_close_the_quoted_pull_request_title(
 
 def test_a_login_personalizes_the_fork_and_the_pull_request_head() -> None:
     brief = compile_brief(CSV, ["It works"], "octo-contributor")
-    assert "- Work in your fork, octo-contributor/forge-app, on the branch " in brief
+    assert (
+        "- Work in your copy, octo-contributor/forge-app (a fork of verastd/forge-app), on the "
+        "branch " in brief
+    )
     assert "open a pull request from octo-contributor:task/1-polish-the-csv-export" in brief
     generic = compile_brief(CSV, ["It works"], None)
-    assert f"- Work in your fork of {UPSTREAM_REPO}, on the branch " in generic
-    assert "from your fork's task/1-polish-the-csv-export-in-the-data-app branch to" in generic
+    assert f"- Work in your copy of {UPSTREAM_REPO} (a fork of it), on the branch " in generic
+    assert "from your copy's task/1-polish-the-csv-export-in-the-data-app branch to" in generic
 
 
 @pytest.mark.parametrize(

@@ -1,18 +1,16 @@
 /**
  * Pure helpers for the Contribute hand-off screens: the plain sentence for
  * every API error code (Phase 4 contract §5), the real links behind each
- * rail's one-time setup steps, the fields each kind of credential needs, and
- * the guards for anything the API relays from an agent or a vendor (links,
- * agent-written text).
+ * rail's one-time setup steps, the fields each kind of credential needs, the
+ * guards for anything the API relays from an agent or a vendor (links,
+ * agent-written text), and what "your copy" and "Send for review" came to
+ * (Phase 7).
  *
  * No React, no fetch: everything here is unit-tested on its own
- * (tests/e2e/launch.spec.ts).
+ * (tests/e2e/launch.spec.ts, tests/e2e/repo-flow.spec.ts).
  */
-import { RAIL_REGISTRY, START_RAILS, UPSTREAM_REPO, isStartRail } from '@forge/shared';
-import type { BridgeStatus, CredentialKind, Rail, RailMeta, StartRail } from '@forge/shared';
-
-/** GitHub's "create a fork" page for the upstream repository. */
-export const FORK_URL = `https://github.com/${UPSTREAM_REPO}/fork`;
+import { COPY_STEP, RAIL_REGISTRY, REPO_ACTION_ERRORS, START_RAILS, UPSTREAM_REPO, isStartRail } from '@forge/shared';
+import type { BridgeStage, BridgeStatus, CredentialKind, Rail, RailMeta, StartRail, TaskDetail } from '@forge/shared';
 
 /** Where people connect their agent to FORGE once (unit W2's page). */
 export const CONNECT_PATH = '/connect';
@@ -40,11 +38,12 @@ export interface StepLink {
   external: boolean;
 }
 
-const FORK_STEP = /^Fork forge-app on GitHub\.$/;
+/** Step 1 on the task page, "Your copy", where Get started is: what the registry's copy step (`COPY_STEP`) links to. */
+export const COPY_STEP_ANCHOR = '#copy-title';
 const APP_STEP = /FORGE's GitHub app/;
 const CONNECT_STEP = /^Connect your agent to FORGE once/;
-/** The step that says where the key, or the routine, comes from. */
-const KEY_STEP = /API key|routine for your fork/;
+/** The step that says where the key, or the routine, comes from (whichever word the registry uses for the copy). */
+const KEY_STEP = /API key|routine for your /;
 
 /**
  * The page where a rail's key is made, as the API described the rail
@@ -69,7 +68,7 @@ export function setupStepLink(
   step: string,
   appSlug: string | null,
 ): StepLink | null {
-  if (FORK_STEP.test(step)) return { href: FORK_URL, external: true };
+  if (step === COPY_STEP) return { href: COPY_STEP_ANCHOR, external: false };
   if (APP_STEP.test(step)) {
     const install = githubAppInstallUrl(appSlug);
     return install === null ? null : { href: install, external: true };
@@ -163,6 +162,10 @@ export interface Failure {
   sessionUrl?: string;
   /** The start used a key FORGE had saved, rather than one pasted just now. */
   usedSavedKey?: boolean;
+  /** `tests_modified` / `protected_paths`: how many files the review was refused for (never which). */
+  files?: number;
+  /** `head_taken`: the pull request already open from the copy's branch. */
+  pullRequest?: number;
 }
 
 /**
@@ -325,7 +328,7 @@ export function describeStartError(failure: Failure, meta: DescribedRail, option
       const detail = failure.detail === undefined ? '' : plainText(failure.detail, 600);
       return detail !== ''
         ? detail
-        : `${label} isn't connected to your fork yet. Finish the setup steps ${options.steps ?? 'above'}, then try again.`;
+        : `${label} isn't connected to your copy yet. Finish the setup steps ${options.steps ?? 'above'}, then try again.`;
     }
     case 'already_started':
       // The API's answer to a second press: the first start went through.
@@ -392,11 +395,11 @@ export function describeTaskError(failure: string | Failure, taskId?: number): s
     case 'pr_not_found':
       return 'GitHub has no pull request at that link.';
     case 'not_your_pr':
-      return "That pull request comes from someone else's fork.";
+      return "That pull request comes from someone else's copy, not yours.";
     case 'pr_not_for_task':
       return taskId === undefined
-        ? "That pull request isn't for this task. FORGE takes one from your fork, opened after you claimed the task, on the task's branch or naming the task in its title or description."
-        : `That pull request isn't for this task. FORGE takes one from your fork, opened after you claimed the task, on the task's branch or with “[#${taskId}]” in its title or “Closes #${taskId}” in its description.`;
+        ? "That pull request isn't for this task. FORGE takes one from your copy, opened after you claimed the task, on the task's branch or naming the task in its title or description."
+        : `That pull request isn't for this task. FORGE takes one from your copy, opened after you claimed the task, on the task's branch or with “[#${taskId}]” in its title or “Closes #${taskId}” in its description.`;
     case 'submit_limit':
       return `You've handed in links too often just now. ${retryWords(retryAfterSeconds)}`;
     default:
@@ -470,6 +473,258 @@ export function readStartOutcome(params: {
     };
   }
   return null;
+}
+
+/* --- "your copy" and "Send for review": what the repo callback sends back ------ */
+
+/**
+ * Codes the repo callback (`/auth/github/repo/callback`) may put in
+ * `?repo_error=`: the web's own, beside the API's. `not_configured` is this
+ * server without its OAuth App (or without GitHub sign-in); `expired` lands
+ * on the task board, when there was no attempt to go back to.
+ */
+export const WEB_REPO_ERRORS = [
+  'github_denied',
+  'github_failed',
+  'not_configured',
+  'wrong_account',
+  'signed_out',
+  'expired',
+] as const;
+
+/**
+ * What "Send for review" checks before it opens anything: the agent changed
+ * existing tests or files contributors can't change (each with how many
+ * files), the change is too big for one task, or FORGE couldn't check it.
+ */
+export const REVIEW_CHECK_ERRORS = ['tests_modified', 'protected_paths', 'too_large', 'checks_unavailable'] as const;
+
+/** Every code the task page explains when it comes back in `?repo_error=`. */
+export const REPO_ERROR_CODES: ReadonlySet<string> = new Set([
+  ...WEB_REPO_ERRORS,
+  ...REPO_ACTION_ERRORS,
+  ...REVIEW_CHECK_ERRORS,
+  'not_claimed',
+  'task_not_found',
+  'bridge-disabled',
+  'unauthenticated',
+  'invalid_request',
+  'body_too_large',
+  'service_unreachable',
+  'upstream_timeout',
+  'api_failed',
+  'github_unavailable',
+]);
+
+export type RepoOutcome =
+  /** `synced: false`: the copy couldn't be brought up to date; `latest: false`: its branch came from the copy's own main. */
+  | { kind: 'copied'; synced?: false; latest?: false }
+  | { kind: 'sent'; pr?: number }
+  | { kind: 'error'; failure: Failure };
+
+/** The statuses worth saying in a sentence: GitHub's, or the API's when it gave no code. */
+const STATUS_CODES: ReadonlySet<string> = new Set(['github_failed', 'api_failed']);
+/** The refusals that name files, which the page counts. */
+const FILES_CODES: ReadonlySet<string> = new Set(['tests_modified', 'protected_paths']);
+/** The refusals that name a pull request, by number. */
+const PR_CODES: ReadonlySet<string> = new Set(['head_taken']);
+
+/**
+ * What `?copy=ready&synced=0&latest=0`, `?review=sent&pr=<n>` or
+ * `?repo_error=<code>&status=<n>&files=<n>&pr=<n>` on the task page say, or null. An
+ * error wins over a success in the same query, unknown codes read as a
+ * generic failure, and nothing from the query string is ever shown as text:
+ * only these sentences, and numbers that are numbers.
+ */
+export function readRepoOutcome(params: {
+  copy?: string | null;
+  synced?: string | null;
+  latest?: string | null;
+  review?: string | null;
+  pr?: string | null;
+  repoError?: string | null;
+  status?: string | null;
+  files?: string | null;
+}): RepoOutcome | null {
+  if (typeof params.repoError === 'string' && params.repoError !== '') {
+    const code = REPO_ERROR_CODES.has(params.repoError) ? params.repoError : 'unknown';
+    const status = typeof params.status === 'string' && /^[1-5][0-9]{2}$/.test(params.status) ? Number(params.status) : undefined;
+    const files = typeof params.files === 'string' && /^[1-9][0-9]{0,2}$/.test(params.files) ? Number(params.files) : undefined;
+    const pr = typeof params.pr === 'string' && /^[1-9][0-9]{0,8}$/.test(params.pr) ? Number(params.pr) : undefined;
+    return {
+      kind: 'error',
+      failure: {
+        code,
+        ...(status !== undefined && STATUS_CODES.has(code) ? { upstreamStatus: status } : {}),
+        ...(files !== undefined && FILES_CODES.has(code) ? { files } : {}),
+        ...(pr !== undefined && PR_CODES.has(code) ? { pullRequest: pr } : {}),
+      },
+    };
+  }
+  if (params.review === 'sent') {
+    const pr = typeof params.pr === 'string' && /^[1-9][0-9]{0,8}$/.test(params.pr) ? Number(params.pr) : undefined;
+    return pr === undefined ? { kind: 'sent' } : { kind: 'sent', pr };
+  }
+  if (params.copy === 'ready') {
+    return {
+      kind: 'copied',
+      ...(params.synced === '0' ? { synced: false } : {}),
+      ...(params.latest === '0' ? { latest: false } : {}),
+    };
+  }
+  return null;
+}
+
+/** The sentence for "your copy" or "Send for review" when it did not happen. */
+export function describeRepoError(failure: string | Failure): string {
+  const { code, upstreamStatus, files, pullRequest } = asFailure(failure);
+  switch (code) {
+    case 'github_denied':
+      return "You didn't allow it on GitHub, so FORGE did nothing.";
+    case 'github_failed':
+      return upstreamStatus === undefined
+        ? "GitHub didn't finish the approval, so FORGE did nothing. Please try again."
+        : `GitHub turned down one of FORGE's requests (error ${upstreamStatus}). Try again in a minute: FORGE picks up where it stopped.`;
+    case 'not_configured':
+      return "FORGE can't do that on this server yet, so nothing changed.";
+    case 'wrong_account':
+      return "You allowed it on GitHub with a different account from the one you're signed in with here, so FORGE did nothing.";
+    case 'signed_out':
+      return 'Your FORGE sign-in ended before GitHub sent you back, so FORGE did nothing. Sign in and try again.';
+    case 'expired':
+      return 'That took too long, or got interrupted, so FORGE did nothing. Open your task and press the button again.';
+    case 'rate_limited':
+      return "You've asked FORGE to do that too many times in the last hour. Try again later.";
+    case 'copy_not_ready':
+      return 'GitHub is still making your copy. Wait a minute, then press Get started again.';
+    case 'copy_mismatch':
+      return "GitHub answered with a repository that isn't your copy of FORGE's code, so FORGE stopped and changed nothing.";
+    case 'no_copy':
+      return "FORGE hasn't set up your copy yet. Press Get started first.";
+    case 'branch_missing':
+      return "Your copy has nowhere for this task's work yet, so there's nothing to send. Press Refresh your copy, then let your agent push its work.";
+    case 'no_changes':
+      return "Your agent hasn't pushed any work for this task to your copy yet, so there's nothing to send.";
+    case 'tests_modified':
+      return `Your agent changed ${
+        files === undefined ? 'tests that were already there' : files === 1 ? 'a test file that was already there' : `${files} test files that were already there`
+      }, so FORGE didn't send it. Ask your agent to undo that and put any new tests in new files, then send it for review again.`;
+    case 'protected_paths':
+      return `Your agent changed ${
+        files === undefined ? 'some files' : files === 1 ? 'a file' : `${files} files`
+      } that contributors can't change, so FORGE didn't send it. Ask your agent to undo ${files === 1 ? 'that change' : 'those changes'}, then send it for review again.`;
+    case 'too_large':
+      return "This change is too big for one task, so FORGE didn't send it. Ask your agent to keep to what the task asks, then send it for review again.";
+    case 'checks_unavailable':
+      return "FORGE couldn't check the change just now, so nothing was sent. Try again in a few minutes.";
+    case 'head_taken':
+      return `Someone else opened ${pullRequest === undefined ? 'a pull request' : `pull request #${pullRequest}`} from your copy's branch. FORGE can't send yours while it's open. Ask a maintainer to close it.`;
+    case 'task_not_found':
+      return "FORGE doesn't have this task any more, so nothing changed.";
+    case 'invalid_request':
+      return "FORGE couldn't read that request, so nothing changed. Reload the page and try again.";
+    case 'body_too_large':
+      return "FORGE couldn't take that request, so nothing changed. Reload the page and try again.";
+    case 'api_failed':
+      return upstreamStatus === undefined
+        ? "FORGE's service didn't answer properly, so it may not have gone through. Reload the page to see where things stand."
+        : `FORGE's service didn't answer properly (error ${upstreamStatus}), so it may not have gone through. Reload the page to see where things stand.`;
+    default:
+      return common(code) ?? "That didn't work. Reload the page to see where things stand, then try again.";
+  }
+}
+
+/** The sentence for a copy set up or brought up to date. */
+export const COPY_READY_SENTENCE = 'Your copy is ready. Your agent can work in it now.';
+
+/** Said beside it when the copy has changes of its own, so GitHub wouldn't bring it up to date (`synced: false`). */
+export const COPY_NOT_SYNCED_SENTENCE =
+  "FORGE couldn't bring your copy fully up to date, because it has changes of its own. That doesn't stop your agent: it works on this task's own branch.";
+
+/** ...and when the task's branch had to start from the copy's own main (`branchFromLatest: false`). */
+export const COPY_NOT_LATEST_SENTENCE =
+  "Your agent's branch starts from your copy's main, which may be behind FORGE's latest code. Ask your agent to bring the branch up to date with FORGE's code first.";
+
+/** Everything a `copied` outcome says, in order: the copy is ready, then whatever needs a word. */
+export function copiedSentences(outcome: { synced?: false; latest?: false }): string[] {
+  return [
+    COPY_READY_SENTENCE,
+    ...(outcome.synced === false ? [COPY_NOT_SYNCED_SENTENCE] : []),
+    ...(outcome.latest === false ? [COPY_NOT_LATEST_SENTENCE] : []),
+  ];
+}
+
+/**
+ * Beside "Send for review": what the pull request FORGE opens will say in the
+ * person's name. Its description carries the template's test promise (no
+ * existing test changed or deleted, which FORGE checks in the diff first) and
+ * the AI-assistance disclosure, both ticked, and names who sent it.
+ */
+export const REVIEW_SAYS_SENTENCE =
+  "FORGE opens the pull request in your name. It says, for you, that your agent didn't change or delete any existing tests (FORGE checks that first) and that an AI agent did the work.";
+
+/** The sentence for work sent for review, with its pull request's number when there is one. */
+export function sentForReviewSentence(pr: number | undefined): string {
+  return pr === undefined
+    ? 'Sent for review. Its checks show up below as they run.'
+    : `Sent for review: pull request #${pr}. Its checks show up below as they run.`;
+}
+
+/** An upstream pull request's link and number: `https://github.com/verastd/forge-app/pull/<n>`. */
+const UPSTREAM_PULL = new RegExp(`^https://github\\.com/${UPSTREAM_REPO.replace('/', '\\/')}/pull/([1-9][0-9]{0,8})(?:[/?#]|$)`, 'i');
+
+/** The status's pull request, if it is a plain https link to one on verastd/forge-app: its link and number. */
+export function upstreamPullRequest(status: Pick<BridgeStatus, 'prUrl'> | null): { url: string; number: number } | null {
+  const url = safeHttpsUrl(status?.prUrl, ['github.com']);
+  const match = url === null ? null : UPSTREAM_PULL.exec(url);
+  return url === null || match === null ? null : { url, number: Number(match[1]) };
+}
+
+/**
+ * Whether a `?review=sent` (which any link can carry) is backed by the task's
+ * status: it shows a pull request on verastd/forge-app, and the one named
+ * when the query names one.
+ */
+export function reviewSentBy(status: Pick<BridgeStatus, 'prUrl'> | null, pr: number | undefined): boolean {
+  const found = upstreamPullRequest(status);
+  return found !== null && (pr === undefined || found.number === pr);
+}
+
+/** Stages at which the task's pull request is open (or merged): checks, review, shipping. */
+const PR_STAGES: ReadonlySet<BridgeStage> = new Set(['in_checks', 'in_review', 'shipping', 'shipped']);
+
+/** Where "Send for review" stands: nothing to send yet, something to send, or sent. */
+export type ReviewState = 'waiting' | 'ready' | 'sent';
+
+/**
+ * Step 3's state, from the task (`canSendForReview`, the API's word that the
+ * task's branch in the copy is ahead and no pull request is known) and its
+ * status:
+ * - `sent` once a pull request is open or merged (the practice app, which
+ *   has no real one: once its pretend review went out, a `review_sent`
+ *   event, or its pretend agent said it opened one);
+ * - `ready` when the API says so, or the agent said it pushed or is done;
+ * - `waiting` otherwise, and while the status hasn't been read yet, so a
+ *   stale `canSendForReview` never offers a second pull request.
+ */
+export function reviewState(
+  detail: Pick<TaskDetail, 'canSendForReview'>,
+  status: Pick<BridgeStatus, 'stage' | 'prUrl' | 'events'> | null,
+  practice: boolean,
+): ReviewState {
+  if (status === null) return 'waiting';
+  const sent = practice
+    ? status.events.some(
+        (event) => event.kind === 'review_sent' || (event.source === 'agent' && event.stage === 'pr_opened'),
+      )
+    : upstreamPullRequest(status) !== null && PR_STAGES.has(status.stage);
+  if (sent) return 'sent';
+  if (detail.canSendForReview === true) return 'ready';
+  const pushed = status.events.some(
+    (event) =>
+      event.source === 'agent' && event.kind === 'progress' && (event.stage === 'pushed' || event.stage === 'done'),
+  );
+  return pushed ? 'ready' : 'waiting';
 }
 
 /* --- untrusted text and links ---------------------------------------------------- */

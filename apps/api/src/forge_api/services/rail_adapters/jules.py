@@ -29,7 +29,6 @@ Not proven live (docs/live-tests.md, test 3):
 from typing import Any
 
 from forge_api.services.rail_adapters.base import (
-    FORK_REPO_NAME,
     AdapterError,
     AdapterRequest,
     AdapterResult,
@@ -64,16 +63,19 @@ def _bad_key(response: VendorResponse, text: str) -> bool:
     return "api key not valid" in text or "api_key_invalid" in text or "api key expired" in text
 
 
-def _connect_sentence(login: str) -> str:
+def _connect_sentence(fork: str) -> str:
     return (
-        f"Jules can't use your fork yet. Sign in at jules.google.com, connect GitHub, "
-        f"and give the Jules app access to {login}/{FORK_REPO_NAME}. Then try again."
+        f"Jules can't use your copy yet. Sign in at jules.google.com, connect GitHub, "
+        f"and give the Jules app access to {fork}. Then try again."
     )
 
 
-def _matches(source: Any, login: str) -> bool:
+def _matches(source: Any, fork: str) -> bool:
+    """Whether a Jules source is `fork` (`owner/name`: the contributor's copy, or
+    `<login>/forge-app`)."""
     if not isinstance(source, dict):
         return False
+    login, _, fork_name = fork.partition("/")
     repo = source.get("githubRepo")
     if isinstance(repo, dict):
         owner, name = repo.get("owner"), repo.get("repo")
@@ -81,12 +83,12 @@ def _matches(source: Any, login: str) -> bool:
             isinstance(owner, str)
             and isinstance(name, str)
             and owner.lower() == login.lower()
-            and name.lower() == FORK_REPO_NAME
+            and name.lower() == fork_name.lower()
         )
     name = source.get("name")
     candidates = {
-        f"sources/github/{login}/{FORK_REPO_NAME}".lower(),
-        f"sources/github-{login}-{FORK_REPO_NAME}".lower(),
+        f"sources/github/{login}/{fork_name}".lower(),
+        f"sources/github-{login}-{fork_name}".lower(),
     }
     return isinstance(name, str) and name.lower() in candidates
 
@@ -149,14 +151,14 @@ class JulesAdapter(RailAdapter):
             body = json_body(response, vendor=self.vendor)
             sources = body.get("sources")
             for source in sources if isinstance(sources, list) else []:
-                if _matches(source, request.login) and isinstance(source.get("name"), str):
+                if _matches(source, request.fork) and isinstance(source.get("name"), str):
                     name: str = source["name"]
                     return name
             next_token = body.get("nextPageToken")
             if not isinstance(next_token, str) or not next_token:
                 break
             token = next_token
-        raise AdapterError("rail_setup_needed", 404, _connect_sentence(request.login))
+        raise AdapterError("rail_setup_needed", 404, _connect_sentence(request.fork))
 
     def start(self, request: AdapterRequest) -> AdapterResult:
         source = self.find_source(request)
@@ -166,7 +168,7 @@ class JulesAdapter(RailAdapter):
                 response.status in (400, 412)
                 and any(word in text for word in ("source", "repo", "github", "precondition"))
             ):
-                return _connect_sentence(request.login)
+                return _connect_sentence(request.fork)
             return None
 
         response = self.call(

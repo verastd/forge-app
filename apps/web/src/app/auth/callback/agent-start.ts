@@ -3,12 +3,14 @@
  * callback's `agent` branch, once the code is exchanged): check the token
  * belongs to the account signed in here, start Copilot with it, and revoke it
  * afterwards, whatever happened, so it is good for that one start and no
- * more.
+ * more. The steps themselves are `withOneTimeToken` (`../one-time-token.ts`),
+ * which "your copy" and "Send for review" share.
  *
  * Each step comes in as a function, so tests/e2e/hardening.spec.ts runs this
  * without GitHub or the API. Nothing here logs, keeps or returns the token.
  */
 import type { ApiOutcome } from '../../../lib/bff-forward';
+import { withOneTimeToken } from '../one-time-token';
 
 export interface TokenSteps {
   /** The token's GitHub user id, in decimal. Throws when GitHub won't say. */
@@ -25,10 +27,5 @@ export interface TokenSteps {
  * throws, after the token is revoked.
  */
 export async function startWithToken(token: string, sessionSub: string, steps: TokenSteps): Promise<ApiOutcome> {
-  try {
-    if ((await steps.userIdOf(token)) !== sessionSub) return { ok: false, code: 'wrong_account' };
-    return await steps.dispatch(token);
-  } finally {
-    await steps.revoke(token);
-  }
+  return withOneTimeToken(token, sessionSub, { userIdOf: steps.userIdOf, act: steps.dispatch, revoke: steps.revoke });
 }

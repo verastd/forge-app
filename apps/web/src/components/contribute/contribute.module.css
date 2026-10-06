@@ -260,3 +260,49 @@
   padding-top: 4px;
   padding-bottom: 4px;
 }
+
+/* The task page's three steps (Phase 7): Your copy, Your agent, Send for
+ * review. The number is a badge like the setup steps' (.steps in
+ * globals.css); a done step shows a tick in the ok colour. */
+.stepTitle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  overflow-wrap: anywhere;
+}
+
+.stepNumber {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-xs);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.stepDone {
+  background: var(--ok-soft);
+  border-color: var(--ok-line);
+  color: var(--ok);
+}
+
+.stepForm {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+/* A repository's owner/name: it can be long, and must wrap on a phone. */
+.copyName {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}

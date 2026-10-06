@@ -1211,6 +1211,9 @@ ROUTES = [
     ("get", "/api/bridge/me/keys", None),
     ("delete", "/api/bridge/me/keys/jules", None),
     ("get", "/api/bridge/me/fork", None),
+    # Phase 7: "your copy" and "Send for review".
+    ("post", "/api/bridge/copy", {"taskId": CSV_TASK, "token": "test-only-token"}),
+    ("post", "/api/bridge/review", {"taskId": CSV_TASK, "token": "test-only-token"}),
 ]
 #: Seeing and removing your saved keys works whatever the switches say (web M1).
 SAVED_KEY_ROUTES = {("get", "/api/bridge/me/keys"), ("delete", "/api/bridge/me/keys/jules")}
