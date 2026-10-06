@@ -1039,6 +1039,10 @@ AVATAR_PLACEMENT_SCALE_MIN: Final = 0.01
 AVATAR_PLACEMENT_SCALE_MAX: Final = 10
 AVATAR_PLACEMENT_REACH: Final = 1
 AVATAR_PLACEMENT_EYE_ANGLE: Final = 1.2
+AVATAR_PLACEMENT_EYE_SCALE_MIN: Final = 0.5
+AVATAR_PLACEMENT_EYE_SCALE_MAX: Final = 2.5
+AVATAR_PLACEMENT_SCREEN_MIN: Final = 0.01
+AVATAR_PLACEMENT_SCREEN_MAX: Final = 0.6
 
 _HexColor = Annotated[str, Field(pattern=r"^#[0-9a-f]{6}$")]
 _AvatarHeadId = Annotated[str, Field(pattern=AVATAR_HEAD_ID)]
@@ -1067,8 +1071,25 @@ class Avatar(BaseModel):
     memberId: _AvatarMemberId
     colors: AvatarColors
     head: _AvatarHeadId | None = None
+    #: A face accessory worn over the head; None: none.
+    accessory: _AvatarHeadId | None = None
     chest: _Sha256 | None = None
     updatedAt: str
+
+
+_ScreenSide = Annotated[
+    float,
+    Field(ge=AVATAR_PLACEMENT_SCREEN_MIN, le=AVATAR_PLACEMENT_SCREEN_MAX, allow_inf_nan=False),
+]
+
+
+class AvatarHeadScreen(BaseModel):
+    """A shiny black LED face screen across a replacing head's face opening."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    center: _PlacementPoint
+    size: tuple[_ScreenSide, _ScreenSide]
 
 
 class AvatarHeadPlacement(BaseModel):
@@ -1086,6 +1107,20 @@ class AvatarHeadPlacement(BaseModel):
     eyes: tuple[_PlacementPoint, _PlacementPoint] | None = None
     #: [slant, turn, pitch] radians for the left eye, mirrored for the right.
     eyeAngles: tuple[_EyeAngle, _EyeAngle, _EyeAngle] | None = None
+    #: The glowing eyes' size, times their own.
+    eyeScale: (
+        Annotated[
+            float,
+            Field(
+                ge=AVATAR_PLACEMENT_EYE_SCALE_MIN,
+                le=AVATAR_PLACEMENT_EYE_SCALE_MAX,
+                allow_inf_nan=False,
+            ),
+        ]
+        | None
+    ) = None
+    #: A face screen across the face opening; None: the model's own face.
+    screen: AvatarHeadScreen | None = None
 
 
 #: A head worn as its file says.
@@ -1100,6 +1135,8 @@ class AvatarHead(BaseModel):
     fit: AvatarHeadFit
     eyes: bool
     placement: AvatarHeadPlacement = AVATAR_PLACEMENT_AS_IS
+    #: The member it was made for; None: nobody yet.
+    owner: _AvatarMemberId | None = None
     updatedAt: str
 
 
@@ -1113,6 +1150,7 @@ class AvatarUpdate(BaseModel):
 
     colors: AvatarColors
     head: _AvatarHeadId | None = None
+    accessory: _AvatarHeadId | None = None
 
 
 class AvatarChestUpload(BaseModel):
@@ -1129,12 +1167,19 @@ class AvatarHeadUpload(BaseModel):
     fit: AvatarHeadFit
     data: Annotated[str, Field(min_length=1)]
     placement: AvatarHeadPlacement | None = None
+    owner: _AvatarMemberId | None = None
 
 
 class AvatarHeadRefit(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     placement: AvatarHeadPlacement
+
+
+class AvatarHeadOwner(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    owner: _AvatarMemberId | None
 
 
 class AvatarMember(BaseModel):

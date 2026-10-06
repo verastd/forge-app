@@ -34,11 +34,13 @@ export interface AvatarDirectory {
 export function lookFrom(list: AvatarList | null, id: string, name: string): RobotLook {
   const dressed = list?.avatars.find((avatar) => avatar.memberId === id);
   const head: AvatarHead | null = dressed?.head ? (list?.heads.find((h) => h.id === dressed.head) ?? null) : null;
+  const accessory: AvatarHead | null = dressed?.accessory ? (list?.heads.find((h) => h.id === dressed.accessory) ?? null) : null;
   return {
     id,
     name,
     colors: dressed?.colors ?? defaultColors(id),
     head,
+    accessory,
     chest: dressed?.chest ?? null,
   };
 }

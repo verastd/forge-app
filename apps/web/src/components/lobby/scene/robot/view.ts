@@ -29,7 +29,7 @@
 
 import * as THREE from 'three';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { FACE_PANEL, HEAD_ANCHOR, createBlinker, eyeRotations, hashId, robotPose } from '@forge/lobby';
+import { FACE_PANEL, HEAD_ANCHOR, HEAD_FIT, createBlinker, eyeRotations, hashId, robotPose } from '@forge/lobby';
 import type { AvatarColors, Blinker, MotionInput, MotionPose } from '@forge/lobby';
 import type { AvatarHead } from '@forge/shared';
 
@@ -61,6 +61,8 @@ export interface RobotLook {
   name: string;
   colors: AvatarColors;
   head: AvatarHead | null;
+  /** A face accessory worn over the head (its own or a library one); absent or null: none. */
+  accessory?: AvatarHead | null;
   /** The chest image's sha256; null wears the generated emblem. */
   chest: string | null;
 }
@@ -68,14 +70,27 @@ export interface RobotLook {
 /** A look's identity, to tell when it changed. */
 export function lookKey(look: RobotLook): string {
   const { colors: c } = look;
-  return [look.name, c.shell, c.trim, c.accent, c.eye, look.head?.sha256 ?? '', look.head?.fit ?? '', placementKey(look.head), look.chest ?? ''].join('|');
+  const accessory = look.accessory ?? null;
+  return [
+    look.name,
+    c.shell,
+    c.trim,
+    c.accent,
+    c.eye,
+    look.head?.sha256 ?? '',
+    look.head?.fit ?? '',
+    placementKey(look.head),
+    accessory?.sha256 ?? '',
+    placementKey(accessory),
+    look.chest ?? '',
+  ].join('|');
 }
 
 /** A head's placement, to tell when only that changed. */
 function placementKey(head: AvatarHead | null): string {
   if (!head) return '';
-  const { scale, offset, eyes, eyeAngles } = head.placement;
-  return JSON.stringify([scale, offset, eyes ?? null, eyeAngles ?? null]);
+  const { scale, offset, eyes, eyeAngles, eyeScale, screen } = head.placement;
+  return JSON.stringify([scale, offset, eyes ?? null, eyeAngles ?? null, eyeScale ?? null, screen ?? null]);
 }
 
 /** Where `node` sits in `ancestor`'s frame (ancestor's own transform left out). */
@@ -109,7 +124,7 @@ export interface RobotView {
    * the model, or else on the face screen's plane (what an eye hole shows),
    * in the head frame and in the file's own frame. Null with no head worn.
    */
-  pickHead(raycaster: THREE.Raycaster): HeadPick | null;
+  pickHead(raycaster: THREE.Raycaster, target?: 'head' | 'accessory'): HeadPick | null;
   dispose(): void;
 }
 
@@ -154,6 +169,63 @@ function roleOf(name: string): keyof AvatarColors | 'joint' | null {
     if (lower.startsWith(role)) return role;
   }
   return null;
+}
+
+/** A shiny black LED face screen: a rounded panel, the same for every robot (sized per head). */
+let screenGeometry: THREE.ShapeGeometry | null = null;
+function sharedScreenGeometry(): THREE.ShapeGeometry {
+  if (!screenGeometry) {
+    // A unit panel (1 x 1, corners rounded as on a 0.25 m screen), scaled to each screen's size.
+    const r = 0.06;
+    const shape = new THREE.Shape();
+    shape.moveTo(-0.5 + r, -0.5);
+    shape.lineTo(0.5 - r, -0.5);
+    shape.quadraticCurveTo(0.5, -0.5, 0.5, -0.5 + r);
+    shape.lineTo(0.5, 0.5 - r);
+    shape.quadraticCurveTo(0.5, 0.5, 0.5 - r, 0.5);
+    shape.lineTo(-0.5 + r, 0.5);
+    shape.quadraticCurveTo(-0.5, 0.5, -0.5, 0.5 - r);
+    shape.lineTo(-0.5, -0.5 + r);
+    shape.quadraticCurveTo(-0.5, -0.5, -0.5 + r, -0.5);
+    screenGeometry = new THREE.ShapeGeometry(shape, 4);
+  }
+  return screenGeometry;
+}
+
+/**
+ * The cut a face screen makes in its head (the head file's frame): whatever
+ * of the model stands in front of the screen inside its opening is not drawn,
+ * so the model's own sculpted eyes don't poke through. Shared by a head's
+ * materials; `on` 0 cuts nothing.
+ */
+interface HeadCut {
+  on: { value: number };
+  rect: { value: THREE.Vector4 };
+  z: { value: number };
+}
+
+/** Teaches a head material the screen's cut; `toRoot` is its mesh's transform within the head file. */
+function cutHeadMaterial(material: THREE.Material, cut: HeadCut, toRoot: THREE.Matrix4): void {
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.uCutOn = cut.on;
+    shader.uniforms.uCutRect = cut.rect;
+    shader.uniforms.uCutZ = cut.z;
+    shader.uniforms.uMeshToRoot = { value: toRoot };
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nuniform mat4 uMeshToRoot;\nvarying vec3 vHeadPos;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvHeadPos = (uMeshToRoot * vec4(transformed, 1.0)).xyz;');
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        '#include <common>\nuniform float uCutOn;\nuniform vec4 uCutRect;\nuniform float uCutZ;\nvarying vec3 vHeadPos;',
+      )
+      .replace(
+        'void main() {',
+        'void main() {\n  if (uCutOn > 0.5 && vHeadPos.z > uCutZ && vHeadPos.x > uCutRect.x && vHeadPos.x < uCutRect.z && vHeadPos.y > uCutRect.y && vHeadPos.y < uCutRect.w) discard;',
+      );
+  };
+  material.customProgramCacheKey = () => 'forge-head-cut';
+  material.needsUpdate = true;
 }
 
 interface Bones {
@@ -301,6 +373,23 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
     slot.add(socket);
     return socket;
   });
+  // A replacing head's face screen, and the cut it makes in the head.
+  const headCut: HeadCut = { on: { value: 0 }, rect: { value: new THREE.Vector4() }, z: { value: 0 } };
+  const screenMaterial = new THREE.MeshPhysicalMaterial({
+    color: 0x030305,
+    roughness: 0.16,
+    metalness: 0,
+    clearcoat: 1,
+    clearcoatRoughness: 0.06,
+    envMap: assets.envMap,
+    envMapIntensity: 0.9,
+    side: THREE.DoubleSide,
+  });
+  const screen = new THREE.Mesh(sharedScreenGeometry(), screenMaterial);
+  screen.name = 'face-screen';
+  screen.visible = false;
+  slot.add(screen);
+
   // A replacing head's eyes: where its placement, or its EyeL/EyeR, put them.
   const fittedSockets = [0, 1].map(() => {
     const socket = new THREE.Group();
@@ -324,6 +413,10 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
   let headObject: THREE.Object3D | null = null;
   let headMaterials: THREE.Material[] = [];
   let pendingHead: string | null = null;
+  let accessoryObject: THREE.Object3D | null = null;
+  let accessoryMaterials: THREE.Material[] = [];
+  let pendingAccessory: string | null = null;
+  let accessoryRetryAt: number | null = null;
   let pendingChest: string | null = null;
   /** When to try a failed head or chest image again (performance.now() ms), or null. */
   let headRetryAt: number | null = null;
@@ -342,8 +435,20 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
   };
 
   const tintHead = (): void => {
-    for (const each of headMaterials) {
-      const role = roleOf(each.name);
+    tint(headMaterials);
+    tint(accessoryMaterials);
+  };
+
+  /**
+   * Paints a worn model's materials: those named for a colour take it; a plain
+   * model (no texture, no material named for a colour, as a modeller's
+   * untextured export comes) takes the robot's armour colour; a textured one
+   * keeps its own look.
+   */
+  const tint = (materials: THREE.Material[]): void => {
+    const plain = materials.every((each) => !roleOf(each.name) && !(each as THREE.MeshStandardMaterial).map);
+    for (const each of materials) {
+      const role = roleOf(each.name) ?? (plain ? 'shell' : null);
       const standard = each as THREE.MeshStandardMaterial;
       if (!role || !standard.color) continue;
       const hex = role === 'joint' ? JOINT_COLOR : look.colors[role];
@@ -355,10 +460,29 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
   /** Scales and moves the worn head as `head.placement` says, and puts a replacing head's eyes. */
   const placeHead = (head: AvatarHead): void => {
     if (!headObject) return;
-    const { scale, offset, eyes, eyeAngles } = head.placement;
+    const { scale, offset, eyes, eyeAngles, eyeScale, screen: panel } = head.placement;
     const turns = eyeRotations(eyeAngles);
+    const eyeSize = eyeScale ?? 1;
     headObject.scale.setScalar(scale);
     headObject.position.set(offset[0], offset[1], offset[2]);
+    const face = head.fit === 'replace' ? panel : null;
+    screen.visible = Boolean(face);
+    headCut.on.value = face ? 1 : 0;
+    if (face) {
+      const [w, h] = face.size;
+      screen.position.set(face.center[0], face.center[1], face.center[2]);
+      screen.scale.set(w, h, 1);
+      // Cut the opening only (the screen tucks behind the frame round it), in the file's frame.
+      const tuck = HEAD_FIT.screenTuck;
+      const toFile = (v: number, axis: 0 | 1 | 2): number => (v - offset[axis]) / scale;
+      headCut.rect.value.set(
+        toFile(face.center[0] - w / 2 + tuck, 0),
+        toFile(face.center[1] - h / 2 + tuck, 1),
+        toFile(face.center[0] + w / 2 - tuck, 0),
+        toFile(face.center[1] + h / 2 - tuck, 1),
+      );
+      headCut.z.value = toFile(face.center[2], 2);
+    }
     if (head.fit !== 'replace') return;
     if (eyes) {
       eyes.forEach((eye, i) => {
@@ -366,7 +490,7 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
         socket.position.set(eye[0], eye[1], eye[2]);
         const [x, y, z] = turns[i]!;
         socket.rotation.set(x, y, z, 'YXZ');
-        socket.scale.setScalar(1);
+        socket.scale.setScalar(eyeSize);
       });
       placeEyes(fittedSockets);
       return;
@@ -386,7 +510,7 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
       } else {
         socket.quaternion.copy(mark.quaternion);
       }
-      socket.scale.copy(mark.scale);
+      socket.scale.copy(mark.scale).multiplyScalar(eyeSize);
     });
     placeEyes(fittedSockets);
   };
@@ -400,7 +524,80 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
       headMaterials = [];
     }
     uniforms.uHideHead.value = 0;
+    screen.visible = false;
+    headCut.on.value = 0;
     placeEyes(ownSockets);
+  };
+
+  /** Loads a library model's own copy for this robot: its materials cloned, double-sided, lit by the robots' map. */
+  const cloneModel = (
+    scene: THREE.Object3D,
+    prepare: (material: THREE.Material, toRoot: THREE.Matrix4) => void,
+  ): { object: THREE.Object3D; materials: THREE.Material[] } => {
+    const object = scene.clone(true);
+    const materials: THREE.Material[] = [];
+    object.updateMatrixWorld(true);
+    const rootInverse = object.matrixWorld.clone().invert();
+    object.traverse((child) => {
+      const meshChild = child as THREE.Mesh;
+      if (!meshChild.isMesh) return;
+      // Where this mesh sits within the model's file.
+      const toRoot = rootInverse.clone().multiply(meshChild.matrixWorld);
+      const list = Array.isArray(meshChild.material) ? meshChild.material : [meshChild.material];
+      const cloned = list.map((m) => {
+        const copy = m.clone();
+        // Modellers' meshes often face some triangles inward: drawn from both sides, a model never shows holes.
+        copy.side = THREE.DoubleSide;
+        prepare(copy, toRoot);
+        const standard = copy as THREE.MeshStandardMaterial;
+        if ('envMap' in standard) {
+          standard.envMap = assets.envMap;
+          standard.envMapIntensity = 0.55;
+        }
+        materials.push(copy);
+        return copy;
+      });
+      meshChild.material = Array.isArray(meshChild.material) ? cloned : cloned[0]!;
+    });
+    return { object, materials };
+  };
+
+  const placeAccessory = (accessory: AvatarHead): void => {
+    if (!accessoryObject) return;
+    const { scale, offset } = accessory.placement;
+    accessoryObject.scale.setScalar(scale);
+    accessoryObject.position.set(offset[0], offset[1], offset[2]);
+  };
+
+  const dropAccessory = (): void => {
+    if (!accessoryObject) return;
+    accessoryObject.removeFromParent();
+    for (const each of accessoryMaterials) each.dispose();
+    accessoryObject = null;
+    accessoryMaterials = [];
+  };
+
+  const wearAccessory = (accessory: AvatarHead): void => {
+    pendingAccessory = accessory.sha256;
+    assets.head(accessory.sha256).then(
+      (gltf) => {
+        if (disposed || pendingAccessory !== accessory.sha256) return;
+        pendingAccessory = null;
+        dropAccessory();
+        const { object, materials } = cloneModel(gltf.scene, () => undefined);
+        accessoryObject = object;
+        accessoryMaterials = materials;
+        tint(accessoryMaterials);
+        slot.add(object);
+        placeAccessory(look.accessory?.sha256 === accessory.sha256 ? look.accessory : accessory);
+      },
+      () => {
+        // It didn't load: none for now, tried again in a while.
+        if (disposed || pendingAccessory !== accessory.sha256) return;
+        pendingAccessory = null;
+        accessoryRetryAt = performance.now() + RETRY_MS;
+      },
+    );
   };
 
   const wearHead = (head: AvatarHead): void => {
@@ -410,24 +607,8 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
         if (disposed || pendingHead !== head.sha256) return;
         pendingHead = null;
         dropHead();
-        const object = gltf.scene.clone(true);
-        const materials: THREE.Material[] = [];
-        object.traverse((child) => {
-          const meshChild = child as THREE.Mesh;
-          if (!meshChild.isMesh) return;
-          const list = Array.isArray(meshChild.material) ? meshChild.material : [meshChild.material];
-          const cloned = list.map((m) => {
-            const copy = m.clone();
-            const standard = copy as THREE.MeshStandardMaterial;
-            if ('envMap' in standard) {
-              standard.envMap = assets.envMap;
-              standard.envMapIntensity = 0.55;
-            }
-            materials.push(copy);
-            return copy;
-          });
-          meshChild.material = Array.isArray(meshChild.material) ? cloned : cloned[0]!;
-        });
+        // The face screen's cut, in the head file's frame.
+        const { object, materials } = cloneModel(gltf.scene, (material, toRoot) => cutHeadMaterial(material, headCut, toRoot));
         headObject = object;
         headMaterials = materials;
         tintHead();
@@ -504,6 +685,16 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
       tintHead();
       if (next.head && placementKey(previous.head) !== placementKey(next.head)) placeHead(next.head);
     }
+    const before = previous.accessory ?? null;
+    const after = next.accessory ?? null;
+    if (first || before?.sha256 !== after?.sha256) {
+      pendingAccessory = null;
+      accessoryRetryAt = null;
+      dropAccessory();
+      if (after) wearAccessory(after);
+    } else if (after && placementKey(before) !== placementKey(after)) {
+      placeAccessory(after);
+    }
     const emblemChanged = !next.chest && (previous.name !== next.name || previous.colors.accent !== next.colors.accent || previous.colors.eye !== next.colors.eye);
     if (first || previous.chest !== next.chest || emblemChanged) {
       chestRetryAt = null;
@@ -513,12 +704,13 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
 
   setLook(initial);
 
-  const pickHead = (raycaster: THREE.Raycaster): HeadPick | null => {
-    const head = look.head;
-    if (!head || !headObject) return null;
+  const pickHead = (raycaster: THREE.Raycaster, target: 'head' | 'accessory' = 'head'): HeadPick | null => {
+    const head = target === 'head' ? look.head : (look.accessory ?? null);
+    const object = target === 'head' ? headObject : accessoryObject;
+    if (!head || !object) return null;
     root.updateMatrixWorld(true);
     const toHead = slot.matrixWorld.clone().invert();
-    const hit = raycaster.intersectObject(headObject, true)[0];
+    const hit = raycaster.intersectObject(object, true)[0];
     let at: THREE.Vector3 | null;
     let normal: [number, number, number] | null = null;
     if (hit) {
@@ -533,7 +725,10 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
       }
     } else {
       const ray = raycaster.ray.clone().applyMatrix4(toHead);
-      at = ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 0, 1), -(FACE_PANEL.z + 0.004)), new THREE.Vector3());
+      // Seen through (an eye hole): where the eyes are, on a replacing head's face or the robot's own.
+      const worn = look.head?.fit === 'replace' ? look.head.placement.eyes : null;
+      const faceZ = worn ? Math.min(worn[0][2], worn[1][2]) : FACE_PANEL.z + 0.004;
+      at = ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 0, 1), -faceZ), new THREE.Vector3());
     }
     if (!at) return null;
     const { scale, offset } = head.placement;
@@ -553,15 +748,19 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
       return look;
     },
     get state() {
-      return pendingHead !== null || pendingChest !== null || holding ? 'loading' : 'ready';
+      return pendingHead !== null || pendingAccessory !== null || pendingChest !== null || holding ? 'loading' : 'ready';
     },
     setLook,
     holdChest(loading) {
       holding = loading;
     },
     update(frame) {
-      if (headRetryAt !== null || chestRetryAt !== null) {
+      if (headRetryAt !== null || accessoryRetryAt !== null || chestRetryAt !== null) {
         const now = performance.now();
+        if (accessoryRetryAt !== null && now >= accessoryRetryAt) {
+          accessoryRetryAt = null;
+          if (look.accessory) wearAccessory(look.accessory);
+        }
         if (headRetryAt !== null && now >= headRetryAt) {
           headRetryAt = null;
           if (look.head) wearHead(look.head);
@@ -603,11 +802,13 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
     dispose() {
       disposed = true;
       dropHead();
+      dropAccessory();
       root.removeFromParent();
       material.dispose();
       eyeMaterial.dispose();
       haloMaterial.dispose();
       flameMaterial.dispose();
+      screenMaterial.dispose();
       // The skeleton's bone texture is this robot's own.
       skinned?.skeleton.dispose();
     },

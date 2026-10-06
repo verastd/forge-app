@@ -1286,6 +1286,8 @@ export const AvatarSchema = z.object({
   colors: AvatarColorsSchema,
   /** A library head's id; absent: the robot's own head. */
   head: z.string().regex(AVATAR_HEAD_ID).optional(),
+  /** A face accessory (a head whose fit is `accessory`) worn over the head; absent: none. */
+  accessory: z.string().regex(AVATAR_HEAD_ID).optional(),
   /** The chestplate image's sha256; absent: a generated emblem. */
   chest: z.string().regex(AVATAR_SHA256).optional(),
   updatedAt: z.string(),
@@ -1297,6 +1299,12 @@ export const AVATAR_PLACEMENT_SCALE_MIN = 0.01;
 export const AVATAR_PLACEMENT_SCALE_MAX = 10;
 export const AVATAR_PLACEMENT_REACH = 1;
 export const AVATAR_PLACEMENT_EYE_ANGLE = 1.2;
+/** The smallest and largest a fitted head's glowing eyes may be, times their own size. */
+export const AVATAR_PLACEMENT_EYE_SCALE_MIN = 0.5;
+export const AVATAR_PLACEMENT_EYE_SCALE_MAX = 2.5;
+/** The smallest and largest a face screen may be across or down, metres. */
+export const AVATAR_PLACEMENT_SCREEN_MIN = 0.01;
+export const AVATAR_PLACEMENT_SCREEN_MAX = 0.6;
 
 const placementPoint = z.tuple([
   z.number().min(-AVATAR_PLACEMENT_REACH).max(AVATAR_PLACEMENT_REACH),
@@ -1312,6 +1320,15 @@ const placementPoint = z.tuple([
  * right, in that same frame), ahead of any EyeL/EyeR in the file; absent or
  * null, the file's own.
  */
+export const AvatarHeadScreenSchema = z.object({
+  center: placementPoint,
+  size: z.tuple([
+    z.number().min(AVATAR_PLACEMENT_SCREEN_MIN).max(AVATAR_PLACEMENT_SCREEN_MAX),
+    z.number().min(AVATAR_PLACEMENT_SCREEN_MIN).max(AVATAR_PLACEMENT_SCREEN_MAX),
+  ]),
+});
+export type AvatarHeadScreen = z.infer<typeof AvatarHeadScreenSchema>;
+
 export const AvatarHeadPlacementSchema = z.object({
   scale: z.number().min(AVATAR_PLACEMENT_SCALE_MIN).max(AVATAR_PLACEMENT_SCALE_MAX),
   offset: placementPoint,
@@ -1328,6 +1345,15 @@ export const AvatarHeadPlacementSchema = z.object({
       z.number().min(-AVATAR_PLACEMENT_EYE_ANGLE).max(AVATAR_PLACEMENT_EYE_ANGLE),
     ])
     .nullish(),
+  /** How big a replacing head's glowing eyes are, times their own size. Absent: 1. */
+  eyeScale: z.number().min(AVATAR_PLACEMENT_EYE_SCALE_MIN).max(AVATAR_PLACEMENT_EYE_SCALE_MAX).nullish(),
+  /**
+   * A shiny black LED face screen across a replacing head's face opening:
+   * its middle (head frame, metres) and its width and height. It closes an
+   * open screen cavity, covers the model's own sculpted eyes, and the glowing
+   * eyes sit on it. Absent: the model's own face (a face Tripo modelled).
+   */
+  screen: AvatarHeadScreenSchema.nullish(),
 });
 export type AvatarHeadPlacement = z.infer<typeof AvatarHeadPlacementSchema>;
 
@@ -1352,6 +1378,11 @@ export const AvatarHeadSchema = z.object({
    * an API older than fitting, which doesn't send one).
    */
   placement: AvatarHeadPlacementSchema.default(AVATAR_PLACEMENT_AS_IS),
+  /**
+   * The member it was made for: only they can wear it, and the editor offers
+   * it to nobody else. Absent: not given to anyone yet (no one can pick it).
+   */
+  owner: z.string().regex(AVATAR_MEMBER_ID).optional(),
   updatedAt: z.string(),
 });
 export type AvatarHead = z.infer<typeof AvatarHeadSchema>;
@@ -1367,6 +1398,7 @@ export type AvatarList = z.infer<typeof AvatarListSchema>;
 export const AvatarUpdateSchema = z.object({
   colors: AvatarColorsSchema,
   head: z.string().regex(AVATAR_HEAD_ID).optional(),
+  accessory: z.string().regex(AVATAR_HEAD_ID).optional(),
 });
 export type AvatarUpdate = z.infer<typeof AvatarUpdateSchema>;
 
@@ -1384,6 +1416,8 @@ export const AvatarHeadUploadSchema = z.object({
   data: z.string().min(1),
   /** How to wear it; absent: as the file is. */
   placement: AvatarHeadPlacementSchema.optional(),
+  /** The member it is made for; absent: keeps the one it has (a new head: nobody). */
+  owner: z.string().regex(AVATAR_MEMBER_ID).optional(),
 });
 export type AvatarHeadUpload = z.infer<typeof AvatarHeadUploadSchema>;
 
@@ -1392,6 +1426,12 @@ export const AvatarHeadRefitSchema = z.object({
   placement: AvatarHeadPlacementSchema,
 });
 export type AvatarHeadRefit = z.infer<typeof AvatarHeadRefitSchema>;
+
+/** `PUT /api/avatars/heads/{headId}/owner` (admins): give a head to a member, or to nobody (null). */
+export const AvatarHeadOwnerSchema = z.object({
+  owner: z.string().regex(AVATAR_MEMBER_ID).nullable(),
+});
+export type AvatarHeadOwner = z.infer<typeof AvatarHeadOwnerSchema>;
 
 /** A member an admin can dress, for the editor's list. */
 export const AvatarMemberSchema = z.object({
