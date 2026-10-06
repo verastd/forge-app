@@ -97,6 +97,9 @@ class FakeGitHub:
     #: Phase 7: upstream main's .github/forge-protocol.json (None: 404), served as the
     #: Contents API does, base64 in JSON.
     protocol: bytes | None = field(default_factory=PROTOCOL_FILE.read_bytes)
+    #: The manifest at particular upstream commits (None: not there), overriding `protocol`
+    #: for those commits only. The file is read at a commit id, never at a branch name.
+    protocol_at: dict[str, bytes | None] = field(default_factory=dict)
 
     def user_id(self, login: str) -> int:
         return self.ids.setdefault(login.lower(), 5000 + len(self.ids))
@@ -203,9 +206,11 @@ class FakeGitHub:
                 return json_response(404, {"message": "Not Found"})
             return json_response(200, repository)
         if path == "/repos/verastd/forge-app/contents/.github/forge-protocol.json":
-            if self.protocol is None or query.get("ref") != ["main"]:
+            ref = query.get("ref", [""])[0]
+            content = self.protocol_at.get(ref, self.protocol)
+            if content is None or len(ref) != 40 or not all(c in "0123456789abcdef" for c in ref):
                 return json_response(404, {"message": "Not Found"})
-            encoded = base64.b64encode(self.protocol).decode()
+            encoded = base64.b64encode(content).decode()
             return json_response(200, {"type": "file", "encoding": "base64", "content": encoded})
         if path.startswith("/repos/verastd/forge-app/compare/main..."):
             owner, _, branch = path.split("...", 1)[1].partition(":")

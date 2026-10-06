@@ -685,9 +685,11 @@ is returned rather than doubled.
    read up to 8 MiB: the commits ahead, the changed files (GitHub lists
    them on the first page only) and the head commit the comparison was
    made at (from its `permalink_url`; without one, `github_failed`).
-4. The rules, upstream main's `.github/forge-protocol.json`, read publicly
-   (below), never from the branch and never with the contributor's token;
-   then the pre-check.
+4. The rules, `.github/forge-protocol.json` as it is at the very main
+   commit the comparison was made against (its `base_commit`; without one,
+   `checks_unavailable`), read publicly (below), never from the branch and
+   never with the contributor's token; then the pre-check. So a change to
+   the rules can never be checked against older ones.
 5. `GET /repos/verastd/forge-app/pulls?head={owner}:{branch}&base=main&state=open`:
    the caller's own open pull request from the branch is returned
    (`200`, `created: false`) and recorded for the claim when it counts; one
@@ -1095,9 +1097,11 @@ holder's copy is ahead of upstream main
 (`GET /repos/verastd/forge-app/compare/main...<owner>:<branch>?per_page=1&page=2`:
 the comparison's second page, which carries the count without the changed
 files), and the rules Send for review checks a diff against
-(`GET /repos/verastd/forge-app/contents/.github/forge-protocol.json?ref=main`).
-Results are cached for 60 seconds (the fork check, a copy by its id and
-the rules for 5 minutes) in a bounded cache that drops its least recently used entry when
+(`GET /repos/verastd/forge-app/contents/.github/forge-protocol.json?ref=<commit>`,
+at the comparison's base commit).
+Results are cached for 60 seconds (the fork check and a copy by its id for
+5 minutes, the rules for an hour per commit, since a commit's content never
+changes) in a bounded cache that drops its least recently used entry when
 full. Each read gets 5 seconds in all, connecting and the whole answer
 included; inside a copy or a review it gets no more than what is left of
 the action's 40 seconds, and none starts after them (a read cut short that

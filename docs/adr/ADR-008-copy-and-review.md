@@ -177,9 +177,11 @@ cookie, and these are the only calls:
 
 **FORGE checks the diff before it sends anything.** The comparison's first
 page gives the commits ahead, the changed files and the head commit it was
-made at. FORGE reads the rules from upstream main's
-`.github/forge-protocol.json`, publicly, never from the branch and never
-with the contributor's token, and refuses before any write:
+made at, and the main commit it was made against. FORGE reads the rules
+from `.github/forge-protocol.json` at that very commit (so a change to the
+rules is never checked against older ones; no base commit means
+`503 checks_unavailable`), publicly, never from the branch and never with
+the contributor's token, and refuses before any write:
 
 - `409 too_large` when GitHub can't show the whole diff (300 files, its
   cap, or a comparison over 8 MiB) or the diff changes more than 20,000

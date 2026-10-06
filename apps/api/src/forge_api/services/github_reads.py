@@ -68,7 +68,8 @@ CHECKS_TTL_SECONDS = 60.0
 SEARCH_TTL_SECONDS = 60.0
 FORK_TTL_SECONDS = 300.0
 COMPARE_TTL_SECONDS = 60.0
-RULES_TTL_SECONDS = 300.0
+#: The rules are read at one commit, whose content never changes: kept for an hour.
+RULES_TTL_SECONDS = 3600.0
 REPOSITORY_TTL_SECONDS = 300.0
 #: Where upstream declares its protocol rules, and the most of it FORGE reads.
 PROTOCOL_PATH = ".github/forge-protocol.json"
@@ -91,6 +92,8 @@ MAX_BODY_SCAN = 20_000
 #: Conclusions that let a pull request through; everything else completed is a failure.
 PASSING = frozenset({"success", "neutral", "skipped"})
 _SHA = re.compile(r"[0-9a-f]{7,64}")
+#: A full commit id, as the protocol rules are read at.
+_COMMIT = re.compile(r"[0-9a-f]{40}")
 #: `[#12]` in a pull request title: AGENTS.md rule 8's `[#<issue>] <goal>`.
 _TITLE_REF = re.compile(r"\[#([1-9][0-9]{0,9})\]")
 #: "Fixes #12", "closes: #12", "Resolves #12" in a description: the link Foreman's G0 gate
@@ -748,16 +751,18 @@ class GitHubReads:
         found = self._cached(("repository", str(repo_id)), REPOSITORY_TTL_SECONDS, fetch)
         return found if isinstance(found, Repository) else None
 
-    def protocol_rules(self) -> ProtocolRules | None:
-        """Upstream main's protocol rules (cached for 5 minutes), or None when the file is
-        there but isn't a manifest Foreman would take. GitHubUnavailable when it can't be
-        read at all. Read from main, never from a pull request, so a diff can't loosen the
-        rules it is checked against."""
+    def protocol_rules(self, ref: str) -> ProtocolRules | None:
+        """The protocol rules as they are at upstream commit `ref` (40 lowercase hex: the
+        main a comparison was made against), or None when the file there isn't a manifest
+        Foreman would take, or `ref` isn't a commit id. GitHubUnavailable when it can't be
+        read at all. Cached by commit, whose content never changes, so a comparison is never
+        checked against the rules of another main; read from upstream, never from a pull
+        request, so a diff can't loosen the rules it is checked against."""
+        if not _COMMIT.fullmatch(ref):
+            return None
 
         def fetch() -> ProtocolRules | None:
-            response = self._get(
-                f"/repos/{UPSTREAM_REPO}/contents/{PROTOCOL_PATH}", {"ref": "main"}
-            )
+            response = self._get(f"/repos/{UPSTREAM_REPO}/contents/{PROTOCOL_PATH}", {"ref": ref})
             if not response.ok:
                 raise GitHubUnavailable(f"GitHub answered {response.status}")
             raw = self._json(response)
@@ -772,5 +777,5 @@ class GitHubReads:
                 return None
             return parse_protocol(data)
 
-        found = self._cached(("rules",), RULES_TTL_SECONDS, fetch)
+        found = self._cached(("rules", ref), RULES_TTL_SECONDS, fetch)
         return found if isinstance(found, ProtocolRules) else None

@@ -119,6 +119,8 @@ TEMPLATE_ATTESTATION = (
 
 #: A commit id: SHA-1, or SHA-256 in a repository that uses it.
 _SHA = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
+#: The commit upstream main was at for a comparison (its `base_commit`): 40 lowercase hex.
+_BASE_SHA = re.compile(r"[0-9a-f]{40}")
 #: The head commit a comparison was made at, from the end of its permalink
 #: (".../compare/verastd:<base sha>...<owner>:<head sha>").
 _COMPARED_HEAD = re.compile(r"\.\.\.(?:[A-Za-z0-9-]{1,39}:)?([0-9a-f]{40}|[0-9a-f]{64})$")
@@ -231,6 +233,9 @@ class Comparison:
     files: tuple[ChangedFile, ...]
     #: The head commit the comparison was made at (from its permalink), when GitHub said.
     head_sha: str | None = None
+    #: The commit upstream main was at for this comparison (`base_commit`), when GitHub said:
+    #: the diff is checked against the protocol rules as they are at that commit.
+    base_sha: str | None = None
 
 
 @dataclass(frozen=True)
@@ -520,10 +525,13 @@ def compare(gh: AsContributor, owner: str, branch: str) -> Comparison | None:
         raise github_failed("compare", STATUS_BAD_GATEWAY)
     link = body.get("permalink_url")
     head = _COMPARED_HEAD.search(link) if isinstance(link, str) else None
+    base = body.get("base_commit")
+    base_sha = base.get("sha") if isinstance(base, dict) else None
     return Comparison(
         ahead_by=ahead,
         files=tuple(file for file in files if file is not None),
         head_sha=head.group(1) if head else None,
+        base_sha=base_sha if isinstance(base_sha, str) and _BASE_SHA.fullmatch(base_sha) else None,
     )
 
 

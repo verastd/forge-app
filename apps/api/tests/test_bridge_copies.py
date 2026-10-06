@@ -106,6 +106,8 @@ class FakeAsUser:
     head: str = HEAD_SHA
     #: False: the pull request list ignores `base`, so FORGE's own check of it is what counts.
     honour_base: bool = True
+    #: Where upstream main is for a comparison (its `base_commit`).
+    base: str = UPSTREAM_SHA
     next_pull: int = 101
     #: Endpoint name -> an HTTP status, or "timeout", "garbage" (not JSON), "redirect".
     fail: dict[str, int | str] = field(default_factory=dict)
@@ -216,7 +218,7 @@ class FakeAsUser:
             listed = self.files if ahead > 0 else []
             permalink = (
                 "https://github.com/verastd/forge-app/compare/"
-                f"verastd:{UPSTREAM_SHA}...{head.split(':', 1)[0]}:{self.head}"
+                f"verastd:{self.base}...{head.split(':', 1)[0]}:{self.head}"
             )
             return json_response(
                 200,
@@ -225,6 +227,7 @@ class FakeAsUser:
                     "ahead_by": ahead,
                     "files": listed,
                     "permalink_url": permalink,
+                    "base_commit": {"sha": self.base},
                 },
             )
         if name == "list_pulls":
@@ -935,7 +938,7 @@ def test_send_for_review_opens_the_pull_request_as_the_contributor(
     # The rules were read publicly from upstream main, never with the contributor's token.
     (rules_read,) = [r for r in env.bridge.github.requests if "/contents/" in r.url.path]
     assert rules_read.url.path == "/repos/verastd/forge-app/contents/.github/forge-protocol.json"
-    assert rules_read.url.params["ref"] == "main"
+    assert rules_read.url.params["ref"] == UPSTREAM_SHA  # main as this diff saw it
     assert "Authorization" not in rules_read.headers
     # Recorded for the claim like any pull request: the stage follows it.
     lease = env.bridge.store.latest(CSV_TASK)
@@ -1105,7 +1108,15 @@ def test_pull_request_answers_that_cant_be_read(
         if "/compare/" in request.url.path:
             changed = [{"filename": "src/a.ts", "status": "modified"}]
             link = f"https://github.com/verastd/forge-app/compare/a...octo-contributor:{HEAD_SHA}"
-            return json_response(200, {"ahead_by": 1, "files": changed, "permalink_url": link})
+            return json_response(
+                200,
+                {
+                    "ahead_by": 1,
+                    "files": changed,
+                    "permalink_url": link,
+                    "base_commit": {"sha": UPSTREAM_SHA},
+                },
+            )
         if request.method == "GET":
             return json_response(200, answer)
         return json_response(201, {"number": 9})  # created, but nothing usable said about it
@@ -1756,25 +1767,31 @@ def test_the_rules_read_refuses_what_it_cant_decode(answer: Any) -> None:
         env={},
     )
     with pytest.raises(GitHubUnavailable):
-        reads.protocol_rules()
+        reads.protocol_rules(UPSTREAM_SHA)
 
 
-def test_the_rules_are_read_from_main_once_every_5_minutes(env: Env) -> None:
+def test_the_rules_are_read_once_per_commit_of_main(env: Env) -> None:
     reads = env.bridge.github.reads(lambda: env.bridge.clock().timestamp())
 
-    def asked() -> int:
-        return sum("/contents/" in r.url.path for r in env.bridge.github.requests)
+    def asked() -> list[str]:
+        found = [r for r in env.bridge.github.requests if "/contents/" in r.url.path]
+        return [r.url.params["ref"] for r in found]
 
-    assert reads.protocol_rules() is not None
-    assert reads.protocol_rules() is not None
-    assert asked() == 1
-    env.bridge.clock.advance(301)
-    assert reads.protocol_rules() is not None
-    assert asked() == 2
+    assert reads.protocol_rules(UPSTREAM_SHA) is not None
+    assert reads.protocol_rules(UPSTREAM_SHA) is not None
+    assert asked() == [UPSTREAM_SHA]  # a commit's content never changes: once is enough
+    assert reads.protocol_rules("e" * 40) is not None
+    assert asked() == [UPSTREAM_SHA, "e" * 40]  # another main, its own read
+    env.bridge.clock.advance(3601)
+    assert reads.protocol_rules(UPSTREAM_SHA) is not None
+    assert asked() == [UPSTREAM_SHA, "e" * 40, UPSTREAM_SHA]
+    for ref in ("main", "A" * 40, "a" * 39, "a" * 64, ""):
+        assert reads.protocol_rules(ref) is None  # only a full commit id is read at
+    assert len(asked()) == 3
 
 
 def test_the_rules_are_upstreams_own(env: Env) -> None:
-    rules = env.bridge.github.reads().protocol_rules()
+    rules = env.bridge.github.reads().protocol_rules(UPSTREAM_SHA)
     assert rules is not None
     assert "tests/**" in rules.test_globs and ".github/" in rules.protected_paths
     assert all(copies.glob_pattern(glob) is not None for glob in rules.test_globs)
@@ -2352,7 +2369,8 @@ def test_head_a_comparison_that_doesnt_say_which_commit_is_github_failed(
         if request.url.path == "/user":
             return json_response(200, {"id": 1001, "login": "octo-contributor"})
         changed = [{"filename": "src/a.ts", "status": "modified"}]
-        return json_response(200, {"ahead_by": 1, "files": changed})  # no permalink_url
+        base = {"sha": UPSTREAM_SHA}
+        return json_response(200, {"ahead_by": 1, "files": changed, "base_commit": base})
 
     env.bridge.monkeypatch.setattr(
         bridge_service, "_repo_client", httpx.Client(transport=httpx.MockTransport(respond))
@@ -2614,3 +2632,76 @@ def test_a_review_fits_the_40_seconds_too(
     assert post(client, "review", user_headers).status_code == 201
     assert env.poll.now - start == 28.0  # four calls of 7 s
     assert all(r.extensions["timeout"]["read"] <= 8.0 for r in env.github.requests)
+
+
+# --- The rules are main's as the diff saw it (PR review, Codex P1) ----------------------------
+
+
+def test_the_rules_are_those_of_the_main_each_diff_was_compared_with(
+    client: TestClient, env: Env, user_headers: dict[str, str]
+) -> None:
+    """Two reviews within 5 minutes. Between them main moves to a commit whose manifest
+    protects a file the second branch changes: the second is checked against that commit's
+    rules, never the first one's (a cache keyed by nothing but "the rules" would let it
+    through, and FORGE would attest)."""
+    first = branch_name(CSV_TASK, "Polish the CSV export in the Data app")
+    task_three = FixtureTaskSource().get_task(3)
+    assert task_three is not None
+    second = branch_name(3, task_three.title)
+    claim(client, user_headers)
+    claim(client, user_headers, task_id=3)
+    record_copy(env)
+    env.github.files = [{"filename": "src/a.ts", "status": "modified"}]
+    env.github.aheads[f"octo-contributor:{first}"] = 1
+    env.github.aheads[f"octo-contributor:{second}"] = 1
+    assert post(client, "review", user_headers).status_code == 201  # main at UPSTREAM_SHA
+    moved = "e" * 40
+    env.github.base = moved
+    env.bridge.github.protocol_at[moved] = json.dumps(
+        {"version": 1, "testGlobs": ["tests/**"], "protectedPaths": [".github/", "src/a.ts"]}
+    ).encode()
+    env.bridge.clock.advance(60)  # well inside 5 minutes
+    response = post(client, "review", user_headers, task_id=3)
+    assert (response.status_code, response.json()) == (
+        409,
+        {"error": "protected_paths", "paths": ["src/a.ts"]},
+    )
+    reads = [r.url.params["ref"] for r in env.bridge.github.requests if "/contents/" in r.url.path]
+    assert reads == [UPSTREAM_SHA, moved]
+
+
+@pytest.mark.parametrize(
+    "base",
+    [None, {"sha": None}, {"sha": "A" * 40}, {"sha": "a" * 39}, {"sha": "a" * 64}, "a" * 40],
+)
+def test_a_comparison_without_its_base_commit_is_checks_unavailable(
+    client: TestClient, env: Env, user_headers: dict[str, str], base: Any
+) -> None:
+    claim(client, user_headers)
+    record_copy(env)
+    seen: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.url.path == "/user":
+            return json_response(200, {"id": 1001, "login": "octo-contributor"})
+        answer: dict[str, Any] = {
+            "ahead_by": 1,
+            "files": [{"filename": "src/a.ts", "status": "modified"}],
+            "permalink_url": "https://github.com/verastd/forge-app/compare/"
+            f"verastd:{UPSTREAM_SHA}...octo-contributor:{HEAD_SHA}",
+        }
+        if base is not None:
+            answer["base_commit"] = base
+        return json_response(200, answer)
+
+    env.bridge.monkeypatch.setattr(
+        bridge_service, "_repo_client", httpx.Client(transport=httpx.MockTransport(respond))
+    )
+    response = post(client, "review", user_headers)
+    assert (response.status_code, response.json()) == (503, {"error": "checks_unavailable"})
+    assert [r.url.path for r in seen] == [
+        "/user",
+        f"/repos/verastd/forge-app/compare/main...octo-contributor:{CSV_BRANCH}",
+    ]  # nothing listed, nothing opened
+    assert not any("/contents/" in r.url.path for r in env.bridge.github.requests)

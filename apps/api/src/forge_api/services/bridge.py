@@ -2276,9 +2276,12 @@ class Bridge:
         checked = comparison.head_sha
         if checked is None:
             raise copies.github_failed("compare", STATUS_BAD_GATEWAY)
-        # The rules come from upstream main, read publicly; without them, no pull request.
+        # The rules as they are at the main this diff was compared with, read publicly from
+        # upstream; without them (or without that commit), no pull request.
+        if comparison.base_sha is None:
+            raise copies.checks_unavailable()
         try:
-            rules = self.github.protocol_rules()
+            rules = self.github.protocol_rules(comparison.base_sha)
         except GitHubUnavailable as exc:
             logger.warning("The protocol rules can't be read: %s", exc)
             rules = None
