@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { FACE_PANEL } from './avatar.js';
-import { HEAD_FIT, ROBOT_EYES, alignToEye, autoPlacement, nudge, placePoint, rescale } from './headFit.js';
+import { HEAD_FIT, ROBOT_EYES, alignToEye, anglesFromNormal, autoPlacement, eyeRotations, nudge, placePoint, rescale } from './headFit.js';
 import type { HeadPlacement, Point3 } from './headFit.js';
 
 /** A box's eight corners, flat. */
@@ -66,6 +66,20 @@ describe('autoPlacement, replacing the head', () => {
       expect(eye[2]).toBeCloseTo(screenFront + HEAD_FIT.eyeLift, 3);
       expect(eye[2]).toBeLessThan(rimFront);
     }
+    // A flat screen faces straight ahead.
+    expect(placement.eyeAngles).toEqual([0, 0, 0]);
+  });
+
+  it('turns its eyes in on a face whose halves angle toward the middle', () => {
+    // A V-shaped face: each half recedes toward the middle, so each faces in by atan(0.1 / 0.3).
+    const left = [-0.3, 0.02, 0.2, 0, 0.02, 0.1, 0, 0.38, 0.1, -0.3, 0.02, 0.2, 0, 0.38, 0.1, -0.3, 0.38, 0.2];
+    const right = left.map((v, i) => (i % 3 === 0 ? -v : v));
+    const shell = slab([-0.35, 0, -0.2], [0.35, 0.4, 0.05]);
+    const triangles = [...shell, ...left, ...right];
+    const placement = autoPlacement('replace', triangles, triangles);
+    expect(placement.eyeAngles?.[0]).toBe(0);
+    expect(placement.eyeAngles?.[1]).toBeCloseTo(Math.atan(0.1 / 0.3), 3);
+    expect(placement.eyeAngles?.[2]).toBeCloseTo(0, 4);
   });
 
   it('falls back to the band’s front when nothing of the model is in front of the eyes, and skips flat-on triangles', () => {
@@ -75,6 +89,7 @@ describe('autoPlacement, replacing the head', () => {
     const placement = autoPlacement('replace', shell, aside);
     const front = placePoint(placement, [0, 0, 0.3])[2];
     expect(placement.eyes?.[0]?.[2]).toBeCloseTo(front + HEAD_FIT.eyeLift, 3);
+    expect(placement.eyeAngles).toBeUndefined();
   });
 
   it('wears a model with nothing to measure as it is', () => {
@@ -111,6 +126,27 @@ describe('autoPlacement, a face accessory', () => {
     expect(placePoint(left, hole)[1]).toBeCloseTo(ROBOT_EYES[0][1], 3);
     expect(left.offset[2]).toBe(placement.offset[2]);
     expect(placePoint(alignToEye(placement, hole, 'right'), hole)[0]).toBeCloseTo(ROBOT_EYES[1][0], 3);
+  });
+});
+
+describe('eye angles', () => {
+  it('face a surface: turn toward the middle, mirrored, and pitch up', () => {
+    expect(anglesFromNormal([0, 0, 1], 'left')).toEqual([0, 0]);
+    const [turn] = anglesFromNormal([0.5, 0, 1], 'left');
+    expect(turn).toBeGreaterThan(0);
+    expect(anglesFromNormal([-0.5, 0, 1], 'right')[0]).toBeCloseTo(turn, 6);
+    expect(anglesFromNormal([0.5, 0, 1], 'right')[0]).toBeCloseTo(-turn, 6);
+    expect(anglesFromNormal([0, 0.5, 1], 'left')[1]).toBeCloseTo(Math.asin(0.5 / Math.hypot(0.5, 1)), 4);
+    expect(anglesFromNormal([0, 0, 0], 'left')).toEqual([0, 0]);
+    expect(anglesFromNormal([5, 0, 0.01], 'left')[0]).toBe(HEAD_FIT.eyeAngle);
+  });
+
+  it('rotate the two eyes as mirror images', () => {
+    expect(eyeRotations(null)).toEqual([[0, 0, 0], [0, 0, 0]]);
+    expect(eyeRotations([0.2, 0.3, 0.1])).toEqual([
+      [-0.1, 0.3, -0.2],
+      [-0.1, -0.3, 0.2],
+    ]);
   });
 });
 

@@ -88,14 +88,16 @@ register_schema(
             x REAL NOT NULL,
             y REAL NOT NULL,
             z REAL NOT NULL,
-            eyes TEXT
+            eyes TEXT,
+            eye_angles TEXT
         )""",
     ],
 )
 
 #: A head with how it is worn (the placement's columns are NULL when it has none).
 _HEAD_SELECT: Final = (
-    "SELECT h.*, p.scale AS p_scale, p.x AS p_x, p.y AS p_y, p.z AS p_z, p.eyes AS p_eyes "
+    "SELECT h.*, p.scale AS p_scale, p.x AS p_x, p.y AS p_y, p.z AS p_z, p.eyes AS p_eyes, "
+    "p.eye_angles AS p_eye_angles "
     "FROM avatars_heads h LEFT JOIN avatars_head_placements p ON p.head_id = h.id"
 )
 
@@ -334,8 +336,12 @@ def _placement(row: dict[str, Any]) -> AvatarHeadPlacement:
     if row["p_scale"] is None:
         return AVATAR_PLACEMENT_AS_IS
     eyes = json.loads(row["p_eyes"]) if row["p_eyes"] is not None else None
+    angles = json.loads(row["p_eye_angles"]) if row["p_eye_angles"] is not None else None
     return AvatarHeadPlacement(
-        scale=row["p_scale"], offset=(row["p_x"], row["p_y"], row["p_z"]), eyes=eyes
+        scale=row["p_scale"],
+        offset=(row["p_x"], row["p_y"], row["p_z"]),
+        eyes=eyes,
+        eyeAngles=angles,
     )
 
 
@@ -344,10 +350,11 @@ def _store_placement(db: StateDB, head_id: str, placement: AvatarHeadPlacement |
     if placement is None:
         return
     eyes = None if placement.eyes is None else json.dumps([list(eye) for eye in placement.eyes])
+    angles = None if placement.eyeAngles is None else json.dumps(list(placement.eyeAngles))
     db.execute(
-        "INSERT INTO avatars_head_placements (head_id, scale, x, y, z, eyes) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
-        (head_id, placement.scale, *placement.offset, eyes),
+        "INSERT INTO avatars_head_placements (head_id, scale, x, y, z, eyes, eye_angles) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (head_id, placement.scale, *placement.offset, eyes, angles),
     )
 
 

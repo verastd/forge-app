@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import * as shared from './index.js';
 import {
   AVATAR_PLACEMENT_AS_IS,
+  AVATAR_PLACEMENT_EYE_ANGLE,
   AVATAR_PLACEMENT_REACH,
   AVATAR_PLACEMENT_SCALE_MAX,
   AVATAR_PLACEMENT_SCALE_MIN,
@@ -1084,7 +1085,12 @@ describe('Phase 7: RepoActionRequestSchema / CopyResultSchema / ReviewResultSche
 });
 
 describe('AvatarHeadPlacementSchema', () => {
-  const fitted = { scale: 0.5, offset: [-0.01, 0, -0.015], eyes: [[-0.052, 0.106, 0.135], [0.052, 0.106, 0.135]] };
+  const fitted = {
+    scale: 0.5,
+    offset: [-0.01, 0, -0.015],
+    eyes: [[-0.052, 0.106, 0.135], [0.052, 0.106, 0.135]],
+    eyeAngles: [0.2, 0.15, -0.05],
+  };
 
   it('takes a fit, with or without eyes of its own', () => {
     expect(AvatarHeadPlacementSchema.parse(fitted)).toEqual(fitted);
@@ -1099,6 +1105,8 @@ describe('AvatarHeadPlacementSchema', () => {
     { ...fitted, offset: [0, 0] },
     { ...fitted, eyes: [[0, 0, 0]] },
     { ...fitted, scale: Number.NaN },
+    { ...fitted, eyeAngles: [0, 0] },
+    { ...fitted, eyeAngles: [0, AVATAR_PLACEMENT_EYE_ANGLE + 0.1, 0] },
   ])('refuses %j', (bad) => {
     expect(AvatarHeadPlacementSchema.safeParse(bad).success).toBe(false);
   });

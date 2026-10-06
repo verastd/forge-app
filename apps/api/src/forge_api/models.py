@@ -1038,6 +1038,7 @@ AvatarHeadFit = Literal["replace", "accessory"]
 AVATAR_PLACEMENT_SCALE_MIN: Final = 0.01
 AVATAR_PLACEMENT_SCALE_MAX: Final = 10
 AVATAR_PLACEMENT_REACH: Final = 1
+AVATAR_PLACEMENT_EYE_ANGLE: Final = 1.2
 
 _HexColor = Annotated[str, Field(pattern=r"^#[0-9a-f]{6}$")]
 _AvatarHeadId = Annotated[str, Field(pattern=AVATAR_HEAD_ID)]
@@ -1047,6 +1048,10 @@ _Reach = Annotated[
     float, Field(ge=-AVATAR_PLACEMENT_REACH, le=AVATAR_PLACEMENT_REACH, allow_inf_nan=False)
 ]
 _PlacementPoint = tuple[_Reach, _Reach, _Reach]
+_EyeAngle = Annotated[
+    float,
+    Field(ge=-AVATAR_PLACEMENT_EYE_ANGLE, le=AVATAR_PLACEMENT_EYE_ANGLE, allow_inf_nan=False),
+]
 
 
 class AvatarColors(BaseModel):
@@ -1079,6 +1084,8 @@ class AvatarHeadPlacement(BaseModel):
     ]
     offset: _PlacementPoint
     eyes: tuple[_PlacementPoint, _PlacementPoint] | None = None
+    #: [slant, turn, pitch] radians for the left eye, mirrored for the right.
+    eyeAngles: tuple[_EyeAngle, _EyeAngle, _EyeAngle] | None = None
 
 
 #: A head worn as its file says.

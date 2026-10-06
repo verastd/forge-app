@@ -381,7 +381,7 @@ test.describe('fitting a head', () => {
     if (!box) throw new Error('no fitting preview');
     await expect(async () => {
       await page.mouse.click(box.x + box.width / 2, box.y + box.height * 0.45);
-      await expect(page.getByText('Left eye placed.')).toBeVisible({ timeout: 2_000 });
+      await expect(page.getByText(/^Left eye placed(, angled to the surface)?\.$/)).toBeVisible({ timeout: 2_000 });
     }).toPass({ timeout: 30_000 });
     await expect(page.getByRole('status').filter({ hasText: 'Click the head where its right eye goes' })).toBeVisible();
     await page.keyboard.press('Escape');
@@ -391,11 +391,18 @@ test.describe('fitting a head', () => {
     await expect(size).toHaveAttribute('aria-valuetext', '150% of where it started');
     await page.getByRole('slider', { name: /^Down · Up/ }).fill('0.02');
     await expect(page.getByRole('slider', { name: /^Down · Up/ })).toHaveAttribute('aria-valuetext', '2 centimetres up');
+    const slant = page.getByRole('slider', { name: 'Eye slant, both eyes' });
+    await slant.fill('10');
+    await expect(slant).toHaveAttribute('aria-valuetext', '10° tops in');
+    await page.getByRole('slider', { name: 'Eye turn, both eyes' }).fill('-5');
+    await expect(page.getByRole('slider', { name: 'Eye turn, both eyes' })).toHaveAttribute('aria-valuetext', '5° out');
 
     await add.click();
     await expect(page.getByRole('button', { name: 'Uploading…' })).toBeVisible();
     await expect.poll(() => sent).not.toBeNull();
-    const placement = (sent as unknown as { placement: { scale: number; offset: number[]; eyes: number[][] } }).placement;
+    const placement = (sent as unknown as { placement: { scale: number; offset: number[]; eyes: number[][]; eyeAngles: number[] } }).placement;
+    expect(placement.eyeAngles[0]).toBeCloseTo((10 * Math.PI) / 180, 3);
+    expect(placement.eyeAngles[1]).toBeCloseTo((-5 * Math.PI) / 180, 3);
     // 0.37 m of robot head over a 0.8 m wide model, then half as big again.
     expect(placement.scale).toBeCloseTo((0.37 / 0.8) * 1.5, 2);
     expect(placement.offset[1]).toBeCloseTo(0.02, 3);
@@ -412,6 +419,23 @@ test.describe('fitting a head', () => {
     });
     await expect(page.getByRole('listitem').filter({ hasText: 'Tripo head' })).toBeVisible();
     await expect(page.getByRole('slider', { name: /^Size/ })).toHaveCount(0);
+  });
+
+  test('an API older than fitting says it needs redeploying', async ({ page, context, baseURL }) => {
+    await signInAs(context, baseURL ?? '', { sub: '4242', login: 'trent-admin' });
+    await openEditor(page);
+    await page.route('**/bff/avatars/heads/old-api', (route) =>
+      route.fulfill({
+        status: 400,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: 'invalid_request', message: 'Check placement and try again.', fields: ['placement'] }),
+      }),
+    );
+    await page.getByLabel('Name').fill('Old API');
+    await page.getByLabel(/File \(\.glb/).setInputFiles({ name: 'old-api.glb', mimeType: 'model/gltf-binary', buffer: TRIPO_HEAD });
+    await expect(page.getByRole('slider', { name: 'Size' })).toBeEnabled({ timeout: 90_000 });
+    await page.getByRole('button', { name: 'Add to library' }).click();
+    await expect(page.getByRole('alert').filter({ hasText: 'The API server is older than head fitting' })).toBeVisible();
   });
 
   test('a file the preview can’t open says so and can’t be added', async ({ page, context, baseURL }) => {
