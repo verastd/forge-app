@@ -579,6 +579,8 @@ test.describe('fitting a head', () => {
         ...LIST.heads,
         { ...head, id: 'phantom-head', name: 'Phantom head' },
         { ...head, id: 'bolt-head', name: 'Bolt head' },
+        // A head may be called "own": it is a head, not the robot's own.
+        { ...head, id: 'own', name: 'Own' },
       ],
     };
     await page.route('**/bff/avatars/members', (route) =>
@@ -597,8 +599,14 @@ test.describe('fitting a head', () => {
     await expect(page.getByRole('slider', { name: 'Tilt, whole accessory' })).toBeEnabled({ timeout: 90_000 });
     await over.selectOption('bolt-head');
     await expect(over).toHaveValue('bolt-head');
-    await over.selectOption('own');
+    await over.selectOption({ label: 'Own' });
     await expect(over).toHaveValue('own');
+    // Switching mid-pick drops the pick, which was aimed at the old head.
+    await page.getByRole('button', { name: 'Line up an eye hole' }).click();
+    await expect(page.getByRole('button', { name: 'Line up an eye hole' })).toHaveAttribute('aria-pressed', 'true');
+    await over.selectOption({ label: 'The robot’s own head' });
+    await expect(over).toHaveValue('');
+    await expect(page.getByRole('button', { name: 'Line up an eye hole' })).toHaveAttribute('aria-pressed', 'false');
     await expect(page.getByRole('slider', { name: 'Tilt, whole accessory' })).toBeEnabled({ timeout: 90_000 });
   });
 

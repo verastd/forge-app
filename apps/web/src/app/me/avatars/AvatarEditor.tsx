@@ -684,6 +684,9 @@ function RobotEditor({ member, list, setList, onDirty, onDraft }: RobotEditorPro
   );
 }
 
+/** The "Fitted over" value for the robot's own head: empty, which no head id can be. */
+const OWN_HEAD = '';
+
 interface HeadLibraryProps {
   /** Whose heads: uploads are made for them, and only theirs are listed. Null: nobody chosen yet. */
   member: AvatarMember | null;
@@ -697,15 +700,18 @@ function HeadLibrary({ member, drafted, list, setList }: HeadLibraryProps) {
   const [giving, setGiving] = useState<string | null>(null);
   const theirs = member ? list.heads.filter((h) => h.owner === member.memberId) : [];
   const ownHeads = theirs.filter((h) => h.fit === 'replace');
-  /** Which head a face accessory is fitted over: a head's id, 'own' (the robot's own), or null (the default below). */
+  /**
+   * Which head a face accessory is fitted over: a head's id, OWN_HEAD (the robot's own), or null
+   * (the default below). OWN_HEAD is empty, which no head id can be.
+   */
   const [overChoice, setOverChoice] = useState<string | null>(null);
   const saved = member ? list.avatars.find((a) => a.memberId === member.memberId) : undefined;
   // By default the head the robot above wears now (saved or not), else one it has saved, else its first custom head.
   const draftedHead = drafted ? drafted.head : (saved?.head ?? null);
   const defaultOver =
-    ownHeads.find((h) => h.id === draftedHead)?.id ?? ownHeads.find((h) => h.id === saved?.head)?.id ?? ownHeads[0]?.id ?? 'own';
-  const over = overChoice !== null && (overChoice === 'own' || ownHeads.some((h) => h.id === overChoice)) ? overChoice : defaultOver;
-  const overHead = over === 'own' ? null : (ownHeads.find((h) => h.id === over) ?? null);
+    ownHeads.find((h) => h.id === draftedHead)?.id ?? ownHeads.find((h) => h.id === saved?.head)?.id ?? ownHeads[0]?.id ?? OWN_HEAD;
+  const over = overChoice !== null && (overChoice === OWN_HEAD || ownHeads.some((h) => h.id === overChoice)) ? overChoice : defaultOver;
+  const overHead = over === OWN_HEAD ? null : (ownHeads.find((h) => h.id === over) ?? null);
   const wearerColors = drafted?.colors ?? saved?.colors ?? (member ? defaultColors(member.memberId) : null);
   // Whose robot fittings are shown on: its colours as the editor shows them, and the head chosen to fit over.
   const wearer = useMemo(
@@ -741,7 +747,7 @@ function HeadLibrary({ member, drafted, list, setList }: HeadLibraryProps) {
             {h.name}
           </option>
         ))}
-        <option value="own">The robot’s own head</option>
+        <option value={OWN_HEAD}>The robot’s own head</option>
       </select>
     </label>
   );

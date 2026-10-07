@@ -136,6 +136,11 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled, w
   const [reading, setReading] = useState<Reading>({ kind: 'reading' });
   const [placement, setPlacement] = useState<HeadPlacement | null>(null);
   const [picking, setPicking] = useState<Picking>(null);
+  // Fitted over another head (or none): a click that was aimed at the old one is dropped.
+  const wornId = worn?.id ?? null;
+  useEffect(() => {
+    setPicking(null);
+  }, [wornId]);
   const [note, setNote] = useState<{ tone: 'ok' | 'warn'; text: string } | null>(null);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
