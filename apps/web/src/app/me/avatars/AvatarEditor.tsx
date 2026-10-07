@@ -198,6 +198,7 @@ export function AvatarEditor() {
   }, []);
 
   const dirtyRef = useRef(false);
+  const [drafted, setDrafted] = useState<DraftedLook | null>(null);
 
   if (load.kind === 'loading') {
     return (
@@ -292,6 +293,7 @@ export function AvatarEditor() {
         {selected ? (
           <RobotEditor
             key={selected}
+            onDraft={setDrafted}
             member={members.find((m) => m.memberId === selected) ?? { memberId: selected, login: selected }}
             list={list}
             setList={setList}
@@ -308,6 +310,7 @@ export function AvatarEditor() {
 
       <HeadLibrary
         key={selected ?? 'nobody'}
+        drafted={drafted && drafted.memberId === selected ? drafted : null}
         member={selected ? (members.find((m) => m.memberId === selected) ?? { memberId: selected, login: selected }) : null}
         list={list}
         setList={setList}
@@ -316,16 +319,28 @@ export function AvatarEditor() {
   );
 }
 
+/** The robot as the editor shows it now (saved or not): what a face accessory is fitted over. */
+interface DraftedLook {
+  memberId: string;
+  colors: AvatarColors;
+  head: string | null;
+}
+
 interface RobotEditorProps {
+  /** Told the robot's look whenever it changes, so the head library fits on the same robot. */
+  onDraft: (look: DraftedLook) => void;
   member: AvatarMember;
   list: AvatarList;
   setList: (update: (list: AvatarList) => AvatarList) => void;
   onDirty: (dirty: boolean) => void;
 }
 
-function RobotEditor({ member, list, setList, onDirty }: RobotEditorProps) {
+function RobotEditor({ member, list, setList, onDirty, onDraft }: RobotEditorProps) {
   const saved: Avatar | undefined = list.avatars.find((a) => a.memberId === member.memberId);
   const [draft, setDraft] = useState<Draft>(() => draftFor(member.memberId, list));
+  useEffect(() => {
+    onDraft({ memberId: member.memberId, colors: draft.colors, head: draft.head });
+  }, [onDraft, member.memberId, draft.colors, draft.head]);
   const [busy, setBusy] = useState<Busy>({ kind: 'idle' });
   const [chestUpload, setChestUpload] = useState<Upload>({ kind: 'idle' });
   const [removingChest, setRemovingChest] = useState(false);
@@ -672,20 +687,31 @@ function RobotEditor({ member, list, setList, onDirty }: RobotEditorProps) {
 interface HeadLibraryProps {
   /** Whose heads: uploads are made for them, and only theirs are listed. Null: nobody chosen yet. */
   member: AvatarMember | null;
+  /** Their robot as the editor above shows it now, saved or not. */
+  drafted: DraftedLook | null;
   list: AvatarList;
   setList: (update: (list: AvatarList) => AvatarList) => void;
 }
 
-function HeadLibrary({ member, list, setList }: HeadLibraryProps) {
+function HeadLibrary({ member, drafted, list, setList }: HeadLibraryProps) {
   const [giving, setGiving] = useState<string | null>(null);
   const theirs = member ? list.heads.filter((h) => h.owner === member.memberId) : [];
-  // Whose robot fittings are shown on: their saved colours and the replacing head they wear.
-  const wearer = useMemo(() => {
-    if (!member) return null;
-    const saved = list.avatars.find((a) => a.memberId === member.memberId);
-    const head = saved?.head ? (list.heads.find((h) => h.id === saved.head) ?? null) : null;
-    return { colors: saved?.colors ?? defaultColors(member.memberId), head };
-  }, [member, list]);
+  const ownHeads = theirs.filter((h) => h.fit === 'replace');
+  /** Which head a face accessory is fitted over: a head's id, 'own' (the robot's own), or null (the default below). */
+  const [overChoice, setOverChoice] = useState<string | null>(null);
+  const saved = member ? list.avatars.find((a) => a.memberId === member.memberId) : undefined;
+  // By default the head the robot above wears now (saved or not), else one it has saved, else its first custom head.
+  const draftedHead = drafted ? drafted.head : (saved?.head ?? null);
+  const defaultOver =
+    ownHeads.find((h) => h.id === draftedHead)?.id ?? ownHeads.find((h) => h.id === saved?.head)?.id ?? ownHeads[0]?.id ?? 'own';
+  const over = overChoice !== null && (overChoice === 'own' || ownHeads.some((h) => h.id === overChoice)) ? overChoice : defaultOver;
+  const overHead = over === 'own' ? null : (ownHeads.find((h) => h.id === over) ?? null);
+  const wearerColors = drafted?.colors ?? saved?.colors ?? (member ? defaultColors(member.memberId) : null);
+  // Whose robot fittings are shown on: its colours as the editor shows them, and the head chosen to fit over.
+  const wearer = useMemo(
+    () => (member && wearerColors ? { colors: wearerColors, head: overHead } : null),
+    [member, wearerColors, overHead],
+  );
   const unassigned = list.heads.filter((h) => !h.owner);
   const [name, setName] = useState('');
   const [fit, setFit] = useState<AvatarHeadFit>('replace');
@@ -705,6 +731,20 @@ function HeadLibrary({ member, list, setList }: HeadLibraryProps) {
   const taken = !replacing && list.heads.some((h) => h.id === id);
   const busy = upload.kind === 'preparing' || upload.kind === 'uploading' || upload.kind === 'processing';
   const refitting = refit.kind === 'saving';
+
+  const overPicker = (
+    <label className={styles.label}>
+      Fitted over
+      <select className="text-input" value={over} onChange={(event) => setOverChoice(event.target.value)} disabled={busy || refitting}>
+        {ownHeads.map((h) => (
+          <option key={h.id} value={h.id}>
+            {h.name}
+          </option>
+        ))}
+        <option value="own">The robot’s own head</option>
+      </select>
+    </label>
+  );
   const ready = member !== null && name.trim().length > 0 && idValid && !taken && file !== null && placement !== null && !busy;
   const fitSource = useMemo(
     () => (file ? { kind: 'file' as const, file } : adjusting ? { kind: 'library' as const, head: adjusting } : null),
@@ -954,6 +994,7 @@ function HeadLibrary({ member, list, setList }: HeadLibraryProps) {
           <h3 id="head-refit" className="card-title" style={{ margin: 0 }}>
             Fitting “{adjusting.name}”
           </h3>
+          {adjusting.fit === 'accessory' && overPicker}
           <HeadFitter
             source={fitSource}
             fit={adjusting.fit}
@@ -1030,6 +1071,7 @@ function HeadLibrary({ member, list, setList }: HeadLibraryProps) {
           </div>
           {fitSource?.kind === 'file' && (
             <div className={styles.fitWide}>
+              {fit === 'accessory' && overPicker}
               <HeadFitter source={fitSource} fit={fit} initial={null} onChange={setPlacement} disabled={busy} wearer={wearer} />
             </div>
           )}
