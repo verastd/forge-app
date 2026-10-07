@@ -567,6 +567,49 @@ test.describe('fitting a head', () => {
     await expect(page.getByRole('button', { name: 'Straighten' })).toHaveCount(0);
   });
 
+  test('a mask is fitted over the head the robot has on now, saved or not, or another of theirs', async ({ page, context, baseURL }) => {
+    await signInAs(context, baseURL ?? '', { sub: '4242', login: 'trent-admin' });
+    await page.route(`**/bff/avatars/assets/${SHA}`, (route) =>
+      route.fulfill({ status: 200, contentType: 'model/gltf-binary', body: TRIPO_HEAD }),
+    );
+    const head = { ...LIST.heads[0], fit: 'replace', eyes: false };
+    const withHeads = {
+      ...LIST,
+      heads: [
+        ...LIST.heads,
+        { ...head, id: 'phantom-head', name: 'Phantom head' },
+        { ...head, id: 'bolt-head', name: 'Bolt head' },
+        // A head may be called "own": it is a head, not the robot's own.
+        { ...head, id: 'own', name: 'Own' },
+      ],
+    };
+    await page.route('**/bff/avatars/members', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(MEMBERS) }),
+    );
+    await page.route('**/bff/avatars', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(withHeads) }),
+    );
+    await page.goto('/me/avatars');
+    await expect(page.getByRole('heading', { name: '@octo-alice', exact: true })).toBeVisible({ timeout: 60_000 });
+    // Picked above, not saved: the mask is still fitted over it.
+    await page.getByRole('group', { name: 'Head' }).getByRole('button', { name: /Phantom head/ }).click();
+    await page.getByRole('listitem').filter({ hasText: 'Phantom mask' }).getByRole('button', { name: 'Adjust fit' }).click();
+    const over = page.getByRole('combobox', { name: 'Fitted over' });
+    await expect(over).toHaveValue('phantom-head');
+    await expect(page.getByRole('slider', { name: 'Tilt, whole accessory' })).toBeEnabled({ timeout: 90_000 });
+    await over.selectOption('bolt-head');
+    await expect(over).toHaveValue('bolt-head');
+    await over.selectOption({ label: 'Own' });
+    await expect(over).toHaveValue('own');
+    // Switching mid-pick drops the pick, which was aimed at the old head.
+    await page.getByRole('button', { name: 'Line up an eye hole' }).click();
+    await expect(page.getByRole('button', { name: 'Line up an eye hole' })).toHaveAttribute('aria-pressed', 'true');
+    await over.selectOption({ label: 'The robot’s own head' });
+    await expect(over).toHaveValue('');
+    await expect(page.getByRole('button', { name: 'Line up an eye hole' })).toHaveAttribute('aria-pressed', 'false');
+    await expect(page.getByRole('slider', { name: 'Tilt, whole accessory' })).toBeEnabled({ timeout: 90_000 });
+  });
+
   test('two library heads on one file each keep their own fit', async ({ page, context, baseURL }) => {
     await signInAs(context, baseURL ?? '', { sub: '4242', login: 'trent-admin' });
     await page.route(`**/bff/avatars/assets/${SHA}`, (route) =>
