@@ -658,6 +658,7 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
     const emblem = (): void => {
       uniforms.uChest.value = assets.emblem(next.id, next.name, next.colors);
       uniforms.uChestAspect.value = 1;
+      uniforms.uChestFull.value = 0;
       chestFadeTarget = 1;
     };
     if (!next.chest) {
@@ -676,6 +677,7 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
         const image = texture.image as { width?: number; height?: number } | undefined;
         uniforms.uChest.value = texture;
         uniforms.uChestAspect.value = image?.width && image.height ? image.width / image.height : 1;
+        uniforms.uChestFull.value = 1;
         chestFadeTarget = 1;
       },
       () => {
