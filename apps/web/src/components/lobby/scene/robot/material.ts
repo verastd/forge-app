@@ -148,9 +148,12 @@ if (robotZone == ${ZONE.trim} || robotZone == ${ZONE.headTrim}) {
   vec4 image = texture2D(uChest, uChestFull > 0.5 ? clamp(fullUv, 0.0, 1.0) : panelUv);
   // Where the image is shown: the panel for the emblem; the whole front (its opaque part) for an upload.
   float shown = mix(plate, front * image.a, uChestFull);
-  // What lights up: the scan on the panel until the image fades in, then the image where it is shown.
-  float lit = mix(plate, shown, uChestFade);
-  vec3 screen = mix(waiting, image.rgb, uChestFade);
+  // What lights up: the scan on the panel as it fades out, and the image where it is shown as it fades
+  // in, each weighted apart, so a transparent pixel's hidden colour never shows, mid-fade included.
+  float scanPart = plate * (1.0 - uChestFade);
+  float imagePart = shown * uChestFade;
+  float lit = scanPart + imagePart;
+  vec3 screen = (waiting * scanPart + image.rgb * imagePart) / max(lit, 1e-4);
   robotBase = mix(robotBase, screen * 0.45, lit);
   robotRough = mix(robotRough, 0.14, lit);
   robotMetal = mix(robotMetal, 0.0, lit);
