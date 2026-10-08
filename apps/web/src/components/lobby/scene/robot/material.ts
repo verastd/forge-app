@@ -4,12 +4,14 @@
  * (@forge/lobby's ZONE) with each robot's own uniforms.
  *
  * - shell, trim: the robot's two paints; joints a fixed dark gunmetal.
- * - torso: shell, with the chestplate covering its flat front panel edge to
- *   edge: the image (or the generated emblem) behind glass, lit from within
- *   like a screen so it reads in the dark cave, with a thin line of the
- *   accent colour just past its edge, on the panel's bevel. Until
- *   the image arrives the panel shows a moving scan in the accent colour, and
- *   the image fades in over it.
+ * - torso: shell, with the chestplate on its front, lit from within like a
+ *   screen so it reads in the dark cave. An uploaded image covers the whole
+ *   visible front, bevels and all, stretched to it, and keeps its
+ *   transparency: where it is clear the robot's own armour shows. The
+ *   generated emblem fills the flat panel, with a thin line of the accent
+ *   colour just past its edge, on the bevel. Until an image arrives the
+ *   panel shows a moving scan in the accent colour, and the image fades in
+ *   over it.
  * - head, headTrim: the robot's own head, with a dark glass face screen
  *   rimmed in the accent; hidden (collapsed into the neck) when the robot
  *   wears a head from the library.
@@ -42,6 +44,8 @@ export interface RobotUniforms {
   uChestAspect: { value: number };
   /** 0: the loading scan; 1: the image. */
   uChestFade: { value: number };
+  /** 1: an uploaded image, over the whole front and with its transparency; 0: the emblem, on the flat panel. */
+  uChestFull: { value: number };
   uThrust: { value: number };
   uHideHead: { value: number };
   uTime: { value: number };
@@ -54,6 +58,8 @@ const f = (n: number): string => n.toFixed(4);
 // The chestplate covers the torso's whole flat front panel.
 const chestCentre = [(CHEST_PANEL.minX + CHEST_PANEL.maxX) / 2, (CHEST_PANEL.minY + CHEST_PANEL.maxY) / 2];
 const chestHalf = [(CHEST_PANEL.maxX - CHEST_PANEL.minX) / 2, (CHEST_PANEL.maxY - CHEST_PANEL.minY) / 2];
+// The torso's whole visible front, bevels included (bind pose): an uploaded chestplate stretches over it.
+const CHEST_FRONT = { minX: -0.138, maxX: 0.138, minY: 0.479, maxY: 0.783 } as const;
 const faceCentre = [(FACE_PANEL.minX + FACE_PANEL.maxX) / 2, (FACE_PANEL.minY + FACE_PANEL.maxY) / 2];
 const faceHalf = [(FACE_PANEL.maxX - FACE_PANEL.minX) / 2 - 0.024, (FACE_PANEL.maxY - FACE_PANEL.minY) / 2 - 0.02];
 
@@ -85,6 +91,7 @@ uniform vec3 uEye;
 uniform sampler2D uChest;
 uniform float uChestAspect;
 uniform float uChestFade;
+uniform float uChestFull;
 uniform float uThrust;
 uniform float uTime;
 uniform float uTalk;
@@ -114,29 +121,43 @@ if (robotZone == ${ZONE.trim} || robotZone == ${ZONE.headTrim}) {
   // Brightest at the tip, fading up the cone.
   float tip = 1.0 - smoothstep(0.0, 0.16, vBind.y);
   robotEmit = uEye * (0.25 + 2.4 * tip * tip) * uThrust;
-} else if (robotZone == ${ZONE.torso} && vBindN.z > 0.55 && vBind.z > 0.09) {
+} else if (robotZone == ${ZONE.torso} && vBind.z > 0.05) {
+  // Which way this face of the torso looks (flat, from the bind-pose position's derivatives), so the
+  // front and its bevels count and the sides, top and bottom do not.
+  vec3 flatN = normalize(cross(dFdx(vBind), dFdy(vBind)));
+  if (dot(flatN, vBindN) < 0.0) flatN = -flatN;
+  float front = smoothstep(0.25, 0.35, flatN.z);
   vec2 p = vBind.xy - vec2(${f(chestCentre[0]!)}, ${f(chestCentre[1]!)});
   vec2 halfSize = vec2(${f(chestHalf[0]!)}, ${f(chestHalf[1]!)});
   float d = robotRoundRect(p, halfSize, 0.012);
   float aa = fwidth(d) * 1.2;
-  // The image fills the panel; the accent line sits just outside it, on the bevel.
-  float plate = 1.0 - smoothstep(-aa, aa, d);
-  float frame = (1.0 - smoothstep(-aa, aa, d - 0.004)) - plate;
+  // The flat panel, and the accent line just outside it, on the bevel.
+  float plate = (1.0 - smoothstep(-aa, aa, d)) * front;
+  float frame = ((1.0 - smoothstep(-aa, aa, d - 0.004)) * front - plate) * (1.0 - uChestFull);
   vec2 uv = p / (2.0 * halfSize) + 0.5;
-  // Cover the plate: crop the image's long side, keep it centred.
-  float plateAspect = ${f(chestHalf[0]! / chestHalf[1]!)};
-  vec2 scale = uChestAspect > plateAspect ? vec2(plateAspect / uChestAspect, 1.0) : vec2(1.0, uChestAspect / plateAspect);
-  vec2 imageUv = (uv - 0.5) * scale + 0.5;
-  vec3 image = texture2D(uChest, imageUv).rgb;
   // Loading: a scan sweeping down a dark panel.
   float sweep = fract(uv.y + uTime * 0.55);
   float scan = smoothstep(0.82, 1.0, sweep) * 0.9 + 0.08 * step(0.5, fract(uv.y * 40.0));
   vec3 waiting = vec3(0.012) + uAccent * scan * 0.45;
-  vec3 screen = mix(waiting, image, uChestFade);
-  robotBase = mix(robotBase, screen * 0.45, plate);
-  robotRough = mix(robotRough, 0.14, plate);
-  robotMetal = mix(robotMetal, 0.0, plate);
-  robotEmit += screen * (0.75 + 0.35 * uTalk) * plate;
+  // The emblem covers the panel, cropped to it and centred.
+  float plateAspect = ${f(chestHalf[0]! / chestHalf[1]!)};
+  vec2 scale = uChestAspect > plateAspect ? vec2(plateAspect / uChestAspect, 1.0) : vec2(1.0, uChestAspect / plateAspect);
+  vec2 panelUv = (uv - 0.5) * scale + 0.5;
+  // An uploaded image is stretched over the whole front, edge to edge, bevels and all.
+  vec2 fullUv = (vBind.xy - vec2(${f(CHEST_FRONT.minX)}, ${f(CHEST_FRONT.minY)})) / vec2(${f(CHEST_FRONT.maxX - CHEST_FRONT.minX)}, ${f(CHEST_FRONT.maxY - CHEST_FRONT.minY)});
+  vec4 image = texture2D(uChest, uChestFull > 0.5 ? clamp(fullUv, 0.0, 1.0) : panelUv);
+  // Where the image is shown: the panel for the emblem; the whole front (its opaque part) for an upload.
+  float shown = mix(plate, front * image.a, uChestFull);
+  // What lights up: the scan on the panel as it fades out, and the image where it is shown as it fades
+  // in, each weighted apart, so a transparent pixel's hidden colour never shows, mid-fade included.
+  float scanPart = plate * (1.0 - uChestFade);
+  float imagePart = shown * uChestFade;
+  float lit = scanPart + imagePart;
+  vec3 screen = (waiting * scanPart + image.rgb * imagePart) / max(lit, 1e-4);
+  robotBase = mix(robotBase, screen * 0.45, lit);
+  robotRough = mix(robotRough, 0.14, lit);
+  robotMetal = mix(robotMetal, 0.0, lit);
+  robotEmit += screen * (0.75 + 0.35 * uTalk) * lit;
   robotBase = mix(robotBase, uAccent * 0.5, frame);
   robotEmit += uAccent * frame * 0.9;
 } else if (robotZone == ${ZONE.head} && vBindN.z > 0.55 && vBind.z > 0.09) {
@@ -175,6 +196,7 @@ export function createBodyMaterial(envMap: THREE.Texture, placeholder: THREE.Tex
     uChest: { value: placeholder },
     uChestAspect: { value: 1 },
     uChestFade: { value: 0 },
+    uChestFull: { value: 0 },
     uThrust: { value: 0.35 },
     uHideHead: { value: 0 },
     uTime: { value: 0 },
