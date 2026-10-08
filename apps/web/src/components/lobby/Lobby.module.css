@@ -771,7 +771,6 @@
 }
 
 .reverb {
-  flex: none;
   display: grid;
   gap: 6px;
   padding: 10px 14px;
@@ -1303,6 +1302,10 @@
   .search {
     padding: 0 16px 10px;
     border-bottom: 0;
+  }
+
+  .reverb {
+    padding: 10px 16px;
   }
 
   .search input {

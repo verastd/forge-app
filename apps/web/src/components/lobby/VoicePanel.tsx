@@ -594,8 +594,8 @@ export function VoicePanel({ feed, micRef, practice, onRejoin }: VoicePanelProps
             <span aria-hidden="true">×</span>
           </button>
         </header>
-        {voice.available && <ReverbControl feed={feed} roomSound={voice.roomSound} />}
         <People
+          reverb={voice.available ? <ReverbControl feed={feed} roomSound={voice.roomSound} /> : null}
           people={voice.people}
           voiced={voice.available}
           canMute={voice.available}
@@ -707,7 +707,10 @@ function People({
   feed,
   room,
   handOff,
+  reverb,
 }: {
+  /** Your own Reverb control, at the top of what scrolls (so a short screen never loses the list to it). */
+  reverb: ReactNode;
   people: Person[];
   voiced: boolean;
   canMute: boolean;
@@ -757,20 +760,24 @@ function People({
   }, [hasPeople]);
 
   if (!hasPeople) {
-    if (room.sees) {
-      return <p className={styles.empty}>Nobody else is here yet.</p>;
-    }
     return (
-      <p className={styles.empty}>
-        {room.finding ? (
-          <>
-            <Spinner />
-            Finding who&apos;s here…
-          </>
+      <div className={styles.roster}>
+        {reverb}
+        {room.sees ? (
+          <p className={styles.empty}>Nobody else is here yet.</p>
         ) : (
-          "Can't see who's here right now."
+          <p className={styles.empty}>
+            {room.finding ? (
+              <>
+                <Spinner />
+                Finding who&apos;s here…
+              </>
+            ) : (
+              "Can't see who's here right now."
+            )}
+          </p>
         )}
-      </p>
+      </div>
     );
   }
 
@@ -843,6 +850,7 @@ function People({
           letGo();
         }}
       >
+        {needle === '' && reverb}
         {found.length === 0 && <p className={styles.empty}>Nobody here by that name.</p>}
         {(['here', 'talking', 'earshot', 'far', 'muted'] as const).map((group) => {
           const members = groups.get(group);
