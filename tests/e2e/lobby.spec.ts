@@ -1005,8 +1005,8 @@ test("the HUD's fullest state: every word, label, group and live region", async 
   const long = personRow(page, 'gh:1002').locator('[class*="name"]').first();
   await expect(long).toHaveAttribute('dir', 'auto');
   await expect(long).toHaveAttribute('title', 'a-login-as-long-as-github-allows-them-x');
-  // No numbers about the sound anywhere: no levels, no reverb, no kHz.
-  await expect(panel.getByText(/Reverb|Direct|kHz/)).toHaveCount(0);
+  // No numbers about anyone's sound: no levels, no reverb, no kHz on the people (your own Reverb slider is yours, above them).
+  await expect(panel.locator('li[data-person-id]').getByText(/Reverb|Direct|kHz/)).toHaveCount(0);
 
   // The search: by name, anywhere in the room.
   await drawer.getByRole('searchbox', { name: 'Find a name' }).fill('zzz');
@@ -1036,4 +1036,28 @@ test('/apps/nope asks for a sign-in, then is a 404 with the not-found page', asy
   expect(response?.status()).toBe(404);
   await expect(page.getByRole('heading', { name: 'Page not found', level: 1 })).toBeVisible();
   await expect(page.getByRole('main').getByRole('link', { name: 'Go to the lobby' })).toHaveAttribute('href', '/apps');
+});
+
+test('your own Reverb: a slider in the people drawer, taken at once and kept in this browser', async ({ page }) => {
+  test.setTimeout(120_000);
+  await openLobby(page, '/apps?voice-fixture=full');
+  let drawer = await openPeople(page);
+  const reverb = drawer.getByRole('slider', { name: /^Reverb/ });
+  // The cave as designed until you change it, and only for you.
+  await expect(reverb).toHaveValue('100');
+  await expect(reverb).toHaveAttribute('aria-valuetext', '100% of the cave’s echo');
+  // The fixture's cave sound failed to load: the slider says where to try again.
+  await expect(drawer.locator('[data-control="reverb"]')).toContainText('didn’t load');
+  await reverb.fill('35');
+  await expect(reverb).toHaveAttribute('aria-valuetext', '35% of the cave’s echo');
+  expect(await page.evaluate(() => window.localStorage.getItem('forge.lobby.reverb.v1'))).toBe('35');
+  await reverb.fill('0');
+  await expect(reverb).toHaveAttribute('aria-valuetext', 'Off, voices dry');
+  await expect(drawer.locator('[data-control="reverb"]')).toContainText('off (dry voices)');
+
+  // Back next visit.
+  await reverb.fill('60');
+  await openLobby(page, '/apps?voice-fixture=full');
+  drawer = await openPeople(page);
+  await expect(drawer.getByRole('slider', { name: /^Reverb/ })).toHaveValue('60');
 });

@@ -3,7 +3,12 @@ import { describe, expect, it } from 'vitest';
 import { REVERB_PRESETS, reverbSendGain } from './acoustics.js';
 import { computeGain, distanceAlpha, shouldSubscribe } from './attenuation.js';
 import {
+  REVERB_LEVEL,
   VOICE,
+  clampReverbLevel,
+  parseReverbLevel,
+  reverbWetFor,
+  serializeReverbLevel,
   hearSpeaking,
   liveVoices,
   nearness,
@@ -249,5 +254,34 @@ describe('voiceConfigProblem', () => {
     expect(voiceConfigProblem({ ...good, falloffDistance: 2 })).toBe('falloffDistance must be past fullVolumeDistance');
     expect(voiceConfigProblem({ ...good, reverbWet: 1.5 })).toBe('reverbWet must be within 0..1');
     expect(voiceConfigProblem({ ...good, reverbWet: -0.1 })).toBe('reverbWet must be within 0..1');
+  });
+});
+
+describe('each listener’s reverb level', () => {
+  it('scales the cave’s own wet send: all of it, none, or between', () => {
+    expect(reverbWetFor(1)).toBe(VOICE.reverbWet);
+    expect(reverbWetFor(0)).toBe(0);
+    expect(reverbWetFor(0.5)).toBeCloseTo(VOICE.reverbWet / 2, 6);
+    expect(reverbWetFor(3)).toBe(VOICE.reverbWet);
+    expect(reverbWetFor(-1)).toBe(0);
+    expect(reverbWetFor(Number.NaN)).toBe(VOICE.reverbWet);
+  });
+
+  it('is stored as a whole percent and read back', () => {
+    expect(serializeReverbLevel(0.35)).toBe('35');
+    expect(serializeReverbLevel(2)).toBe('100');
+    expect(parseReverbLevel('35')).toBe(0.35);
+    expect(parseReverbLevel('0')).toBe(0);
+    expect(parseReverbLevel(serializeReverbLevel(REVERB_LEVEL.default))).toBe(REVERB_LEVEL.default);
+  });
+
+  it.each([null, '', '101', '-5', '0.5', 'abc', '1000', ' 50'])('rejects a stored %j', (raw) => {
+    expect(parseReverbLevel(raw)).toBeNull();
+  });
+
+  it('keeps any level in range', () => {
+    expect(clampReverbLevel(0.4)).toBe(0.4);
+    expect(clampReverbLevel(Number.POSITIVE_INFINITY)).toBe(REVERB_LEVEL.default);
+    expect(Object.isFrozen(REVERB_LEVEL)).toBe(true);
   });
 });

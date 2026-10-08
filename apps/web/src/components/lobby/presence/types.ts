@@ -111,6 +111,11 @@ export interface PresenceFeed {
   onVoice(listener: () => void): () => void;
   /** Silence everyone (the master gain), or hear them again. */
   setDeafened(on: boolean): void;
+  /**
+   * How much of the cave's reverb you hear, 0 (dry) to 1 (the cave as designed): your own
+   * mix only. Taken now, and kept for a room joined later.
+   */
+  setReverbLevel(level: number): void;
   /** Mute one person, for yourself only. */
   setMuted(id: string, muted: boolean): void;
   /** Let the browser play sound: call it inside a user gesture. */

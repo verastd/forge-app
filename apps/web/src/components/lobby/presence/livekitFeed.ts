@@ -19,7 +19,7 @@
  * and joining list, the shell's status, and the people panel's voice
  * snapshot, rounded and throttled as types.ts describes.
  */
-import { VOICE, nearness } from '@forge/lobby';
+import { REVERB_LEVEL, VOICE, clampReverbLevel, nearness, reverbWetFor } from '@forge/lobby';
 
 import type * as Engine from '../voice/engine';
 import type {
@@ -59,8 +59,8 @@ const RECEPTION: Record<SubscriptionState, Reception> = {
   unsubscribing: 'dropping',
 };
 
-/** The engine's config: the cave's settings (VOICE), with positions that never go stale. */
-function engineConfig(): Partial<ProximityConfig> {
+/** The engine's config: the cave's settings (VOICE), with positions that never go stale and the listener's own reverb level. */
+function engineConfig(reverbLevel: number): Partial<ProximityConfig> {
   return {
     fullVolumeDistance: VOICE.fullVolumeDistance,
     falloffDistance: VOICE.falloffDistance,
@@ -70,7 +70,7 @@ function engineConfig(): Partial<ProximityConfig> {
     positionHz: VOICE.positionHz,
     spatialPanning: VOICE.spatialPanning,
     reverb: VOICE.reverb,
-    reverbWet: VOICE.reverbWet,
+    reverbWet: reverbWetFor(reverbLevel),
     distanceMuffling: VOICE.distanceMuffling,
     // A member who stands still, or whose tab is hidden, keeps their place
     // for as long as they're in the room: Fable's 3 s staleness would drop
@@ -91,6 +91,8 @@ export function livekitFeed(): PresenceFeed {
   /** Where we are, from the scene, kept for an engine that doesn't exist yet; one object, filled every frame. */
   const self: SelfState = { x: 0, y: 0, z: 0, yaw: 0 };
   let placed = false;
+  /** The listener's own reverb level, kept for an engine that doesn't exist yet. */
+  let reverbLevel: number = REVERB_LEVEL.default;
   let peers = new Map<string, PeerState>();
   /** Participants the room knows whose position hasn't arrived: identity → name. */
   let unplaced = new Map<string, string>();
@@ -191,7 +193,7 @@ export function livekitFeed(): PresenceFeed {
       }
       if (joinGeneration !== generation) return;
       let first: TokenResponse | null = grant;
-      engine = new kit.ProximityVoiceEngine(engineConfig(), () => {
+      engine = new kit.ProximityVoiceEngine(engineConfig(reverbLevel), () => {
         const prefetched = first;
         first = null;
         return prefetched !== null ? Promise.resolve(prefetched) : fetchGrant();
@@ -277,6 +279,11 @@ export function livekitFeed(): PresenceFeed {
 
     setDeafened(on) {
       engine?.setDeafened(on);
+    },
+
+    setReverbLevel(level) {
+      reverbLevel = clampReverbLevel(level);
+      engine?.updateConfig({ reverbWet: reverbWetFor(reverbLevel) });
     },
 
     setMuted(id, muted) {

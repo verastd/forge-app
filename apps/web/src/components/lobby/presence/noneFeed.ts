@@ -52,6 +52,7 @@ export function noneFeed(reason: NoneReason): PresenceFeed {
     voice: () => NO_VOICE,
     onVoice: () => nothing,
     setDeafened: nothing,
+    setReverbLevel: nothing,
     setMuted: nothing,
     resumeAudio: () => Promise.resolve(),
     retryRoomSound: nothing,
