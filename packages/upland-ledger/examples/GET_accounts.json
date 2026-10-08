@@ -1,0 +1,71 @@
+{
+  "data": [
+    {
+      "account": "b5yv5uxdn1zc",
+      "username": "krypticking",
+      "usernames": [
+        "krypticking"
+      ],
+      "username_changes": 1,
+      "first_seen": "2025-04-29T10:17:56.000Z",
+      "last_seen": "2026-10-07T21:39:01.500Z",
+      "active_days": 520,
+      "events": 17586,
+      "buys": 6073,
+      "sells": 5250,
+      "upx_spent": 57648184.70000005,
+      "upx_received": 57038026.59999994,
+      "median_buy_latency_s": 3,
+      "sub_5s_buys": 5816,
+      "pct_buys_under_1m": 99.967064,
+      "likely_bot": true,
+      "upx_net": -610158.1
+    },
+    {
+      "account": "oumfkb1vplp5",
+      "username": "freakyman51",
+      "usernames": [
+        "freakyman51"
+      ],
+      "username_changes": 1,
+      "first_seen": "2025-04-28T15:53:31.000Z",
+      "last_seen": "2026-10-08T06:47:00.500Z",
+      "active_days": 528,
+      "events": 18074,
+      "buys": 3222,
+      "sells": 3062,
+      "upx_spent": 30767158.950000025,
+      "upx_received": 36198967.19999996,
+      "median_buy_latency_s": 4,
+      "sub_5s_buys": 2905,
+      "pct_buys_under_1m": 98.78957,
+      "likely_bot": true,
+      "upx_net": 5431808.25
+    },
+    {
+      "account": "hfe3nnsj23et",
+      "username": "fafel48",
+      "usernames": [
+        "fafel48"
+      ],
+      "username_changes": 1,
+      "first_seen": "2025-04-28T18:54:56.000Z",
+      "last_seen": "2026-10-08T12:13:31.000Z",
+      "active_days": 519,
+      "events": 36822,
+      "buys": 3016,
+      "sells": 3104,
+      "upx_spent": 36618241.790000044,
+      "upx_received": 40365276.750000045,
+      "median_buy_latency_s": 285,
+      "sub_5s_buys": 1,
+      "pct_buys_under_1m": 30.072945,
+      "likely_bot": false,
+      "upx_net": 3747034.96
+    }
+  ],
+  "count": 3,
+  "limit": 3,
+  "offset": 0,
+  "has_more": true
+}

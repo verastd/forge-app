@@ -1,0 +1,53 @@
+{
+  "data": [
+    {
+      "timestamp": "2026-10-08T16:57:47.000Z",
+      "event_type": "property_sale",
+      "account": "smfvx4j4dqsb",
+      "counterparty": "v5rgahb53k5u",
+      "amount_upx": 10500,
+      "trx_id": "66918e849595edcf339abad755a96ba2c75f64dcb83511ab6ac1188977fdb352",
+      "fields": {
+        "price_upx": 10500,
+        "seller_proceeds_upx": 9975,
+        "buyer_paid_upx": 11025,
+        "community_fee_upx": 1050,
+        "address": "3-CHOME-11-19 YACHIYOMACHI",
+        "city": "Takasaki",
+        "region": "JP",
+        "owner_username": "sparrow99",
+        "owner_account": "smfvx4j4dqsb",
+        "mint_trx_id": "475bac0be81d6ec4797da7109123c5fd49743cf7241d089984646a60a469f88c"
+      }
+    },
+    {
+      "timestamp": "2026-08-31T19:13:24.000Z",
+      "event_type": "property_fee_paid",
+      "account": "oddana1rkl1m",
+      "counterparty": "",
+      "amount_upx": 10,
+      "trx_id": "5c5b89812d26370157a186d71f0609a1a261263981a45e46c24d8bc151f5b48c",
+      "fields": {
+        "fee_upx": 10
+      }
+    },
+    {
+      "timestamp": "2026-07-18T20:03:51.500Z",
+      "event_type": "listing_created",
+      "account": "v5rgahb53k5u",
+      "counterparty": "",
+      "amount_upx": 10500,
+      "trx_id": "0e7278137506234cf08e3db539b1bd2ebd17f7ae5e4780bec1da04ba307e6768",
+      "fields": {
+        "ask_upx": 10500,
+        "flag_p31": false,
+        "flag_p32": true,
+        "flag_p33": false
+      }
+    }
+  ],
+  "count": 3,
+  "limit": 3,
+  "offset": 0,
+  "has_more": true
+}

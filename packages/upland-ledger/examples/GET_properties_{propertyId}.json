@@ -1,0 +1,20 @@
+{
+  "property_id": "78641749916331",
+  "address": "3-CHOME-11-19 YACHIYOMACHI",
+  "city": "Takasaki",
+  "region": "JP",
+  "neighborhood": "",
+  "neighborhood_id": 0,
+  "mint_price_upx": 7182,
+  "mint_price_source": "chain",
+  "mint_kind": "fsa_upx",
+  "api_status": "",
+  "minted_at": "2026-06-11T16:53:58.500Z",
+  "sales": 0,
+  "last_sale_upx": 0,
+  "last_sale_at": null,
+  "observations": 1,
+  "mint_band": 12,
+  "chain_known": true,
+  "upland_api": null
+}

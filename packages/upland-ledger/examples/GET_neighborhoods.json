@@ -1,0 +1,35 @@
+{
+  "data": [
+    {
+      "neighborhood_id": 94,
+      "name": "ALAMO SQUARE",
+      "city_id": 1,
+      "city": "San Francisco",
+      "area_m2": 246986.1379213333,
+      "center_lat": 37.77634775377757,
+      "center_lng": -122.43468828871003
+    },
+    {
+      "neighborhood_id": 95,
+      "name": "ANZA VISTA",
+      "city_id": 1,
+      "city": "San Francisco",
+      "area_m2": 301374.5578171015,
+      "center_lat": 37.78096139485752,
+      "center_lng": -122.44322852871693
+    },
+    {
+      "neighborhood_id": 96,
+      "name": "APPAREL CITY",
+      "city_id": 1,
+      "city": "San Francisco",
+      "area_m2": 369174.07990677655,
+      "center_lat": 37.73943792191824,
+      "center_lng": -122.40455966135276
+    }
+  ],
+  "count": 3,
+  "limit": 3,
+  "offset": 0,
+  "has_more": true
+}

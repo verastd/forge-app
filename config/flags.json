@@ -8,5 +8,6 @@
   "agent_start": false,
   "proposals": true,
   "house_spec": true,
-  "lobby_avatars": true
+  "lobby_avatars": true,
+  "upland_ledger": true
 }

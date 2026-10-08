@@ -1,0 +1,71 @@
+[
+  {
+    "observed_at": "2026-10-06 00:00:00.000",
+    "signal_type": "regime_shift",
+    "entity_type": "city",
+    "entity_id": "South Lake Tahoe",
+    "city": "South Lake Tahoe",
+    "score": 1,
+    "expected_edge_upx": 0,
+    "expected_edge_usd": 0,
+    "horizon_hours": 336,
+    "rule_version": 3,
+    "expires_at": "2026-10-20 00:00:00.000",
+    "evidence": {
+      "rule": "trailing 7d vs preceding 28d, city median sale/mint and sale count",
+      "recent_sale_to_mint": "0.7673860911270983",
+      "prior_sale_to_mint": "2.576923076923077",
+      "price_change": "-0.7022083825476932",
+      "recent_sales": "10",
+      "prior_sales": "25",
+      "volume_change": "0.6000000000000001",
+      "direction": "falling"
+    }
+  },
+  {
+    "observed_at": "2026-10-07 00:00:00.000",
+    "signal_type": "regime_shift",
+    "entity_type": "city",
+    "entity_id": "Saint Denis",
+    "city": "Saint Denis",
+    "score": 1,
+    "expected_edge_upx": 0,
+    "expected_edge_usd": 0,
+    "horizon_hours": 336,
+    "rule_version": 3,
+    "expires_at": "2026-10-21 00:00:00.000",
+    "evidence": {
+      "rule": "trailing 7d vs preceding 28d, city median sale/mint and sale count",
+      "recent_sale_to_mint": "4.367670925554894",
+      "prior_sale_to_mint": "2.414206327954803",
+      "price_change": "0.8091539546476834",
+      "recent_sales": "18",
+      "prior_sales": "81",
+      "volume_change": "-0.11111111111111116",
+      "direction": "rising"
+    }
+  },
+  {
+    "observed_at": "2026-10-06 00:00:00.000",
+    "signal_type": "regime_shift",
+    "entity_type": "city",
+    "entity_id": "Fresno",
+    "city": "Fresno",
+    "score": 1,
+    "expected_edge_upx": 0,
+    "expected_edge_usd": 0,
+    "horizon_hours": 336,
+    "rule_version": 3,
+    "expires_at": "2026-10-20 00:00:00.000",
+    "evidence": {
+      "rule": "trailing 7d vs preceding 28d, city median sale/mint and sale count",
+      "recent_sale_to_mint": "7994",
+      "prior_sale_to_mint": "312500",
+      "price_change": "-0.9744192",
+      "recent_sales": "20",
+      "prior_sales": "89",
+      "volume_change": "-0.101123595505618",
+      "direction": "falling"
+    }
+  }
+]

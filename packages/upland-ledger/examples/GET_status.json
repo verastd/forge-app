@@ -1,0 +1,39 @@
+{
+  "clickhouse": {
+    "connected": true,
+    "database": "upland"
+  },
+  "upstream": {
+    "connected": true,
+    "checkedAt": "2026-10-08T17:13:56.134Z"
+  },
+  "ingestion": {
+    "latestTimestamp": "2026-10-08T17:13:53.500Z",
+    "latestBlock": 91574249,
+    "latestGlobalSequence": 350804370,
+    "lagSeconds": 2,
+    "checkpoint": {
+      "stream": "live",
+      "lastTimestamp": "2026-10-08T17:13:53.500Z",
+      "lastBlock": 91574249,
+      "lastGlobalSequence": 350804370,
+      "updatedAt": "2026-10-08T17:13:54.637Z"
+    }
+  },
+  "history": {
+    "chainName": "upland",
+    "chainStart": "2025-04-26T17:30:00.000Z",
+    "chainEnd": null,
+    "live": true,
+    "earliestStoredTimestamp": "2025-04-26T17:45:16.000Z",
+    "backfillComplete": true,
+    "completedWindows": 36265,
+    "pendingWindows": 0,
+    "failedWindows": 0,
+    "windowsByStatus": {
+      "complete": 1,
+      "verified": 36264,
+      "split": 23741
+    }
+  }
+}

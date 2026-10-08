@@ -196,7 +196,8 @@ export type FlagName =
   | 'agent_start'
   | 'proposals'
   | 'house_spec'
-  | 'lobby_avatars';
+  | 'lobby_avatars'
+  | 'upland_ledger';
 
 /**
  * Serves a full, schema-valid flags payload in place of the API's: every
@@ -222,6 +223,7 @@ function allFlags(overrides: Partial<Record<FlagName, boolean>> = {}): Record<Fl
     proposals: true,
     house_spec: true,
     lobby_avatars: true,
+    upland_ledger: true,
     ...overrides,
   };
 }

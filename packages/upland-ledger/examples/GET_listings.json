@@ -1,0 +1,44 @@
+{
+  "data": [
+    {
+      "timestamp": "2026-10-08T16:59:15.500Z",
+      "property_id": "79539021137197",
+      "seller": "hnp1t3yc2yuf",
+      "address": "32 DORLAND ST",
+      "city": "San Francisco",
+      "neighborhood": "",
+      "mint_price_upx": 0,
+      "ask_upx": 0,
+      "ask_fiat": 7,
+      "ask_to_mint": 0
+    },
+    {
+      "timestamp": "2026-10-08T16:59:05.000Z",
+      "property_id": "34935173524597",
+      "seller": "rfgclx4wqazx",
+      "address": "221 ST JOHNS RD, FOREST LODGE",
+      "city": "Sydney",
+      "neighborhood": "",
+      "mint_price_upx": 15202,
+      "ask_upx": 0,
+      "ask_fiat": 4.28,
+      "ask_to_mint": 0
+    },
+    {
+      "timestamp": "2026-10-08T16:58:37.500Z",
+      "property_id": "85709479605778",
+      "seller": "hnp1t3yc2yuf",
+      "address": "6126 8TH AVE NW",
+      "city": "Seattle",
+      "neighborhood": "",
+      "mint_price_upx": 20580,
+      "ask_upx": 0,
+      "ask_fiat": 6,
+      "ask_to_mint": 0
+    }
+  ],
+  "count": 3,
+  "limit": 3,
+  "offset": 0,
+  "has_more": true
+}

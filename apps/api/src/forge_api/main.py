@@ -31,6 +31,7 @@ from forge_api.routers import (
     bridge,
     flags,
     health,
+    ledger,
     mcp,
     members,
     notifications,
@@ -271,6 +272,7 @@ app.include_router(flags.router)
 app.include_router(bridge.router)
 app.include_router(upland.router)
 app.include_router(upland_scrape.router)
+app.include_router(ledger.router)
 app.include_router(oauth.router)
 app.include_router(mcp.router)
 app.include_router(members.router)

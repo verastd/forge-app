@@ -1,0 +1,56 @@
+{
+  "data": [
+    {
+      "timestamp": "2026-10-08T16:57:47.000Z",
+      "property_id": "78641749916331",
+      "buyer": "smfvx4j4dqsb",
+      "seller": "v5rgahb53k5u",
+      "trx_id": "66918e849595edcf339abad755a96ba2c75f64dcb83511ab6ac1188977fdb352",
+      "address": "3-CHOME-11-19 YACHIYOMACHI",
+      "city": "Takasaki",
+      "neighborhood": "",
+      "mint_price_upx": 7182,
+      "price_upx": 10500,
+      "buyer_paid_upx": 11025,
+      "seller_proceeds_upx": 9975,
+      "community_fee_upx": 1050,
+      "price_to_mint": 1.4619883040935673
+    },
+    {
+      "timestamp": "2026-10-08T16:55:43.500Z",
+      "property_id": "78644199389885",
+      "buyer": "smfvx4j4dqsb",
+      "seller": "czwfysj5pdjg",
+      "trx_id": "ade3a29d06944a1cf71fa6d108e467345646eb373068b16f09fbf7422b169cd4",
+      "address": "4-CHOME-14-10 YACHIYOMACHI",
+      "city": "Takasaki",
+      "neighborhood": "",
+      "mint_price_upx": 7182,
+      "price_upx": 10500,
+      "buyer_paid_upx": 11025,
+      "seller_proceeds_upx": 9975,
+      "community_fee_upx": 1050,
+      "price_to_mint": 1.4619883040935673
+    },
+    {
+      "timestamp": "2026-10-08T16:55:06.000Z",
+      "property_id": "78636850970045",
+      "buyer": "smfvx4j4dqsb",
+      "seller": "ev1lwbmqwl1o",
+      "trx_id": "ba45480823c94c00083a833d90068bf2119f507298bd01bd085fdf73e19216d5",
+      "address": "3-CHOME-1-27 SHIMOWADAMACHI",
+      "city": "Takasaki",
+      "neighborhood": "",
+      "mint_price_upx": 8260,
+      "price_upx": 10499,
+      "buyer_paid_upx": 11023.95,
+      "seller_proceeds_upx": 9974.05,
+      "community_fee_upx": 1049.9,
+      "price_to_mint": 1.2710653753026635
+    }
+  ],
+  "count": 3,
+  "limit": 3,
+  "offset": 0,
+  "has_more": true
+}

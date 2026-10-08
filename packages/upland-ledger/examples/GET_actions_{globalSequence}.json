@@ -1,0 +1,56 @@
+{
+  "global_sequence": 350804370,
+  "timestamp": "2026-10-08T17:13:53.500Z",
+  "block_num": 91574249,
+  "block_id": "05754fe93bdd23fdd8f27e3b148b957b1d781c24d3b70842ef5eb22cadc9a12c",
+  "trx_id": "97cbf835eb8eef2e043f05758c54cbdf91fe4a7a4e65173ab068dfc3927eef70",
+  "action_ordinal": 1,
+  "creator_action_ordinal": 0,
+  "contract": "eosio",
+  "action": "onblock",
+  "receiver": "eosio",
+  "notified": [
+    "eosio"
+  ],
+  "actors": [
+    "eosio"
+  ],
+  "authorization": [
+    {
+      "actor": "eosio",
+      "permission": "active"
+    }
+  ],
+  "receipts": [
+    {
+      "receiver": "eosio",
+      "global_sequence": "350804370",
+      "recv_sequence": "102193933",
+      "auth_sequence": [
+        {
+          "account": "eosio",
+          "sequence": "93081480"
+        }
+      ]
+    }
+  ],
+  "data": {
+    "header": {
+      "timestamp": 1689589666,
+      "producer": "uplandprod1e",
+      "confirmed": 0,
+      "previous": "05754FE7170D89777A4B6BEAE38F58CFCC6CE7A5127E22986F363C86E22B60AD",
+      "transaction_mroot": "0000000000000000000000000000000000000000000000000000000000000000",
+      "action_mroot": "B9257EB527F87C45E4C732CB50472DC6266FAEAF8C5ECAD4735CF1400CF6BDF1",
+      "schedule_version": 2,
+      "new_producers": null
+    }
+  },
+  "producer": "uplandprod1e",
+  "cpu_usage_us": 100,
+  "irreversible": false,
+  "source": "hyperion",
+  "stream": "live",
+  "normalizer_version": 1,
+  "ingested_at": "2026-10-08T17:13:54.610Z"
+}

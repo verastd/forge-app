@@ -264,6 +264,9 @@ class FlagConfig(BaseModel):
     house_spec: bool
     # Robot avatars in the Apps lobby (in place of the orbs), and the admin's avatar editor.
     lobby_avatars: bool
+    # The Upland Ledger gateway (/api/ledger/*): an allowlist of reads, and the analytics
+    # query, forwarded to the ledger at UPLAND_LEDGER_URL.
+    upland_ledger: bool
 
 
 class TaskCard(BaseModel):

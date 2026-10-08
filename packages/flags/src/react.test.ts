@@ -49,6 +49,7 @@ const ALL_ON: FlagConfig = {
   proposals: true,
   house_spec: true,
   lobby_avatars: true,
+  upland_ledger: true,
 };
 
 function json(body: unknown, status = 200): Response {

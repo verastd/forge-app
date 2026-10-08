@@ -1,0 +1,62 @@
+{
+  "data": [
+    {
+      "property_id": "34487852905629",
+      "address": "MAIPU 472",
+      "city": "Buenos Aires",
+      "region": "BA",
+      "neighborhood": "",
+      "neighborhood_id": 0,
+      "mint_price_upx": 9804,
+      "mint_price_source": "chain",
+      "mint_kind": "fsa_upx",
+      "api_status": "",
+      "minted_at": "2025-07-11T19:10:30.000Z",
+      "sales": 2,
+      "last_sale_upx": 21999,
+      "last_sale_at": "2026-10-08T12:14:21.500Z",
+      "observations": 3,
+      "mint_band": 13
+    },
+    {
+      "property_id": "80450561606310",
+      "address": "7315 N CRYSTAL AVE",
+      "city": "Kansas City",
+      "region": "MO",
+      "neighborhood": "",
+      "neighborhood_id": 0,
+      "mint_price_upx": 0,
+      "mint_price_source": "none",
+      "mint_kind": "",
+      "api_status": "",
+      "minted_at": null,
+      "sales": 1,
+      "last_sale_upx": 23990,
+      "last_sale_at": "2026-10-08T12:12:42.500Z",
+      "observations": 1,
+      "mint_band": null
+    },
+    {
+      "property_id": "77373418292959",
+      "address": "11733 BALBOA BLVD",
+      "city": "Los Angeles",
+      "region": "CA",
+      "neighborhood": "",
+      "neighborhood_id": 0,
+      "mint_price_upx": 0,
+      "mint_price_source": "none",
+      "mint_kind": "",
+      "api_status": "",
+      "minted_at": null,
+      "sales": 1,
+      "last_sale_upx": 21000,
+      "last_sale_at": "2026-10-08T12:10:14.000Z",
+      "observations": 1,
+      "mint_band": null
+    }
+  ],
+  "count": 3,
+  "limit": 3,
+  "offset": 0,
+  "has_more": true
+}

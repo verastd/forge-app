@@ -1,0 +1,35 @@
+{
+  "data": [
+    {
+      "user_name": "kandju",
+      "reward_upx": 750,
+      "full_address": "415 EUREKA ST, San Francisco, CA",
+      "treasure_type": "box",
+      "lock_seconds": 37,
+      "spawn_at": "2026-09-29T06:37:13.386Z",
+      "locked_at": "2026-09-29T06:37:50.157Z"
+    },
+    {
+      "user_name": "chocnsoda",
+      "reward_upx": 4843,
+      "full_address": "825 NEWHALL ST, San Francisco, CA",
+      "treasure_type": "pinata",
+      "lock_seconds": 37,
+      "spawn_at": "2026-09-29T06:09:45.362Z",
+      "locked_at": "2026-09-29T06:10:22.191Z"
+    },
+    {
+      "user_name": "aldzen",
+      "reward_upx": 40,
+      "full_address": "109 BLANKEN AVE, San Francisco, CA",
+      "treasure_type": "box",
+      "lock_seconds": 33,
+      "spawn_at": "2026-09-29T06:05:40.497Z",
+      "locked_at": "2026-09-29T06:06:13.374Z"
+    }
+  ],
+  "count": 3,
+  "limit": 3,
+  "offset": 0,
+  "has_more": true
+}
