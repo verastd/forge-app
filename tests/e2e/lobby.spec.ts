@@ -1046,18 +1046,34 @@ test('your own Reverb: a slider in the people drawer, taken at once and kept in 
   // The cave as designed until you change it, and only for you.
   await expect(reverb).toHaveValue('100');
   await expect(reverb).toHaveAttribute('aria-valuetext', '100% of the cave’s echo');
-  // The fixture's cave sound failed to load: the slider says where to try again.
-  await expect(drawer.locator('[data-control="reverb"]')).toContainText('didn’t load');
+  // The fixture's cave sound failed to load: Try again right there, and it shows it is loading.
+  const control = drawer.locator('[data-control="reverb"]');
+  await expect(control).toContainText('didn’t load');
+  await control.getByRole('button', { name: 'Try again' }).click();
+  await expect(control).toContainText('The cave’s echo is loading…');
+  await expect(control.getByRole('button', { name: 'Try again' })).toHaveCount(0);
   await reverb.fill('35');
   await expect(reverb).toHaveAttribute('aria-valuetext', '35% of the cave’s echo');
   expect(await page.evaluate(() => window.localStorage.getItem('forge.lobby.reverb.v1'))).toBe('35');
   await reverb.fill('0');
   await expect(reverb).toHaveAttribute('aria-valuetext', 'Off, voices dry');
   await expect(drawer.locator('[data-control="reverb"]')).toContainText('off (dry voices)');
+  // A search hides it without forgetting the level, even where storage is blocked.
+  await page.evaluate(() => {
+    Storage.prototype.setItem = () => {
+      throw new Error('blocked');
+    };
+  });
+  await reverb.fill('20');
+  const search = drawer.getByRole('searchbox', { name: 'Find a name' });
+  await search.fill('mara');
+  await expect(reverb).toBeHidden();
+  await search.fill('');
+  await expect(reverb).toHaveValue('20');
 
-  // Back next visit.
-  await reverb.fill('60');
+  // Back next visit (storage allowed again).
+  await page.reload();
   await openLobby(page, '/apps?voice-fixture=full');
   drawer = await openPeople(page);
-  await expect(drawer.getByRole('slider', { name: /^Reverb/ })).toHaveValue('60');
+  await expect(drawer.getByRole('slider', { name: /^Reverb/ })).toHaveValue('0');
 });

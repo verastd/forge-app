@@ -649,7 +649,7 @@ function ReverbControl({ feed, roomSound }: { feed: PresenceFeed | null; roomSou
     roomSound === 'rendering'
       ? 'The cave’s echo is loading…'
       : roomSound === 'failed'
-        ? 'The cave’s echo didn’t load: Try again in the notice below.'
+        ? 'The cave’s echo didn’t load.'
         : 'Your ears only: everyone sets their own.';
 
   return (
@@ -670,9 +670,14 @@ function ReverbControl({ feed, roomSound }: { feed: PresenceFeed | null; roomSou
         onChange={onChange}
         aria-valuetext={percent === 0 ? 'Off, voices dry' : `${percent}% of the cave’s echo`}
       />
-      <p className={styles.reverbNote} role={roomSound === 'rendering' ? 'status' : undefined}>
+      <p className={styles.reverbNote} role="status">
         {roomSound === 'rendering' && <Spinner />}
         {note}
+        {roomSound === 'failed' && feed !== null && (
+          <button type="button" className={styles.reverbRetry} onClick={() => feed.retryRoomSound()}>
+            Try again
+          </button>
+        )}
       </p>
     </div>
   );
@@ -850,7 +855,8 @@ function People({
           letGo();
         }}
       >
-        {needle === '' && reverb}
+        {/* Hidden while searching, never unmounted: a level storage couldn't keep still holds. */}
+        <div hidden={needle !== ''}>{reverb}</div>
         {found.length === 0 && <p className={styles.empty}>Nobody here by that name.</p>}
         {(['here', 'talking', 'earshot', 'far', 'muted'] as const).map((group) => {
           const members = groups.get(group);
