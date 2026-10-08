@@ -752,6 +752,23 @@ function HeadLibrary({ member, drafted, list, setList }: HeadLibraryProps) {
     </label>
   );
   const ready = member !== null && name.trim().length > 0 && idValid && !taken && file !== null && placement !== null && !busy;
+  // Why the add button can't be pressed yet, first thing to do first: it never sits disabled unexplained.
+  const takenBy = taken ? list.heads.find((h) => h.id === id) : undefined;
+  const blocker = busy
+    ? null
+    : !member
+      ? 'Choose a member first: a head is made for one member.'
+      : file === null
+        ? 'Choose a .glb file.'
+        : name.trim().length === 0
+          ? 'Give it a name.'
+          : !idValid
+            ? 'Use letters or digits in the name.'
+            : takenBy
+              ? `“${takenBy.name}” already uses the id ${id}${takenBy.owner && takenBy.owner !== member.memberId ? ' (another member’s head)' : ''}: change the name, or use Replace file on that head.`
+              : placement === null
+                ? 'Waiting for the fitting tool: it is reading the file, or it couldn’t open it (see the preview above).'
+                : null;
   const fitSource = useMemo(
     () => (file ? { kind: 'file' as const, file } : adjusting ? { kind: 'library' as const, head: adjusting } : null),
     [file, adjusting],
@@ -1091,13 +1108,14 @@ function HeadLibrary({ member, drafted, list, setList }: HeadLibraryProps) {
                 Cancel
               </button>
             )}
+            {blocker && (
+              <span className={styles.hint} role="status" data-testid="add-head-blocker">
+                Can’t add yet: {blocker}
+              </span>
+            )}
           </div>
         </div>
-        {file && placement === null && upload.kind === 'idle' && (
-          <p className={styles.hint} role="status">
-            The fitting tool is reading the file: it can be added once it’s on the robot.
-          </p>
-        )}
+
         <UploadStatus upload={upload} label="the head" />
       </form>
     </section>
