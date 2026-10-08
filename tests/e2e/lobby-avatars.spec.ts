@@ -610,6 +610,23 @@ test.describe('fitting a head', () => {
     await expect(page.getByRole('slider', { name: 'Tilt, whole accessory' })).toBeEnabled({ timeout: 90_000 });
   });
 
+  test('Add to library says why it can’t be pressed yet', async ({ page, context, baseURL }) => {
+    await signInAs(context, baseURL ?? '', { sub: '4242', login: 'trent-admin' });
+    await openEditor(page);
+    const add = page.getByRole('button', { name: 'Add to library' });
+    const why = page.getByTestId('add-head-blocker');
+    await expect(add).toBeDisabled();
+    await expect(why).toHaveText('Can’t add yet: Choose a .glb file.');
+    // A name another head already uses: it says which, and what to do.
+    await page.getByLabel('Name').fill('Phantom');
+    await page.getByLabel(/File \(\.glb/).setInputFiles({ name: 'phantom.glb', mimeType: 'model/gltf-binary', buffer: TRIPO_HEAD });
+    await expect(why).toContainText('“Phantom mask” already uses the id phantom');
+    await expect(add).toBeDisabled();
+    await page.getByLabel('Name').fill('Phantom two');
+    await expect(add).toBeEnabled({ timeout: 90_000 });
+    await expect(why).toHaveCount(0);
+  });
+
   test('two library heads on one file each keep their own fit', async ({ page, context, baseURL }) => {
     await signInAs(context, baseURL ?? '', { sub: '4242', login: 'trent-admin' });
     await page.route(`**/bff/avatars/assets/${SHA}`, (route) =>
