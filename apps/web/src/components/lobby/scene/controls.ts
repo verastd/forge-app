@@ -1,7 +1,8 @@
 /**
  * Free roam, as the prototype drives it: drag to look, WASD or the touch
  * stick to walk, Space/Shift or the lift buttons to rise and fall, the wheel
- * to bob up and down, arrow keys to turn and tilt. A tap (a press that moved
+ * to bob up and down, arrow keys to turn and tilt, V to switch between first
+ * and third person. A tap (a press that moved
  * less than 8 px) picks whatever panel is under it. The mouse's place over
  * the canvas is kept for the scene's hover (the cursor, and an empty slot's
  * readout).
@@ -45,6 +46,8 @@ export interface ControlsOptions {
   pick(clientX: number, clientY: number): Hit | null;
   /** A tap landed on something, from a mouse, a finger or a pen. */
   onTap(hit: Hit, pointerType: string): void;
+  /** V: switch between first and third person. */
+  onToggleView?(): void;
 }
 
 /** Where the mouse is over the canvas, in client coordinates, or null once it has left. */
@@ -200,6 +203,10 @@ export function createControls(motion: Motion, opts: ControlsOptions): Controls 
 
   // ---- keys ----
   onWindow('keydown', (event) => {
+    if (event.code === 'KeyV' && !event.repeat && !event.ctrlKey && !event.metaKey && !event.altKey && !isTextEntry(event.target)) {
+      opts.onToggleView?.();
+      return;
+    }
     if (event.ctrlKey || event.metaKey || event.altKey || !MOVE_KEYS.has(event.code) || isTextEntry(event.target)) {
       return;
     }

@@ -56,14 +56,17 @@
 import { useFlags } from '@forge/flags/react';
 import {
   CAMERA_STORAGE_ITEM,
+  CAMERA_VIEW_STORAGE_ITEM,
   INITIAL_CAMERA,
   appBySlug,
   facing,
+  nextCameraView,
   parseCameraState,
+  parseCameraView,
   serializeCameraState,
   slotIndex,
 } from '@forge/lobby';
-import type { CameraState } from '@forge/lobby';
+import type { CameraState, CameraView } from '@forge/lobby';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -80,6 +83,8 @@ import type { LobbyState } from './lobbyState';
 import { createPresenceFeed } from './presence/types';
 import type { PresenceFeed } from './presence/types';
 import type { Hit } from './scene/controls';
+import type { SelfRobotState } from './scene/peers';
+import { ViewToggle } from './ViewToggle';
 import { PeopleIcon, Spinner } from './icons';
 import { VoicePanel, roomCount, useFeedState, useFeedSummary, wantMicOnEntry } from './VoicePanel';
 
@@ -92,6 +97,8 @@ const MESSAGES: Partial<Record<LobbyState, string>> = {
 };
 
 const TOAST_MS = 1800;
+/** What the toast calls each view. */
+const VIEW_NAMES: Record<CameraView, string> = { first: 'First person', third: 'Third person', front: 'Front view' };
 
 /**
  * For a browser that runs no script (inside `<noscript>`): the heading and
@@ -151,6 +158,23 @@ function readSavedCamera(): CameraState | null {
     return parseCameraState(window.sessionStorage.getItem(CAMERA_STORAGE_ITEM));
   } catch {
     return null;
+  }
+}
+
+/** The view this browser last chose (first person when none, or storage is blocked). */
+function readSavedView(): CameraView {
+  try {
+    return parseCameraView(window.localStorage.getItem(CAMERA_VIEW_STORAGE_ITEM)) ?? 'first';
+  } catch {
+    return 'first';
+  }
+}
+
+function saveView(view: CameraView): void {
+  try {
+    window.localStorage.setItem(CAMERA_VIEW_STORAGE_ITEM, view);
+  } catch {
+    // Storage blocked: the view still holds for this visit.
   }
 }
 
@@ -339,6 +363,10 @@ export function Lobby({ heading, directory }: { heading: ReactNode; directory: R
   const [feed, setFeed] = useState<PresenceFeed | null>(null);
   const [toast, setToast] = useState({ text: '', on: false, id: 0 });
   const [entered, setEntered] = useState(() => enteredThisLoad);
+  /** First or third person: this browser's choice, read after mount (the server has no storage). */
+  const [view, setView] = useState<CameraView>('first');
+  const [self, setSelf] = useState<SelfRobotState>('off');
+  const [retrySelf, setRetrySelf] = useState(0);
   /** The 2D lobby chosen (`?view=2d`): the 3D view never starts. */
   const [flat, setFlat] = useState(false);
 
@@ -406,6 +434,23 @@ export function Lobby({ heading, directory }: { heading: ReactNode; directory: R
 
   const say = useCallback((text: string) => setToast((current) => ({ text, on: true, id: current.id + 1 })), []);
 
+  useEffect(() => {
+    setView(readSavedView());
+  }, []);
+
+  const avatars = flags.lobby_avatars;
+  /** Third person and front need robots: without them it's always first. */
+  const shownView: CameraView = avatars ? view : 'first';
+  const chooseView = (next: CameraView): void => {
+    if (next !== 'first' && !avatars) {
+      say('No third person: robots are off in this lobby');
+      return;
+    }
+    setView(next);
+    saveView(next);
+    say(`${VIEW_NAMES[next]} · V to switch`);
+  };
+
   // The chrome around the lobby (SiteChrome's lobby nav) follows its state.
   useEffect(() => () => publishLobbyState('none'), []);
 
@@ -432,6 +477,8 @@ export function Lobby({ heading, directory }: { heading: ReactNode; directory: R
     onFocus: setFocus,
     onPeers: setPeerCount,
     onLeave: saveCamera,
+    onToggleView: () => chooseView(nextCameraView(shownView)),
+    onSelf: setSelf,
   };
 
   const hud = useCallback(() => {
@@ -537,7 +584,10 @@ export function Lobby({ heading, directory }: { heading: ReactNode; directory: R
           <Suspense fallback={null}>
             <SceneHost
               reducedMotion={reducedMotion}
-              avatars={flags.lobby_avatars}
+              avatars={avatars}
+              view={shownView}
+              selfName={login ?? ''}
+              retrySelf={retrySelf}
               feed={feedRef}
               hud={hud}
               events={events}
@@ -562,6 +612,15 @@ export function Lobby({ heading, directory }: { heading: ReactNode; directory: R
             <Link href="/" className={styles.exit} aria-label="Exit the cave">
               Exit
             </Link>
+          )}
+          {!fallback && live && (
+            <ViewToggle
+              view={shownView}
+              avatars={avatars}
+              self={self}
+              onChange={chooseView}
+              onRetry={() => setRetrySelf((n) => n + 1)}
+            />
           )}
           {/* While the wall is the page, from the server's first render on, the wall is
               the heading and the directory: both step out of sight but stay in the page

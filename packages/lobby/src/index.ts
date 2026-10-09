@@ -31,4 +31,5 @@ export * from './voice.js';
 export * from './avatar.js';
 export * from './avatarMotion.js';
 export * from './collide.js';
+export * from './chase.js';
 export * from './headFit.js';

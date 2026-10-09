@@ -248,6 +248,8 @@ export function livekitFeed(): PresenceFeed {
     // tick sends it under the lobby's send policy.
     publish: place,
 
+    selfId: () => latest?.localIdentity ?? null,
+
     peers: () => peers,
 
     joining: () => unplaced,

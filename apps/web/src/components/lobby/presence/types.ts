@@ -91,6 +91,8 @@ export interface PresenceFeed {
   status(): FeedStatus;
   /** Called every animation frame with the local state; the feed decides when to send. */
   publish(state: SelfState): void;
+  /** Your own id in the room (what everyone else knows you by), or null before you've joined one. */
+  selfId(): string | null;
   /** Called once per animation frame; the current peers (excluding self). */
   peers(): ReadonlyMap<string, PeerState>;
   /** Everyone else in the room whose position hasn't arrived yet, id → name: no orb, but not invisible. */
