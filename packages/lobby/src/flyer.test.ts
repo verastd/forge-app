@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { FLYER, HEAD_FLYERS, flightArea, flightPose, flyerPhase, parseFlyer, roofAt } from './flyer.js';
+import { FLYER, HEAD_FLYERS, flightArea, flightPose, flyerPhase, parseFlyer, roofAt, roofGrid } from './flyer.js';
 import type { RoofGrid } from './flyer.js';
 
 /** A 0.4 × 0.3 m top, floor at 0.3 m, with one tower (0.45 m) in the far-left cell. */
@@ -149,5 +149,61 @@ describe('flyerPhase and parseFlyer', () => {
     expect([...HEAD_FLYERS]).toEqual(['helicopter']);
     expect(parseFlyer('helicopter')).toBe('helicopter');
     for (const raw of ['blimp', null, undefined, 3]) expect(parseFlyer(raw)).toBeNull();
+  });
+});
+
+describe('roofGrid', () => {
+  /** A flat square roof, `y` high over x, z in [lo, hi]: four corners, two triangles, as a box's top is. */
+  function roof(lo: number, hi: number, y: number, at = 0): { positions: number[]; indices: number[] } {
+    return {
+      positions: [lo, y, lo, hi, y, lo, hi, y, hi, lo, y, hi],
+      indices: [at, at + 1, at + 2, at, at + 2, at + 3],
+    };
+  }
+
+  it('fills every cell under a roof that has points only at its corners', () => {
+    const { positions, indices } = roof(-0.2, 0.2, 0.3);
+    const grid = roofGrid(positions, indices, 4)!;
+    expect(grid.min).toEqual([-0.2, -0.2]);
+    expect(grid.max).toEqual([0.2, 0.2]);
+    expect(grid.top).toBe(0.3);
+    for (const h of grid.heights) expect(h).toBeCloseTo(0.3);
+    // Without the triangles, only the corner cells know the roof.
+    const corners = roofGrid(positions, null, 4)!;
+    expect(corners.heights.filter((h) => h !== null)).toHaveLength(4);
+  });
+
+  it('lets a taller building win the cells it stands over', () => {
+    const base = roof(-0.2, 0.2, 0.3);
+    const tower = roof(-0.2, 0, 0.5, 4);
+    const grid = roofGrid([...base.positions, ...tower.positions], [...base.indices, ...tower.indices], 4)!;
+    // The tower covers the low-x, low-z quarter: cells (0..1, 0..1).
+    expect(grid.heights[0]).toBeCloseTo(0.5);
+    expect(grid.heights[1 * 4 + 1]).toBeCloseTo(0.5);
+    expect(grid.heights[3 * 4 + 3]).toBeCloseTo(0.3);
+    expect(roofAt(grid, -0.15, -0.15)).toBeCloseTo(0.5);
+  });
+
+  it('blends a slope’s height across its triangle', () => {
+    // A ramp rising from 0 at x = −1 to 1 at x = 1.
+    const grid = roofGrid([-1, 0, -1, 1, 1, -1, 1, 1, 1, -1, 0, 1], [0, 1, 2, 0, 2, 3], 4)!;
+    // The middle cells hold no corner: their heights come from the triangles alone.
+    expect(grid.heights[1 * 4 + 1]).toBeCloseTo(0.375);
+    expect(grid.heights[1 * 4 + 2]).toBeCloseTo(0.625);
+    // A corner cell keeps its corner (a point counts as it stands).
+    expect(grid.heights[3]).toBe(1);
+  });
+
+  it('skips walls, broken triangles and broken points, and has nothing for no points', () => {
+    const wall = [0, 0, 0, 0, 1, 0, 1, 0, 0];
+    const grid = roofGrid([...wall, Number.NaN, 0, 0], [0, 1, 2, 0, 1, 9, 0, 1, -1, 0, 1, 3], 2)!;
+    expect(grid.top).toBe(1);
+    expect(roofGrid([], null)).toBeNull();
+    expect(roofGrid([Number.NaN, 0, 0], null)).toBeNull();
+    expect(roofGrid([0, 0, 0], null, 0)).toBeNull();
+    // A single point: a grid of one spot, its height there.
+    const dot = roofGrid([0.1, 0.4, 0.1], null)!;
+    expect(dot.top).toBe(0.4);
+    expect(dot.heights.filter((h) => h !== null)).toEqual([0.4]);
   });
 });

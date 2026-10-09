@@ -214,3 +214,86 @@ export function flyerPhase(id: string): number {
 export function parseFlyer(raw: unknown): HeadFlyer | null {
   return raw === 'helicopter' ? raw : null;
 }
+
+/**
+ * Measures a model's top as a `RoofGrid` (`n` × `n` cells over its
+ * footprint): `positions` are its points (x, y, z, x, y, z…, in the frame it
+ * flies in), `indices` its triangles (three point numbers each; null: points
+ * only). Each cell takes the highest surface straight down at its middle:
+ * every triangle over it, height blended across the triangle, and every point
+ * in it (a spire too thin to cover a cell middle still counts). A box-built
+ * city's roofs have points only at their corners, so the triangles are what
+ * fill them. Null with no points.
+ */
+export function roofGrid(positions: ArrayLike<number>, indices: ArrayLike<number> | null, n: number = FLYER.grid): RoofGrid | null {
+  const count = Math.floor(positions.length / 3);
+  if (count === 0 || n < 1) return null;
+  let x0 = Infinity;
+  let x1 = -Infinity;
+  let z0 = Infinity;
+  let z1 = -Infinity;
+  let top = -Infinity;
+  for (let i = 0; i < count; i += 1) {
+    const x = positions[i * 3]!;
+    const y = positions[i * 3 + 1]!;
+    const z = positions[i * 3 + 2]!;
+    if (!finite(x, y, z)) continue;
+    x0 = Math.min(x0, x);
+    x1 = Math.max(x1, x);
+    z0 = Math.min(z0, z);
+    z1 = Math.max(z1, z);
+    top = Math.max(top, y);
+  }
+  if (top === -Infinity) return null;
+  const width = x1 - x0 || 1;
+  const depth = z1 - z0 || 1;
+  const heights: (number | null)[] = new Array<number | null>(n * n).fill(null);
+  const raise = (col: number, row: number, y: number): void => {
+    const cell = row * n + col;
+    const was = heights[cell];
+    if (was === null || was === undefined || y > was) heights[cell] = y;
+  };
+  const colOf = (x: number): number => Math.min(n - 1, Math.max(0, Math.floor(((x - x0) / width) * n)));
+  const rowOf = (z: number): number => Math.min(n - 1, Math.max(0, Math.floor(((z - z0) / depth) * n)));
+  for (let i = 0; i < count; i += 1) {
+    const x = positions[i * 3]!;
+    const y = positions[i * 3 + 1]!;
+    const z = positions[i * 3 + 2]!;
+    if (finite(x, y, z)) raise(colOf(x), rowOf(z), y);
+  }
+  if (indices) {
+    const point = (k: number): [number, number, number] | null => {
+      const at = indices[k];
+      if (at === undefined || !Number.isInteger(at) || at < 0 || at >= count) return null;
+      const p: [number, number, number] = [positions[at * 3]!, positions[at * 3 + 1]!, positions[at * 3 + 2]!];
+      return finite(...p) ? p : null;
+    };
+    for (let k = 0; k + 2 < indices.length; k += 3) {
+      const a = point(k);
+      const b = point(k + 1);
+      const c = point(k + 2);
+      if (!a || !b || !c) continue;
+      // Twice the triangle's area as seen from above: flat-on-edge (a wall) covers no cell middle.
+      const area = (b[0] - a[0]) * (c[2] - a[2]) - (c[0] - a[0]) * (b[2] - a[2]);
+      if (Math.abs(area) < 1e-12) continue;
+      const cMin = colOf(Math.min(a[0], b[0], c[0]));
+      const cMax = colOf(Math.max(a[0], b[0], c[0]));
+      const rMin = rowOf(Math.min(a[2], b[2], c[2]));
+      const rMax = rowOf(Math.max(a[2], b[2], c[2]));
+      for (let row = rMin; row <= rMax; row += 1) {
+        const pz = z0 + ((row + 0.5) / n) * depth;
+        for (let col = cMin; col <= cMax; col += 1) {
+          const px = x0 + ((col + 0.5) / n) * width;
+          // Where the cell's middle falls in the triangle (barycentric), from above.
+          const wb = ((px - a[0]) * (c[2] - a[2]) - (c[0] - a[0]) * (pz - a[2])) / area;
+          const wc = ((b[0] - a[0]) * (pz - a[2]) - (px - a[0]) * (b[2] - a[2])) / area;
+          const wa = 1 - wb - wc;
+          const edge = -1e-9;
+          if (wa < edge || wb < edge || wc < edge) continue;
+          raise(col, row, wa * a[1] + wb * b[1] + wc * c[1]);
+        }
+      }
+    }
+  }
+  return { min: [x0, z0], max: [x1, z1], cols: n, rows: n, heights, top };
+}

@@ -32,11 +32,11 @@ import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 import {
   FACE_PANEL,
   HEAD_ANCHOR,
-  FLYER,
   HEAD_FIT,
   createBlinker,
   flightArea,
   flyerPhase,
+  roofGrid,
   eyeRotations,
   finishLook,
   foreDirection,
@@ -633,72 +633,72 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
   };
 
   /**
-   * The worn model's top as a grid of heights in the head pivot's frame (its
-   * placement applied): the highest vertex over each cell. Null with no
-   * vertices to measure.
+   * A worn model's top as a grid of heights in its pivot's frame (its
+   * placement applied): its triangles and points, measured by roofGrid. Null
+   * with nothing to measure.
    */
-  const measureRoofs = (object: THREE.Object3D): RoofGrid | null => {
-    headPivot.updateWorldMatrix(true, true);
-    const toPivot = headPivot.matrixWorld.clone().invert();
+  const measureRoofs = (object: THREE.Object3D, pivot: THREE.Object3D): RoofGrid | null => {
+    pivot.updateWorldMatrix(true, true);
+    const toPivot = pivot.matrixWorld.clone().invert();
     const toFrame = new THREE.Matrix4();
     const v = new THREE.Vector3();
     const points: number[] = [];
+    const triangles: number[] = [];
     object.traverse((node) => {
       const mesh = node as THREE.Mesh;
       const position = mesh.isMesh ? mesh.geometry.getAttribute('position') : undefined;
       if (!position) return;
       toFrame.multiplyMatrices(toPivot, mesh.matrixWorld);
-      // A dense model needn't have every vertex looked at: a city's roofs are many vertices each.
+      const base = points.length / 3;
+      // A dense model needn't have every vertex looked at (its vertices cover its roofs on their
+      // own); a light one, a box-built city, is measured whole, triangles and all.
       const step = Math.max(1, Math.floor(position.count / 80_000));
       for (let i = 0; i < position.count; i += step) {
         v.fromBufferAttribute(position, i).applyMatrix4(toFrame);
         points.push(v.x, v.y, v.z);
       }
+      if (step !== 1) return;
+      const index = mesh.geometry.getIndex();
+      if (index) {
+        for (let i = 0; i < index.count; i += 1) triangles.push(base + index.getX(i));
+      } else {
+        for (let i = 0; i < position.count; i += 1) triangles.push(base + i);
+      }
     });
-    if (points.length === 0) return null;
-    let x0 = Infinity;
-    let x1 = -Infinity;
-    let z0 = Infinity;
-    let z1 = -Infinity;
-    let top = -Infinity;
-    for (let i = 0; i < points.length; i += 3) {
-      x0 = Math.min(x0, points[i]!);
-      x1 = Math.max(x1, points[i]!);
-      top = Math.max(top, points[i + 1]!);
-      z0 = Math.min(z0, points[i + 2]!);
-      z1 = Math.max(z1, points[i + 2]!);
-    }
-    const n = FLYER.grid;
-    const heights: (number | null)[] = new Array(n * n).fill(null);
-    for (let i = 0; i < points.length; i += 3) {
-      const col = Math.min(n - 1, Math.floor(((points[i]! - x0) / (x1 - x0 || 1)) * n));
-      const row = Math.min(n - 1, Math.floor(((points[i + 2]! - z0) / (z1 - z0 || 1)) * n));
-      const cell = row * n + col;
-      const was = heights[cell];
-      if (was === null || was === undefined || points[i + 1]! > was) heights[cell] = points[i + 1]!;
-    }
-    return { min: [x0, z0], max: [x1, z1], cols: n, rows: n, heights, top };
+    return roofGrid(points, triangles);
   };
+
+  /** Which worn model the flyer is over: the head's, when both have one. */
+  let flyerOver: 'head' | 'accessory' | null = null;
 
   const dropFlyer = (): void => {
     flyer?.dispose();
     flyer = null;
     flight = null;
+    flyerOver = null;
   };
 
-  /** Puts the head's flyer over it (measured as the head is now placed), or takes it away. */
-  const placeFlyer = (head: AvatarHead): void => {
-    const grid = head.placement.flyer === 'helicopter' && headObject ? measureRoofs(headObject) : null;
+  /**
+   * Puts a worn model's flyer over it (measured as it is now placed), or takes
+   * it away. A head's flyer wins over an accessory's; with the head's gone,
+   * the accessory's takes over.
+   */
+  const placeFlyer = (slot: 'head' | 'accessory', worn: AvatarHead | null): void => {
+    const object = slot === 'head' ? headObject : accessoryObject;
+    const pivot = slot === 'head' ? headPivot : accessoryPivot;
+    if (slot === 'accessory' && flyerOver === 'head') return;
+    const grid = worn?.placement.flyer === 'helicopter' && object ? measureRoofs(object, pivot) : null;
     const area = grid ? flightArea(grid) : null;
     if (!grid || !area) {
+      if (flyerOver !== slot) return;
       dropFlyer();
+      if (slot === 'head') placeFlyer('accessory', look.accessory ?? null);
       return;
     }
     flight = { area, grid };
-    if (!flyer) {
-      flyer = createHelicopter(glow);
-      headPivot.add(flyer.root);
-    }
+    if (!flyer) flyer = createHelicopter(glow);
+    if (flyerOver !== slot) pivot.add(flyer.root);
+    flyerOver = slot;
   };
 
   /** Scales and moves the worn head as `head.placement` says, and puts a replacing head's eyes. */
@@ -765,11 +765,12 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
   /** Fits the worn head as `head.placement` says, and puts what flies over it. */
   const placeHead = (head: AvatarHead): void => {
     fitHead(head);
-    placeFlyer(head);
+    placeFlyer('head', head);
   };
 
   const dropHead = (): void => {
-    dropFlyer();
+    const hadFlyer = flyerOver === 'head';
+    if (hadFlyer) dropFlyer();
     if (headObject) {
       headObject.removeFromParent();
       // Geometry and textures belong to the cached head; the materials are this robot's.
@@ -783,6 +784,8 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
     screen.visible = false;
     headCut.on.value = 0;
     placeEyes(ownSockets);
+    // An accessory's flyer, if it has one, takes over from the head's.
+    if (hadFlyer) placeFlyer('accessory', look.accessory ?? null);
   };
 
   /** Loads a library model's own copy for this robot: its materials cloned, double-sided, lit by the robots' map. */
@@ -823,9 +826,11 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
     turnPivot(accessoryPivot, accessory.placement);
     accessoryObject.scale.setScalar(accessory.placement.scale);
     accessoryObject.position.set(0, 0, 0);
+    placeFlyer('accessory', accessory);
   };
 
   const dropAccessory = (): void => {
+    if (flyerOver === 'accessory') dropFlyer();
     if (!accessoryObject) return;
     accessoryObject.removeFromParent();
     for (const each of accessoryMaterials) each.dispose();
