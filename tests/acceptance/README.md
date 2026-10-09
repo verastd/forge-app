@@ -14,6 +14,30 @@ Stage 1.3). The pattern:
   `tests/acceptance/issue-<N>/` directory.** New unit tests for your own
   changes belong elsewhere in the tree.
 
+## Feature tasks: skipped until the work exists, never failing on `main`
+
+A bugfix's acceptance test is committed failing and turns green with the
+patch. A feature's cannot be: `make test` runs every directory here on every
+pull request, so a failing feature test would turn `main` red for everyone.
+The pattern for a feature, from issue #48 on:
+
+- The directory's tests import `skip_until(issue, artefact, ...)` from
+  `tests/acceptance/_shared.py` and name an artefact the implementation has
+  to create and that the task's Scope puts in the contributor's hands (its
+  e2e spec, its package manifest). While the artefact is missing the tests
+  are skipped with the issue number in the reason; the pull request that
+  creates it is the one whose Gauntlet run executes them.
+- Criteria that are already true of `main` (the catalog's contents, say)
+  are not skipped: they run now and guard against regression.
+- **A pull request that leaves its own task's acceptance tests skipped has
+  not met the spec**, whatever else is green: the artefact is a criterion,
+  and the reviewer reads the skip count on the run.
+- These tests are pytest, because pytest is what the Gauntlet runs for this
+  directory. Where a criterion is behaviour in the browser, the task names a
+  Playwright spec under `tests/e2e/` (which `make e2e` runs) and the
+  acceptance test checks that spec exists and covers the named flows; the
+  private suite does the rest.
+
 ## Why this is enforced, not just requested
 
 Deleting or weakening tests is the #1 reward-hacking vector (PRD §5 T4,

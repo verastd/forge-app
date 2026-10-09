@@ -1,6 +1,6 @@
 # Task Spec: register catch, throw and wave in the behaviour catalog
 
-Issue: not yet posted.
+Issue: [verastd/forge-app#48](https://github.com/verastd/forge-app/issues/48) (draft until its acceptance tests merge and it is labelled `agent-ready` + `status:open`).
 
 ## Goal
 
@@ -32,10 +32,12 @@ with its own speed limit and its own on-screen feedback.
 
 ## Acceptance tests
 
-`tests/acceptance/issue-<N>/test_catalog_wiring.spec.ts` (committed by the
-spec author): the catalog has the four kinds; a sixteen-actions-in-one-second
-sender in the practice build produces at most eight gestures on the other
-tab. The private suite additionally probes a malformed action kind.
+`tests/acceptance/issue-48/test_catalog_wiring.py` (committed by the spec
+author, pytest): the catalog covers the four kinds under the lobby flag at
+the wire's rate (runs now), and, once `tests/e2e/lobby-behaviors.spec.ts`
+exists, that both feeds consult the catalog and meter inbound actions and
+that the e2e spec floods a sender. The private suite additionally probes a
+malformed action kind.
 
 ## Scope
 

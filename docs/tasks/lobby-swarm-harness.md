@@ -1,6 +1,6 @@
 # Task Spec: a swarm of scripted members, and the lobby's first baselines
 
-Issue: not yet posted.
+Issue: [verastd/forge-app#50](https://github.com/verastd/forge-app/issues/50) (draft until its acceptance tests merge and it is labelled `agent-ready` + `status:open`).
 
 ## Goal
 
@@ -33,7 +33,7 @@ real people do.
 
 ## Acceptance tests
 
-`tests/acceptance/issue-<N>/test_swarm_tool.py` (committed by the spec
+`tests/acceptance/issue-50/test_swarm_tool.py` (committed by the spec
 author): the swarm's packet generator produces only packets
 `decodePosition` accepts and steps `plausibleStep` allows; `--members 0`
 exits cleanly; the measure script's JSON has the named fields. The private
