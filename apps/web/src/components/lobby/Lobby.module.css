@@ -1382,3 +1382,71 @@
     padding: 0 16px 10px 34px;
   }
 }
+
+/* ---- the view: first or third person, under Exit ---- */
+
+.viewBar {
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  font-family: var(--font-mono);
+}
+
+.view {
+  display: inline-flex;
+  border: 1px solid rgba(var(--cave-line-rgb), 0.35);
+  background: rgba(var(--cave-ink-rgb), 0.6);
+}
+
+.view button {
+  height: 36px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: rgba(var(--cave-text-rgb), 0.7);
+  font: 500 10px var(--font-mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.view button + button {
+  border-left: 1px solid rgba(var(--cave-line-rgb), 0.35);
+}
+
+.view button[aria-pressed='true'] {
+  background: rgba(var(--cave-accent-rgb), 0.18);
+  color: var(--cave-accent);
+}
+
+.view button:hover:not(:disabled) {
+  color: var(--cave-text);
+}
+
+.view button:disabled {
+  color: rgba(var(--cave-text-rgb), 0.35);
+  cursor: not-allowed;
+}
+
+.view button:focus-visible {
+  outline: 2px solid var(--cave-accent);
+  outline-offset: -2px;
+}
+
+.viewNote {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 280px;
+  margin: 0;
+  color: rgba(var(--cave-text-rgb), 0.7);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+}
+
+.viewNote .reverbRetry {
+  margin-left: 0;
+}

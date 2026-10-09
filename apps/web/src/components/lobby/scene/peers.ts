@@ -30,6 +30,7 @@ import type { Spring, Vec3 } from '@forge/lobby';
 
 import type { PeerState } from '../presence/types';
 import { CAVE_PALETTE } from './palette';
+import { loadBody } from './robot/assets';
 import type { RobotAssets, RobotBody } from './robot/assets';
 import type { AvatarDirectory } from './robot/directory';
 import { EYE_DROP, ROBOT_SCALE, TAG_HEIGHT, createRobot } from './robot/view';
@@ -48,15 +49,43 @@ export interface PeerRobots {
   directory: AvatarDirectory;
 }
 
+/**
+ * Your own robot, as third person shows it: off (first person, or no
+ * avatars), loading (the body, or a head or chest image it wears, still on
+ * its way), ready, or failed (the body couldn't load: `retryBody`).
+ */
+export type SelfRobotState = 'off' | 'loading' | 'ready' | 'failed';
+
+/** You, for drawing your own robot: your id in the room (null before you've joined), name, eye and heading. */
+export interface SelfFrame {
+  id: string | null;
+  name: string;
+  eye: THREE.Vector3;
+  yaw: number;
+  /** You're speaking (and your mic is on): your robot's face shows it, as everyone else sees. */
+  talking: boolean;
+  /** Whether it's drawn this frame: false while the camera is too close to it (in, or gliding into, first person). */
+  shown: boolean;
+}
+
 export interface Peers {
-  /** Draws `peers` for this frame. */
+  /**
+   * Draws `peers` for this frame. `viewer` is where you are (your eye, not
+   * the third-person camera): robots look at you, and name tags brighten,
+   * by your distance from them.
+   */
   update(
     dt: number,
     t: number,
     camera: THREE.PerspectiveCamera,
     peers: ReadonlyMap<string, PeerState>,
     reducedMotion: boolean,
+    viewer?: THREE.Vector3,
   ): void;
+  /** Draws your own robot (null: none), and says how it's doing. */
+  updateSelf(dt: number, t: number, self: SelfFrame | null, reducedMotion: boolean): SelfRobotState;
+  /** Loads the shared body again, after it failed: everyone's robot, and yours. */
+  retryBody(): void;
   /** How many peers are drawn as robots now (the rest are orbs). */
   robotCount(): number;
   /** Where everyone is drawn now, eye positions: what the local member bumps into. */
@@ -143,15 +172,37 @@ export function createPeers(
 
   // The shared body: robots wait for it, and without it everyone stays an orb.
   let body: RobotBody | null = null;
+  let bodyState: 'loading' | 'ready' | 'failed' = 'loading';
   let disposed = false;
-  robots?.assets.body.then(
-    (loaded) => {
-      if (!disposed) body = loaded;
-    },
-    (error: unknown) => {
-      console.warn('lobby: the robot avatars could not load; showing orbs', error);
-    },
-  );
+  const takeBody = (pending: Promise<RobotBody>): void => {
+    bodyState = 'loading';
+    pending.then(
+      (loaded) => {
+        if (disposed) return;
+        body = loaded;
+        bodyState = 'ready';
+      },
+      (error: unknown) => {
+        if (disposed) return;
+        bodyState = 'failed';
+        console.warn('lobby: the robot avatars could not load; showing orbs', error);
+      },
+    );
+  };
+  if (robots) takeBody(robots.assets.body);
+
+  // Your own robot (third person): built like everyone else's, never bumped into, never tagged.
+  const mine = {
+    robot: null as RobotView | null,
+    lookVersion: -1,
+    id: null as string | null,
+    last: new THREE.Vector3(),
+    yaw: 0,
+    fresh: true,
+    speed: { value: 0, velocity: 0 } as Spring,
+    climb: { value: 0, velocity: 0 } as Spring,
+    turn: { value: 0, velocity: 0 } as Spring,
+  };
 
   const views = new Map<string, PeerView>();
   const projected = new THREE.Vector3();
@@ -215,7 +266,7 @@ export function createPeers(
   }
 
   return {
-    update(dt, t, camera, peers, reducedMotion) {
+    update(dt, t, camera, peers, reducedMotion, viewer = camera.position) {
       const smoothing = 1 - Math.exp(-dt * 12);
       const width = layer.clientWidth;
       const height = layer.clientHeight;
@@ -272,7 +323,7 @@ export function createPeers(
 
         const bob = reducedMotion ? 0 : Math.sin(t * 1.3 + view.phase) * 0.08;
         view.sprite.position.set(view.shown.x, view.shown.y - ORB_DROP + bob, view.shown.z);
-        view.dist = view.shown.distanceTo(camera.position);
+        view.dist = view.shown.distanceTo(viewer);
         view.nearness = nearness(view.dist);
         const pulse = view.talking && !reducedMotion ? 0.12 * Math.sin(t * 18) : 0;
         view.material.opacity = (0.55 + 0.45 * view.nearness) * (1 - view.handover);
@@ -286,7 +337,7 @@ export function createPeers(
           robot.root.rotation.y = facing;
           robot.root.scale.setScalar(Math.max(0.001, pop(view.handover)));
           // Where the viewer is, from the robot's own point of view.
-          local.copy(camera.position).sub(robot.root.position);
+          local.copy(viewer).sub(robot.root.position);
           const bearing = Math.atan2(local.x, local.z) - facing;
           robot.update({
             t,
@@ -344,6 +395,63 @@ export function createPeers(
         }
       });
     },
+    updateSelf(dt, t, self, reducedMotion) {
+      if (!robots || !self) {
+        if (mine.robot) mine.robot.root.visible = false;
+        mine.fresh = true;
+        return 'off';
+      }
+      if (bodyState === 'failed') return 'failed';
+      if (!body) return 'loading';
+      if (!mine.robot) {
+        mine.robot = createRobot({ assets: robots.assets, body, glow: orbTexture, blank }, robots.directory.look(self.id ?? '', self.name));
+        mine.lookVersion = robots.directory.version;
+        mine.id = self.id;
+        scene.add(mine.robot.root);
+      }
+      const { robot } = mine;
+      // Your look once the room knows who you are, and whenever an admin changes it.
+      if (mine.lookVersion !== robots.directory.version || mine.id !== self.id || robot.look.name !== self.name) {
+        mine.lookVersion = robots.directory.version;
+        mine.id = self.id;
+        robot.setLook(robots.directory.look(self.id ?? '', self.name));
+      }
+      if (mine.fresh) {
+        mine.fresh = false;
+        mine.last.copy(self.eye);
+        mine.yaw = normalizeYaw(self.yaw);
+      }
+      const step = Math.max(dt, 1e-3);
+      const moved = local.subVectors(self.eye, mine.last);
+      mine.last.copy(self.eye);
+      const yawStep = wrapAngle(normalizeYaw(self.yaw) - mine.yaw);
+      mine.yaw = normalizeYaw(self.yaw);
+      stepSpring(mine.speed, Math.hypot(moved.x, moved.z) / step, dt, 6);
+      stepSpring(mine.climb, moved.y / step, dt, 6);
+      stepSpring(mine.turn, yawStep / step, dt, 5);
+
+      robot.root.visible = self.shown;
+      robot.root.position.set(self.eye.x, self.eye.y - ROBOT_EYE, self.eye.z);
+      robot.root.rotation.y = robotYaw(mine.yaw);
+      if (self.shown) {
+        robot.update({
+          t,
+          dt,
+          speed: mine.speed.value,
+          climb: mine.climb.value,
+          turnRate: mine.turn.value,
+          // Nobody to look at: your robot looks where you do.
+          viewerBearing: 0,
+          viewerDistance: Infinity,
+          reducedMotion,
+          talking: self.talking,
+        });
+      }
+      return robot.state === 'loading' ? 'loading' : 'ready';
+    },
+    retryBody() {
+      if (robots && bodyState === 'failed') takeBody(loadBody());
+    },
     bodies() {
       return [...views.values()].map((view) => view.shown);
     },
@@ -358,6 +466,11 @@ export function createPeers(
         remove(view);
       }
       views.clear();
+      if (mine.robot) {
+        scene.remove(mine.robot.root);
+        mine.robot.dispose();
+        mine.robot = null;
+      }
       for (const light of lights) {
         scene.remove(light);
         light.dispose();

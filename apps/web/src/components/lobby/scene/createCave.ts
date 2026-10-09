@@ -30,11 +30,17 @@
  * With avatars on, members also bump into each other (`collideBodies`):
  * after each step the local member is pushed out of everyone drawn and
  * bounces off them, counted on the root as `data-bumps`.
+ *
+ * With avatars on, the camera can also be third person (`setView`): on a
+ * boom behind your own robot (@forge/lobby's chase.ts), or swung round in
+ * front of it, so you can see what you're wearing. You move, publish and listen from your eye just as in first
+ * person; only the camera changes, gliding between the two. The root carries
+ * the view as `data-view` and how your robot is doing as `data-self`.
  */
 
 import * as THREE from 'three';
-import { WALL, clampCamera, collideBodies, normalizeYaw, slotPose } from '@forge/lobby';
-import type { AppEntry, CameraState } from '@forge/lobby';
+import { THIRD_PERSON, WALL, boomOffset, chaseCamera, clampCamera, collideBodies, normalizeYaw, slotPose } from '@forge/lobby';
+import type { AppEntry, CameraState, CameraView } from '@forge/lobby';
 
 import type { PeerState, PresenceFeed, SelfState } from '../presence/types';
 import { createControls, createPicker } from './controls';
@@ -43,7 +49,7 @@ import { CAVE_PALETTE, shaderColor } from './palette';
 import { createPeers } from './peers';
 import { createRobotAssets } from './robot/assets';
 import { createAvatarDirectory } from './robot/directory';
-import type { PeerClasses } from './peers';
+import type { PeerClasses, SelfRobotState } from './peers';
 import { READOUT_TAP_MS, createSlotReadout } from './readout';
 import { SCREEN_INSET, applyTV, createEmbers, createScreenPanel, createTvLight } from './screen';
 import type { ScreenPanel } from './screen';
@@ -262,6 +268,14 @@ export interface CaveOptions {
   reducedMotion: boolean;
   /** People as robot avatars (robot/), not orbs: the `lobby_avatars` flag. */
   avatars?: boolean;
+  /** The view to start in. Third person and front need avatars: without them it is always first. */
+  view?: CameraView;
+  /** Your name, for your own robot's emblem until the room says who you are. */
+  selfName?: string;
+  /** V was pressed: the shell decides the view (and keeps it, or says why not), then calls `setView`. */
+  onToggleView?(): void;
+  /** How your own robot is doing, whenever that changes ('off' in first person). */
+  onSelf?(state: SelfRobotState): void;
   /** The presence feed, read every frame; null while there is none. */
   feed(): PresenceFeed | null;
   hud: CaveHud;
@@ -278,6 +292,10 @@ export interface CaveOptions {
 
 export interface Cave {
   setState(next: { reducedMotion?: boolean }): void;
+  /** First person, third or front (those two only with avatars on): the camera glides there. */
+  setView(view: CameraView): void;
+  /** Loads the robot body again after it failed, so your robot (and everyone's) can show. */
+  retrySelf(): void;
   /** The camera now, clamped into the cave. */
   pose(): CameraState;
   dispose(): void;
@@ -473,8 +491,9 @@ export function createCave(canvas: HTMLCanvasElement, opts: CaveOptions): Cave {
   const picker = createPicker(camera, canvas, screens, grid);
   let focus = '';
   let focusKey = '';
+  // Where the camera is, not only you: a glide between views moves it too.
   const poseKey = (): string =>
-    `${fixed(motion.pos.x)},${fixed(motion.pos.y)},${fixed(motion.pos.z)},${motion.yaw.toFixed(3)},${motion.pitch.toFixed(3)}`;
+    `${fixed(motion.pos.x)},${fixed(motion.pos.y)},${fixed(motion.pos.z)},${motion.yaw.toFixed(3)},${motion.pitch.toFixed(3)},${fixed(camera.position.x)},${fixed(camera.position.y)},${fixed(camera.position.z)}`;
   const setFocus = (hit: Hit | null): void => {
     const next = hit === null ? '' : hit.lit ? hit.slug : `empty:${hit.slot}`;
     if (next !== focus) {
@@ -520,6 +539,7 @@ export function createCave(canvas: HTMLCanvasElement, opts: CaveOptions): Cave {
     rise: opts.hud.rise,
     fall: opts.hud.fall,
     pick: picker.pick,
+    onToggleView: () => opts.onToggleView?.(),
     onTap(hit, pointerType) {
       setFocus(hit);
       // The tap wins over the crosshair until the camera moves again.
@@ -619,6 +639,15 @@ export function createCave(canvas: HTMLCanvasElement, opts: CaveOptions): Cave {
   let rw = 0;
   let rh = 0;
   const self: SelfState = { x: 0, y: 0, z: 0, yaw: 0 };
+  // The view: where the camera is headed, how far along the glide it is (0 first, 1 out on the boom),
+  // how far round the boom has swung (0 behind, π in front) and how much of it is out.
+  const allowedView = (next: CameraView | undefined): CameraView => (opts.avatars && next !== undefined ? next : 'first');
+  let view: CameraView = allowedView(opts.view);
+  let blend = view === 'first' ? 0 : 1;
+  let swing = view === 'front' ? Math.PI : 0;
+  let boom = 1;
+  let selfState: SelfRobotState | null = null;
+  root.dataset.view = view;
   const frustum = new THREE.Frustum();
   const viewProjection = new THREE.Matrix4();
 
@@ -694,8 +723,45 @@ export function createCave(canvas: HTMLCanvasElement, opts: CaveOptions): Cave {
           bumps += 1;
         }
       }
+      // The camera: at your eye, or out on the boom behind your robot, gliding between them.
+      const goal = view === 'first' ? 0 : 1;
+      blend = reducedMotion
+        ? goal
+        : goal > blend
+          ? Math.min(goal, blend + dt / THIRD_PERSON.blend)
+          : Math.max(goal, blend - dt / THIRD_PERSON.blend);
+      // Round to the front only while out on the boom; back behind for first person, so it glides in from behind.
+      const swingGoal = view === 'front' ? Math.PI : 0;
+      const swingStep = (Math.PI * dt) / THIRD_PERSON.swing;
+      swing = reducedMotion
+        ? swingGoal
+        : swingGoal > swing
+          ? Math.min(swingGoal, swing + swingStep)
+          : Math.max(swingGoal, swing - swingStep);
+      const yaw = motion.yaw + Math.PI * smooth(swing / Math.PI);
+      // The shoulder offset fades out as it swings: in front, the robot is in the middle.
+      const side = THIRD_PERSON.side * (1 + Math.cos(swing)) * 0.5;
       camera.position.copy(motion.pos);
-      camera.rotation.set(-motion.pitch, -motion.yaw, 0);
+      let pitch = motion.pitch;
+      let robotShown = false;
+      if (blend > 0) {
+        const chase = chaseCamera(motion.pos, yaw, motion.pitch, peers.bodies(), side);
+        // Something in the way pulls the boom in at once; it grows back out gently.
+        boom =
+          chase.fraction < boom || reducedMotion
+            ? chase.fraction
+            : boom + (chase.fraction - boom) * (1 - Math.exp(-dt * THIRD_PERSON.ease));
+        const offset = boomOffset(yaw, motion.pitch, side);
+        const out = boom * smooth(blend);
+        camera.position.x += offset.x * out;
+        camera.position.y += offset.y * out;
+        camera.position.z += offset.z * out;
+        // Too close and you'd be looking out from inside your own head: the robot only shows once the camera is clear of it.
+        robotShown = Math.hypot(offset.x, offset.y, offset.z) * out > 0.9;
+        const held = Math.min(THIRD_PERSON.maxPitch, Math.max(THIRD_PERSON.minPitch, motion.pitch)) + THIRD_PERSON.tilt;
+        pitch += (held - motion.pitch) * smooth(blend);
+      }
+      camera.rotation.set(-pitch, -yaw, 0);
       camera.updateMatrixWorld();
 
       // Presence: publish where we are, hear from where we are, draw everyone
@@ -713,7 +779,27 @@ export function createCave(canvas: HTMLCanvasElement, opts: CaveOptions): Cave {
         feed.setListener(self);
         others = feed.peers();
       }
-      peers.update(dt, t, camera, others, reducedMotion);
+      peers.update(dt, t, camera, others, reducedMotion, motion.pos);
+      const selfNow = peers.updateSelf(
+        dt,
+        t,
+        blend > 0
+          ? {
+              id: feed ? feed.selfId() : null,
+              name: opts.selfName ?? '',
+              eye: motion.pos,
+              yaw: motion.yaw,
+              talking: feed ? feed.voice().speaking : false,
+              shown: robotShown,
+            }
+          : null,
+        reducedMotion,
+      );
+      if (selfNow !== selfState) {
+        selfState = selfNow;
+        root.dataset.self = selfNow;
+        opts.onSelf?.(selfNow);
+      }
       if (others.size !== peerCount) {
         peerCount = others.size;
         opts.onPeers(peerCount);
@@ -826,6 +912,13 @@ export function createCave(canvas: HTMLCanvasElement, opts: CaveOptions): Cave {
         reducedMotion = next.reducedMotion;
       }
     },
+    setView(next) {
+      view = allowedView(next);
+      root.dataset.view = view;
+    },
+    retrySelf() {
+      peers.retryBody();
+    },
     pose,
     dispose() {
       if (disposed) {
@@ -841,6 +934,8 @@ export function createCave(canvas: HTMLCanvasElement, opts: CaveOptions): Cave {
       avatarDirectory?.dispose();
       robotAssets?.dispose();
       delete root.dataset.robots;
+      delete root.dataset.view;
+      delete root.dataset.self;
       readout.dispose();
       delete root.dataset.hoverSlot;
       delete root.dataset.hoverGlow;

@@ -17,7 +17,7 @@
  */
 
 import { APPS } from '@forge/lobby';
-import type { CameraState } from '@forge/lobby';
+import type { CameraState, CameraView } from '@forge/lobby';
 import { useEffect, useRef } from 'react';
 import type { RefObject } from 'react';
 
@@ -26,6 +26,7 @@ import type { PresenceFeed } from './presence/types';
 import { createCave } from './scene/createCave';
 import type { Cave, CaveHud } from './scene/createCave';
 import type { Hit } from './scene/controls';
+import type { SelfRobotState } from './scene/peers';
 
 /** Everything the scene tells the shell. */
 export interface SceneEvents {
@@ -37,6 +38,10 @@ export interface SceneEvents {
   onPeers(count: number): void;
   /** The view is going away (unmount or page hide): the camera, for saving. */
   onLeave(pose: CameraState): void;
+  /** V was pressed: switch views. */
+  onToggleView(): void;
+  /** How your own robot is doing (third person). */
+  onSelf(state: SelfRobotState): void;
 }
 
 export interface LobbySceneProps {
@@ -44,6 +49,12 @@ export interface LobbySceneProps {
   reducedMotion: boolean;
   /** Draw people as robot avatars (the `lobby_avatars` flag), not orbs. Read once at mount. */
   avatars: boolean;
+  /** First or third person; the camera glides when it changes. */
+  view: CameraView;
+  /** Your name, for your own robot until the room says who you are. Read once at mount. */
+  selfName: string;
+  /** Bumped to load the robot body again after it failed. */
+  retrySelf: number;
   feed: RefObject<PresenceFeed | null>;
   /** The shell's HUD elements, read once when the scene mounts. */
   hud(): Omit<CaveHud, 'people'> | null;
@@ -57,12 +68,23 @@ const PEER_CLASSES = {
   talking: cls('talking'),
 };
 
-export default function LobbyScene({ initial, reducedMotion, avatars, feed, hud, events }: LobbySceneProps) {
+export default function LobbyScene({
+  initial,
+  reducedMotion,
+  avatars,
+  view,
+  selfName,
+  retrySelf,
+  feed,
+  hud,
+  events,
+}: LobbySceneProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const peopleRef = useRef<HTMLDivElement>(null);
   const caveRef = useRef<Cave | null>(null);
   const eventsRef = useRef(events);
   const motionRef = useRef(reducedMotion);
+  const viewRef = useRef(view);
 
   useEffect(() => {
     eventsRef.current = events;
@@ -72,6 +94,15 @@ export default function LobbyScene({ initial, reducedMotion, avatars, feed, hud,
     motionRef.current = reducedMotion;
     caveRef.current?.setState({ reducedMotion });
   }, [reducedMotion]);
+
+  useEffect(() => {
+    viewRef.current = view;
+    caveRef.current?.setView(view);
+  }, [view]);
+
+  useEffect(() => {
+    if (retrySelf > 0) caveRef.current?.retrySelf();
+  }, [retrySelf]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -91,6 +122,10 @@ export default function LobbyScene({ initial, reducedMotion, avatars, feed, hud,
         initial,
         reducedMotion: motionRef.current,
         avatars,
+        view: viewRef.current,
+        selfName,
+        onToggleView: () => eventsRef.current.onToggleView(),
+        onSelf: (state) => eventsRef.current.onSelf(state),
         feed: () => feed.current,
         hud: { ...elements, people },
         classes: PEER_CLASSES,

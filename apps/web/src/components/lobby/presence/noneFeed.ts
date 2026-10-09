@@ -42,6 +42,7 @@ export function noneFeed(reason: NoneReason): PresenceFeed {
     connect: () => Promise.resolve(),
     status: () => status,
     publish: nothing,
+    selfId: () => null,
     peers: () => NO_PEERS,
     joining: () => NOBODY_JOINING,
     setMic: () => Promise.resolve(false),

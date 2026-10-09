@@ -195,6 +195,8 @@ export function localFeed(me: FeedIdentity): PresenceFeed {
       post({ type: 'pos', id, name, pos: encodePosition(latest) });
     },
 
+    selfId: () => (id === '' ? null : id),
+
     peers() {
       expire(performance.now());
       return peers;
