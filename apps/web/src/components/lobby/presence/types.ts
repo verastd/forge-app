@@ -19,6 +19,8 @@
  * implementation lives in `./createPresenceFeed.ts` and is re-exported here
  * with exactly that signature. Import it from either module.
  */
+import type { LobbyAction } from '@forge/lobby';
+
 export interface SelfState { x: number; y: number; z: number; yaw: number }
 /** `talking`: speaking, and audible to you (in range, not muted by you, and you not deafened). */
 export interface PeerState extends SelfState { id: string; name: string; talking: boolean }
@@ -122,6 +124,15 @@ export interface PresenceFeed {
   setMuted(id: string, muted: boolean): void;
   /** Let the browser play sound: call it inside a user gesture. */
   resumeAudio(): Promise<void>;
+  /**
+   * Whether actions (a wave, catch) can go out now: in a room (or the
+   * practice room), not before or after.
+   */
+  actionsAvailable(): boolean;
+  /** Tells everyone else in the room about an action. False when it couldn't go (see `actionsAvailable`). */
+  sendAction(action: LobbyAction): boolean;
+  /** Hears everyone else's actions, by their id. Returns the unsubscribe. */
+  onAction(listener: (from: string, action: LobbyAction) => void): () => void;
   /** Render the cave's reverb again after it failed. */
   retryRoomSound(): void;
   close(): void;

@@ -85,6 +85,8 @@ import type { PresenceFeed } from './presence/types';
 import type { Hit } from './scene/controls';
 import type { SelfRobotState } from './scene/peers';
 import { ViewToggle } from './ViewToggle';
+import { PlayControls } from './PlayControls';
+import type { PlayState } from './scene/play';
 import { PeopleIcon, Spinner } from './icons';
 import { VoicePanel, roomCount, useFeedState, useFeedSummary, wantMicOnEntry } from './VoicePanel';
 
@@ -367,6 +369,10 @@ export function Lobby({ heading, directory }: { heading: ReactNode; directory: R
   const [view, setView] = useState<CameraView>('first');
   const [self, setSelf] = useState<SelfRobotState>('off');
   const [retrySelf, setRetrySelf] = useState(0);
+  /** Catch: where you are in a game, as the scene says; presses go to it by count. */
+  const [play, setPlay] = useState<PlayState>({ phase: 'unavailable', other: null, waving: false });
+  const [ballPress, setBallPress] = useState(0);
+  const [wavePress, setWavePress] = useState(0);
   /** The 2D lobby chosen (`?view=2d`): the 3D view never starts. */
   const [flat, setFlat] = useState(false);
 
@@ -479,6 +485,8 @@ export function Lobby({ heading, directory }: { heading: ReactNode; directory: R
     onLeave: saveCamera,
     onToggleView: () => chooseView(nextCameraView(shownView)),
     onSelf: setSelf,
+    onPlay: setPlay,
+    onPlayEvent: say,
   };
 
   const hud = useCallback(() => {
@@ -588,6 +596,8 @@ export function Lobby({ heading, directory }: { heading: ReactNode; directory: R
               view={shownView}
               selfName={login ?? ''}
               retrySelf={retrySelf}
+              ballPress={ballPress}
+              wavePress={wavePress}
               feed={feedRef}
               hud={hud}
               events={events}
@@ -613,15 +623,6 @@ export function Lobby({ heading, directory }: { heading: ReactNode; directory: R
               Exit
             </Link>
           )}
-          {!fallback && live && (
-            <ViewToggle
-              view={shownView}
-              avatars={avatars}
-              self={self}
-              onChange={chooseView}
-              onRetry={() => setRetrySelf((n) => n + 1)}
-            />
-          )}
           {/* While the wall is the page, from the server's first render on, the wall is
               the heading and the directory: both step out of sight but stay in the page
               for screen readers (the h1 is still the page's heading), and the directory
@@ -645,6 +646,20 @@ export function Lobby({ heading, directory }: { heading: ReactNode; directory: R
           <noscript>
             <style>{NO_SCRIPT_SHOWS_THE_PAGE}</style>
           </noscript>
+          {/* After the heading and the directory in the page's order (out of sight in the cave), so Exit
+              stays the stop just before the h1; on screen they sit right under Exit. */}
+          {!fallback && live && (
+            <ViewToggle
+              view={shownView}
+              avatars={avatars}
+              self={self}
+              onChange={chooseView}
+              onRetry={() => setRetrySelf((n) => n + 1)}
+            />
+          )}
+          {!fallback && live && avatars && (
+            <PlayControls state={play} onBall={() => setBallPress((n) => n + 1)} onWave={() => setWavePress((n) => n + 1)} />
+          )}
         </div>
         {live && <VoicePanel feed={feed} micRef={micRef} practice={practice} onRejoin={rejoin} />}
       </div>

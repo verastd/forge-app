@@ -41,8 +41,6 @@ export const THIRD_PERSON = Object.freeze({
   tilt: 0.12,
   /** To the right, so the robot stands a little left of centre. */
   side: 0.55,
-  /** The shortest the boom gets, as a fraction of its length, however tight the space. */
-  minFraction: 0.18,
   /** Steps the boom is shortened in when something is in the way. */
   steps: 50,
   /** The pitch the boom swings through: steeper and it would dive into the floor or flip overhead. */
@@ -105,7 +103,11 @@ export function clearAt(at: Vec3, bodies: readonly Vec3[]): boolean {
  * The third-person camera for a member whose eye is at `eye`, heading `yaw`
  * and pitch `pitch`, with everyone else's eyes at `bodies`: the boom as long
  * as it can be, up to its full length, with the whole of it from the eye out
- * clear. Never shorter than `minFraction`.
+ * clear. However tight the space, never longer than that: with someone right
+ * behind you the camera comes all the way in to your eye (the scene hides your
+ * robot that close) rather than end up inside them. With your eye inside
+ * someone already, it starts from the first clear point out along the boom;
+ * with nowhere clear at all, it stays at your eye.
  */
 export function chaseCamera(
   eye: Vec3,
@@ -120,17 +122,20 @@ export function chaseCamera(
     y: eye.y + offset.y * fraction,
     z: eye.z + offset.z * fraction,
   });
-  const { steps, minFraction } = THIRD_PERSON;
-  // Out from the eye: the first step that isn't clear stops the boom one step short of it.
+  const { steps } = THIRD_PERSON;
+  // Where the clear stretch starts: the eye, or, with the eye inside someone (for the frame
+  // before a bump parts you), the first step out along the boom that's clear of them.
+  let first = 0;
+  while (first <= steps && !clearAt(at(first / steps), bodies)) first += 1;
+  if (first > steps) return { position: at(0), fraction: 0 };
+  // Out from there: the first step that isn't clear stops the boom one step short of it.
   let fraction = 1;
-  for (let i = 1; i <= steps; i += 1) {
-    const k = i / steps;
-    if (!clearAt(at(k), bodies)) {
+  for (let i = first + 1; i <= steps; i += 1) {
+    if (!clearAt(at(i / steps), bodies)) {
       fraction = (i - 1) / steps;
       break;
     }
   }
-  fraction = Math.max(minFraction, fraction);
   return { position: at(fraction), fraction };
 }
 

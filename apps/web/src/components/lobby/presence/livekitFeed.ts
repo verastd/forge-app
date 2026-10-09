@@ -20,6 +20,7 @@
  * snapshot, rounded and throttled as types.ts describes.
  */
 import { REVERB_LEVEL, VOICE, clampReverbLevel, nearness, reverbWetFor } from '@forge/lobby';
+import type { LobbyAction } from '@forge/lobby';
 
 import type * as Engine from '../voice/engine';
 import type {
@@ -98,6 +99,7 @@ export function livekitFeed(): PresenceFeed {
   let unplaced = new Map<string, string>();
 
   const listeners = new Set<() => void>();
+  const actionListeners = new Set<(from: string, action: LobbyAction) => void>();
   let voice: VoiceSnapshot = { ...NO_VOICE, connection: 'connecting' };
   let shapeKey = '';
   let numbersKey = '';
@@ -199,6 +201,9 @@ export function livekitFeed(): PresenceFeed {
         return prefetched !== null ? Promise.resolve(prefetched) : fetchGrant();
       });
       if (placed) engine.setLocalPosition(self);
+      engine.setActionListener((from, action) => {
+        for (const listener of actionListeners) listener(from, action);
+      });
       detach = engine.subscribe(onEngine);
     }
     const current = engine;
@@ -296,6 +301,17 @@ export function livekitFeed(): PresenceFeed {
 
     retryRoomSound() {
       engine?.reloadReverb();
+    },
+
+    actionsAvailable: () => engine !== null && latest !== null && latest.status === 'connected',
+
+    sendAction: (action) => engine !== null && engine.sendAction(action),
+
+    onAction(listener) {
+      actionListeners.add(listener);
+      return () => {
+        actionListeners.delete(listener);
+      };
     },
 
     close() {

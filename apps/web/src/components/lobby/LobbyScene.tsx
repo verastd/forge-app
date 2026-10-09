@@ -27,6 +27,7 @@ import { createCave } from './scene/createCave';
 import type { Cave, CaveHud } from './scene/createCave';
 import type { Hit } from './scene/controls';
 import type { SelfRobotState } from './scene/peers';
+import type { PlayState } from './scene/play';
 
 /** Everything the scene tells the shell. */
 export interface SceneEvents {
@@ -42,6 +43,10 @@ export interface SceneEvents {
   onToggleView(): void;
   /** How your own robot is doing (third person). */
   onSelf(state: SelfRobotState): void;
+  /** Where you are in a game of catch. */
+  onPlay(state: PlayState): void;
+  /** Something about the game to say. */
+  onPlayEvent(text: string): void;
 }
 
 export interface LobbySceneProps {
@@ -55,6 +60,10 @@ export interface LobbySceneProps {
   selfName: string;
   /** Bumped to load the robot body again after it failed. */
   retrySelf: number;
+  /** Bumped for each press of the ball button (get one, or throw it). */
+  ballPress: number;
+  /** Bumped for each press of the wave button. */
+  wavePress: number;
   feed: RefObject<PresenceFeed | null>;
   /** The shell's HUD elements, read once when the scene mounts. */
   hud(): Omit<CaveHud, 'people'> | null;
@@ -75,6 +84,8 @@ export default function LobbyScene({
   view,
   selfName,
   retrySelf,
+  ballPress,
+  wavePress,
   feed,
   hud,
   events,
@@ -105,6 +116,14 @@ export default function LobbyScene({
   }, [retrySelf]);
 
   useEffect(() => {
+    if (ballPress > 0) caveRef.current?.ball();
+  }, [ballPress]);
+
+  useEffect(() => {
+    if (wavePress > 0) caveRef.current?.wave();
+  }, [wavePress]);
+
+  useEffect(() => {
     const host = hostRef.current;
     const people = peopleRef.current;
     const elements = hud();
@@ -126,6 +145,8 @@ export default function LobbyScene({
         selfName,
         onToggleView: () => eventsRef.current.onToggleView(),
         onSelf: (state) => eventsRef.current.onSelf(state),
+        onPlay: (state) => eventsRef.current.onPlay(state),
+        onPlayEvent: (text) => eventsRef.current.onPlayEvent(text),
         feed: () => feed.current,
         hud: { ...elements, people },
         classes: PEER_CLASSES,

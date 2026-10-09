@@ -82,8 +82,13 @@ import {
   type Vec3,
 } from '@forge/lobby';
 import {
+  acceptAction,
   acceptPacket,
+  createActionLimiter,
   createPacketLimiter,
+  encodeAction,
+  forgetActionSender,
+  parseAction,
   decodePosition,
   encodePosition,
   forgetSender,
@@ -101,11 +106,14 @@ import {
   type VoiceCandidate,
   voiceConfigProblem,
 } from '@forge/lobby';
+import type { LobbyAction } from '@forge/lobby';
 
 import type { NoneReason } from '../presence/noneFeed';
 import type { MicProblem } from '../presence/types';
 
 export const POSITION_TOPIC = 'pos';
+/** FORGE: what members do (lobby actions: a wave, a ball, a throw, a catch), sent reliably, apart from positions. */
+export const ACTION_TOPIC = 'act';
 
 // FORGE: no 'requesting-mic' or 'mic-denied'. Members join to listen, so the
 // mic has its own state (micMuted, micPending, micProblem), not the room's.
@@ -366,6 +374,8 @@ export class ProximityVoiceEngine {
   private lastSent: SelfState | null = null;
   private lastSentAt = 0;
   private limiter = createPacketLimiter();
+  private actionLimiter = createActionLimiter();
+  private actionListener: ((from: string, action: LobbyAction) => void) | null = null;
   /** Who you muted, by identity, so a muted peer stays muted when they rejoin. */
   private readonly mutedIdentities = new Set<string>();
   /** Who the SFU was last told may receive our mic, and when it last heard of an addition. */
@@ -505,6 +515,26 @@ export class ProximityVoiceEngine {
     local.yaw = v.yaw;
     this.localKnown = true;
     if (this.config.positionHz === 0) this.evaluate();
+  }
+
+  /**
+   * FORGE: sends an action to everyone in the room, reliably. False when there
+   * is no room to send it to (not joined yet, or it's gone).
+   */
+  sendAction(action: LobbyAction): boolean {
+    const room = this.room;
+    if (!room || room.state !== ConnectionState.Connected) return false;
+    room.localParticipant
+      .publishData(new TextEncoder().encode(encodeAction(action)), { reliable: true, topic: ACTION_TOPIC })
+      .catch(() => {
+        /* the room went; a later action starts over */
+      });
+    return true;
+  }
+
+  /** FORGE: who hears of other members' actions (one listener; null for none). */
+  setActionListener(listener: ((from: string, action: LobbyAction) => void) | null): void {
+    this.actionListener = listener;
   }
 
   /** Feed a peer position from an authoritative source instead of the data channel. */
@@ -930,6 +960,7 @@ export class ProximityVoiceEngine {
         if (p) this.teardownPeerAudio(p);
         this.peers.delete(rp.identity);
         forgetSender(this.limiter, rp.identity);
+        forgetActionSender(this.actionLimiter, rp.identity);
         // FORGE: and they leave the list of who may receive our mic at once.
         this.updatePermissions(room, performance.now());
         this.emit();
@@ -1010,6 +1041,20 @@ export class ProximityVoiceEngine {
       // (the tick's `listen`), never the SFU's room-wide speaker updates.
       .on(RoomEvent.DataReceived, (payload: Uint8Array, rp?: RemoteParticipant, _kind?: unknown, topic?: string) => {
         if (!live()) return;
+        if (topic === ACTION_TOPIC && rp) {
+          // FORGE: an action, from someone the room knows, within their own
+          // rate limit, and only a message parseAction takes whole.
+          if (!known(room, rp) || !acceptAction(this.actionLimiter, rp.identity, performance.now())) return;
+          let text: string;
+          try {
+            text = new TextDecoder('utf-8', { fatal: true }).decode(payload);
+          } catch {
+            return;
+          }
+          const action = parseAction(text);
+          if (action) this.actionListener?.(rp.identity, action);
+          return;
+        }
         if (topic !== POSITION_TOPIC || !rp) return;
         // FORGE: from a participant the room knows, within their rate limit,
         // and FORGE's 9-byte packet, which refuses any place no camera can be.
@@ -1419,6 +1464,7 @@ export class ProximityVoiceEngine {
   /** What a room leaves behind once it's gone. */
   private resetRoomState(): void {
     this.limiter = createPacketLimiter();
+    this.actionLimiter = createActionLimiter();
     this.lastSent = null;
     this.permittedList = [];
     this.permittedAt = Number.NEGATIVE_INFINITY;

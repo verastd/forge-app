@@ -32,4 +32,6 @@ export * from './avatar.js';
 export * from './avatarMotion.js';
 export * from './collide.js';
 export * from './chase.js';
+export * from './actions.js';
+export * from './play.js';
 export * from './headFit.js';

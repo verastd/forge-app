@@ -1450,3 +1450,27 @@
 .viewNote .reverbRetry {
   margin-left: 0;
 }
+
+/* ---- play: a ball and a wave, under the view ---- */
+
+.view button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.key {
+  padding: 1px 4px;
+  border: 1px solid rgba(var(--cave-line-rgb), 0.4);
+  color: rgba(var(--cave-text-rgb), 0.6);
+  font: 500 9px var(--font-mono);
+}
+
+.view button.incoming {
+  color: var(--cave-accent);
+  animation: breathe 0.9s ease-in-out infinite;
+}
+
+.root[data-motion='reduced'] .view button.incoming {
+  animation: none;
+}
