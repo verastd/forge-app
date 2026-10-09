@@ -81,9 +81,17 @@ describe('chaseCamera', () => {
     expect(clearAt(chase.position, [{ x: 0.4, y: 2.2, z: 2 }])).toBe(true);
   });
 
-  it('is never shorter than its minimum, however tight', () => {
-    const chase = chaseCamera(EYE, 0, 0, [{ x: 0, y: 1.7, z: 0.3 }]);
-    expect(chase.fraction).toBe(THIRD_PERSON.minFraction);
+  it('never puts the camera inside someone standing right behind: it comes in to the eye instead', () => {
+    const close = { x: 0, y: 1.7, z: 0.3 };
+    const chase = chaseCamera(EYE, 0, 0, [close]);
+    expect(chase.fraction).toBe(0);
+    expect(chase.position).toEqual(EYE);
+
+    // About 0.9 m behind, along the boom: stopped short of them, not pushed through.
+    const near = { x: 0.15, y: 1.85, z: 0.9 };
+    const short = chaseCamera(EYE, 0, 0, [near]);
+    expect(short.fraction).toBeLessThan(0.25);
+    expect(clearAt(short.position, [near])).toBe(true);
   });
 });
 
