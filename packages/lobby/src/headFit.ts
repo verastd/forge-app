@@ -42,6 +42,8 @@ export interface HeadPlacement {
   eyeScale?: number | null;
   /** A shiny black LED face screen across the face opening (head frame, metres). */
   screen?: HeadScreen | null;
+  /** What flies over the head (flyer.ts). */
+  flyer?: 'helicopter' | null;
 }
 
 export interface HeadScreen {

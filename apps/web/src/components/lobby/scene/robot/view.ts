@@ -32,8 +32,11 @@ import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 import {
   FACE_PANEL,
   HEAD_ANCHOR,
+  FLYER,
   HEAD_FIT,
   createBlinker,
+  flightArea,
+  flyerPhase,
   eyeRotations,
   finishLook,
   foreDirection,
@@ -42,10 +45,12 @@ import {
   robotPose,
   rotateAbout,
 } from '@forge/lobby';
-import type { ArmAim, ArmsPose, AvatarColors, AvatarFinish, Blinker, MotionInput, MotionPose } from '@forge/lobby';
+import type { ArmAim, ArmsPose, AvatarColors, AvatarFinish, Blinker, FlightArea, MotionInput, MotionPose, RoofGrid } from '@forge/lobby';
 import type { AvatarHead } from '@forge/shared';
 
 import type { RobotAssets, RobotBody } from './assets';
+import { createHelicopter } from './helicopter';
+import type { Helicopter } from './helicopter';
 import { JOINT_COLOR, createBodyMaterial, finish, paint } from './material';
 
 /**
@@ -105,8 +110,8 @@ export function lookKey(look: RobotLook): string {
 /** A head's placement, to tell when only that changed. */
 function placementKey(head: AvatarHead | null): string {
   if (!head) return '';
-  const { scale, offset, eyes, eyeAngles, angles, eyeScale, screen } = head.placement;
-  return JSON.stringify([scale, offset, eyes ?? null, eyeAngles ?? null, angles ?? null, eyeScale ?? null, screen ?? null]);
+  const { scale, offset, eyes, eyeAngles, angles, eyeScale, screen, flyer } = head.placement;
+  return JSON.stringify([scale, offset, eyes ?? null, eyeAngles ?? null, angles ?? null, eyeScale ?? null, screen ?? null, flyer ?? null]);
 }
 
 /** Where `node` sits in `ancestor`'s frame (ancestor's own transform left out). */
@@ -148,6 +153,8 @@ export interface RobotView {
   readonly look: RobotLook;
   /** 'loading' while a head or chest image it wears is still on its way. */
   readonly state: 'loading' | 'ready';
+  /** Whether something flies over its head (a preview frames a little higher and wider for it). */
+  readonly flying: boolean;
   setLook(look: RobotLook): void;
   /** Shows the chestplate's loading scan (an upload on its way), or lets the image back. */
   holdChest(loading: boolean): void;
@@ -548,6 +555,10 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
   let key = '';
   let headObject: THREE.Object3D | null = null;
   let headMaterials: THREE.Material[] = [];
+  // What flies over the head (placement.flyer), where it may fly, and the roofs it shines on.
+  let flyer: Helicopter | null = null;
+  let flight: { area: FlightArea; grid: RoofGrid } | null = null;
+  const flyerStart = flyerPhase(initial.id);
   let pendingHead: string | null = null;
   let accessoryObject: THREE.Object3D | null = null;
   let accessoryMaterials: THREE.Material[] = [];
@@ -621,8 +632,77 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
     }
   };
 
+  /**
+   * The worn model's top as a grid of heights in the head pivot's frame (its
+   * placement applied): the highest vertex over each cell. Null with no
+   * vertices to measure.
+   */
+  const measureRoofs = (object: THREE.Object3D): RoofGrid | null => {
+    headPivot.updateWorldMatrix(true, true);
+    const toPivot = headPivot.matrixWorld.clone().invert();
+    const toFrame = new THREE.Matrix4();
+    const v = new THREE.Vector3();
+    const points: number[] = [];
+    object.traverse((node) => {
+      const mesh = node as THREE.Mesh;
+      const position = mesh.isMesh ? mesh.geometry.getAttribute('position') : undefined;
+      if (!position) return;
+      toFrame.multiplyMatrices(toPivot, mesh.matrixWorld);
+      // A dense model needn't have every vertex looked at: a city's roofs are many vertices each.
+      const step = Math.max(1, Math.floor(position.count / 80_000));
+      for (let i = 0; i < position.count; i += step) {
+        v.fromBufferAttribute(position, i).applyMatrix4(toFrame);
+        points.push(v.x, v.y, v.z);
+      }
+    });
+    if (points.length === 0) return null;
+    let x0 = Infinity;
+    let x1 = -Infinity;
+    let z0 = Infinity;
+    let z1 = -Infinity;
+    let top = -Infinity;
+    for (let i = 0; i < points.length; i += 3) {
+      x0 = Math.min(x0, points[i]!);
+      x1 = Math.max(x1, points[i]!);
+      top = Math.max(top, points[i + 1]!);
+      z0 = Math.min(z0, points[i + 2]!);
+      z1 = Math.max(z1, points[i + 2]!);
+    }
+    const n = FLYER.grid;
+    const heights: (number | null)[] = new Array(n * n).fill(null);
+    for (let i = 0; i < points.length; i += 3) {
+      const col = Math.min(n - 1, Math.floor(((points[i]! - x0) / (x1 - x0 || 1)) * n));
+      const row = Math.min(n - 1, Math.floor(((points[i + 2]! - z0) / (z1 - z0 || 1)) * n));
+      const cell = row * n + col;
+      const was = heights[cell];
+      if (was === null || was === undefined || points[i + 1]! > was) heights[cell] = points[i + 1]!;
+    }
+    return { min: [x0, z0], max: [x1, z1], cols: n, rows: n, heights, top };
+  };
+
+  const dropFlyer = (): void => {
+    flyer?.dispose();
+    flyer = null;
+    flight = null;
+  };
+
+  /** Puts the head's flyer over it (measured as the head is now placed), or takes it away. */
+  const placeFlyer = (head: AvatarHead): void => {
+    const grid = head.placement.flyer === 'helicopter' && headObject ? measureRoofs(headObject) : null;
+    const area = grid ? flightArea(grid) : null;
+    if (!grid || !area) {
+      dropFlyer();
+      return;
+    }
+    flight = { area, grid };
+    if (!flyer) {
+      flyer = createHelicopter(glow);
+      headPivot.add(flyer.root);
+    }
+  };
+
   /** Scales and moves the worn head as `head.placement` says, and puts a replacing head's eyes. */
-  const placeHead = (head: AvatarHead): void => {
+  const fitHead = (head: AvatarHead): void => {
     if (!headObject) return;
     const { scale, offset, eyes, eyeAngles, eyeScale, screen: panel } = head.placement;
     const turns = eyeRotations(eyeAngles);
@@ -682,7 +762,14 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
     placeEyes(fittedSockets);
   };
 
+  /** Fits the worn head as `head.placement` says, and puts what flies over it. */
+  const placeHead = (head: AvatarHead): void => {
+    fitHead(head);
+    placeFlyer(head);
+  };
+
   const dropHead = (): void => {
+    dropFlyer();
     if (headObject) {
       headObject.removeFromParent();
       // Geometry and textures belong to the cached head; the materials are this robot's.
@@ -982,6 +1069,9 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
     get look() {
       return look;
     },
+    get flying() {
+      return flyer !== null;
+    },
     get state() {
       return pendingHead !== null || pendingAccessory !== null || pendingChest !== null || holding ? 'loading' : 'ready';
     },
@@ -1033,6 +1123,7 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
       flame.scale.set(0.18 + 0.1 * p.thrust, (0.22 + 0.45 * p.thrust) * flicker, 1);
       flame.position.y = -0.04 - 0.1 * p.thrust;
       flameMaterial.opacity = 0.35 + 0.55 * p.thrust;
+      if (flyer && flight) flyer.fly(flight.area, flight.grid, frame.t, flyerStart, frame.reducedMotion);
       return p;
     },
     dispose() {

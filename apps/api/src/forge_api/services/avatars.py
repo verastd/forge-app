@@ -130,6 +130,11 @@ register_schema(
             turn REAL NOT NULL,
             slant REAL NOT NULL
         )""",
+        # What flies over a head (a helicopter). No row: nothing.
+        """CREATE TABLE IF NOT EXISTS avatars_head_flyers (
+            head_id TEXT PRIMARY KEY REFERENCES avatars_heads (id),
+            flyer TEXT NOT NULL
+        )""",
     ],
 )
 
@@ -138,12 +143,13 @@ _HEAD_SELECT: Final = (
     "SELECT h.*, p.scale AS p_scale, p.x AS p_x, p.y AS p_y, p.z AS p_z, p.eyes AS p_eyes, "
     "a.slant AS a_slant, a.turn AS a_turn, a.pitch AS a_pitch, "
     "o.member_id AS o_member, l.eye_scale AS l_eye_scale, l.screen AS l_screen, "
-    "r.tilt AS r_tilt, r.turn AS r_turn, r.slant AS r_slant "
+    "r.tilt AS r_tilt, r.turn AS r_turn, r.slant AS r_slant, f.flyer AS f_flyer "
     "FROM avatars_heads h LEFT JOIN avatars_head_placements p ON p.head_id = h.id "
     "LEFT JOIN avatars_head_eye_angles a ON a.head_id = h.id "
     "LEFT JOIN avatars_head_owners o ON o.head_id = h.id "
     "LEFT JOIN avatars_head_eye_looks l ON l.head_id = h.id "
-    "LEFT JOIN avatars_head_angles r ON r.head_id = h.id"
+    "LEFT JOIN avatars_head_angles r ON r.head_id = h.id "
+    "LEFT JOIN avatars_head_flyers f ON f.head_id = h.id"
 )
 
 
@@ -399,6 +405,7 @@ def _placement(row: dict[str, Any]) -> AvatarHeadPlacement:
         angles=turned,
         eyeScale=row["l_eye_scale"],
         screen=screen,
+        flyer=row["f_flyer"],
     )
 
 
@@ -407,8 +414,14 @@ def _store_placement(db: StateDB, head_id: str, placement: AvatarHeadPlacement |
     db.execute("DELETE FROM avatars_head_eye_angles WHERE head_id = ?", (head_id,))
     db.execute("DELETE FROM avatars_head_eye_looks WHERE head_id = ?", (head_id,))
     db.execute("DELETE FROM avatars_head_angles WHERE head_id = ?", (head_id,))
+    db.execute("DELETE FROM avatars_head_flyers WHERE head_id = ?", (head_id,))
     if placement is None:
         return
+    if placement.flyer is not None:
+        db.execute(
+            "INSERT INTO avatars_head_flyers (head_id, flyer) VALUES (?, ?)",
+            (head_id, placement.flyer),
+        )
     if placement.angles is not None:
         db.execute(
             "INSERT INTO avatars_head_angles (head_id, tilt, turn, slant) VALUES (?, ?, ?, ?)",
@@ -652,6 +665,7 @@ def delete_head(db: StateDB, head_id: str) -> None:
         db.execute("DELETE FROM avatars_head_eye_angles WHERE head_id = ?", (head_id,))
         db.execute("DELETE FROM avatars_head_eye_looks WHERE head_id = ?", (head_id,))
         db.execute("DELETE FROM avatars_head_angles WHERE head_id = ?", (head_id,))
+        db.execute("DELETE FROM avatars_head_flyers WHERE head_id = ?", (head_id,))
         db.execute("DELETE FROM avatars_head_owners WHERE head_id = ?", (head_id,))
         db.execute("DELETE FROM avatars_heads WHERE id = ?", (head_id,))
         _drop_unused_assets(db, [row["sha256"]])

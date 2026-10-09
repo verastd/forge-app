@@ -104,6 +104,7 @@ function toWire(placement: HeadPlacement): AvatarHeadPlacement {
     ...(placement.angles?.some((a) => a !== 0) ? { angles: placement.angles } : {}),
     ...(placement.eyeScale && placement.eyeScale !== 1 ? { eyeScale: placement.eyeScale } : {}),
     ...(placement.screen ? { screen: placement.screen } : {}),
+    ...(placement.flyer ? { flyer: placement.flyer } : {}),
   };
 }
 
@@ -417,6 +418,12 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled, w
     });
   };
 
+  /** The helicopter is a choice of its own: Size, Move and Reset leave it as it is. */
+  const onFlyer = (event: ChangeEvent<HTMLInputElement>): void => {
+    const on = event.target.checked;
+    setPlacement((current) => (current ? { ...current, flyer: on ? 'helicopter' : null } : current));
+  };
+
   const onScreenSize = (index: 0 | 1) => (event: ChangeEvent<HTMLInputElement>): void => {
     const metres = Number(event.target.value) / 100;
     setPlacement((current) => {
@@ -688,6 +695,19 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled, w
           </div>
         )}
 
+        <label className={`${styles.radio} ${styles.fitFull}`}>
+          <input type="checkbox" checked={placement?.flyer === 'helicopter'} onChange={onFlyer} disabled={locked} />
+          <span>
+            Helicopter over the top
+            <br />
+            <span className={styles.hint}>
+              {placement?.flyer === 'helicopter'
+                ? 'Flies figure-8s just above the model’s top, its searchlight on whatever’s below. Everyone wearing this head gets it.'
+                : 'Off: nothing flies over this head.'}
+            </span>
+          </span>
+        </label>
+
         <div className={styles.fitRow}>
           {picking && (
             <button type="button" className="btn btn-sm btn-ghost" onClick={() => setPicking(null)}>
@@ -698,7 +718,7 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled, w
             type="button"
             className="btn btn-sm btn-ghost"
             onClick={() => {
-              if (auto) setPlacement(auto);
+              if (auto) setPlacement((current) => ({ ...auto, flyer: current?.flyer ?? null }));
               setPicking(null);
               setNote({ tone: 'ok', text: 'Back to the first guess.' });
             }}

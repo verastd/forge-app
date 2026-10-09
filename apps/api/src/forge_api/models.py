@@ -1106,6 +1106,10 @@ class AvatarHeadScreen(BaseModel):
     size: tuple[_ScreenSide, _ScreenSide]
 
 
+#: What may fly over a head.
+AvatarHeadFlyer = Literal["helicopter"]
+
+
 class AvatarHeadPlacement(BaseModel):
     """How a library head is worn: its file scaled by `scale` about its origin, then moved
     by `offset` (metres from the neck, the robot's unscaled frame); `eyes`, when set, are
@@ -1137,6 +1141,8 @@ class AvatarHeadPlacement(BaseModel):
     ) = None
     #: A face screen across the face opening; None: the model's own face.
     screen: AvatarHeadScreen | None = None
+    #: What flies over the head (a helicopter with a searchlight); None: nothing.
+    flyer: AvatarHeadFlyer | None = None
 
 
 #: A head worn as its file says.

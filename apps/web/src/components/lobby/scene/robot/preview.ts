@@ -50,6 +50,11 @@ const FRAMES = {
   robot: { eye: new THREE.Vector3(0, 0.8 * ROBOT_SCALE, 3.7), at: new THREE.Vector3(0, 0.56 * ROBOT_SCALE, 0) },
   head: { eye: new THREE.Vector3(0, 0.93 * ROBOT_SCALE, 1.55), at: new THREE.Vector3(0, 0.9 * ROBOT_SCALE, 0) },
 } as const;
+/** The same, a little higher and further back, for a robot with something flying over its head. */
+const FLYING_FRAMES = {
+  robot: { eye: new THREE.Vector3(0, 0.88 * ROBOT_SCALE, 4.3), at: new THREE.Vector3(0, 0.66 * ROBOT_SCALE, 0) },
+  head: { eye: new THREE.Vector3(0, 1.06 * ROBOT_SCALE, 2.05), at: new THREE.Vector3(0, 1.0 * ROBOT_SCALE, 0) },
+} as const;
 
 export function createRobotPreview(
   canvas: HTMLCanvasElement,
@@ -210,7 +215,7 @@ export function createRobotPreview(
     // turntable, and it stays wherever a drag leaves it.
     const still = framing === 'head';
     if (!still && !onPick && !dragging && !reducedMotion && now - idleSince > 1500) spin += dt * 0.35;
-    const target = FRAMES[framing];
+    const target = (robot?.flying ? FLYING_FRAMES : FRAMES)[framing];
     const ease = reducedMotion ? 1 : 1 - Math.exp(-dt * 5);
     camera.position.lerp(target.eye, ease);
     lookAt.lerp(target.at, ease);
