@@ -239,3 +239,41 @@ export function voiceConfigProblem(config: VoiceNumbers): string | null {
   }
   return null;
 }
+
+/**
+ * Each listener's own reverb level: how much of the cave's echo they hear,
+ * as a share of `VOICE.reverbWet` (1 is the cave as designed, 0 is dry). It
+ * only changes the listener's own mix: everyone else hears their own level.
+ */
+export const REVERB_LEVEL = Object.freeze({ min: 0, max: 1, default: 1, step: 0.05 });
+
+/** The Web Storage item a listener's reverb level is kept under, versioned in its name. */
+export const REVERB_LEVEL_STORAGE_ITEM = 'forge.lobby.reverb.v1' as const;
+
+/** The level kept inside its range (a non-number is the default). */
+export function clampReverbLevel(level: number): number {
+  if (!Number.isFinite(level)) return REVERB_LEVEL.default;
+  return Math.min(REVERB_LEVEL.max, Math.max(REVERB_LEVEL.min, level));
+}
+
+/** The engine's wet send for a listener's level: the cave's own, scaled. */
+export function reverbWetFor(level: number): number {
+  return Math.round(VOICE.reverbWet * clampReverbLevel(level) * 1000) / 1000;
+}
+
+/** A level as stored: a whole percent. */
+export function serializeReverbLevel(level: number): string {
+  return String(Math.round(clampReverbLevel(level) * 100));
+}
+
+/**
+ * A stored level, or null when there is nothing usable (no value, not a
+ * whole number of percent, or out of range). Stored values are untrusted
+ * input, so it rejects rather than repairs. Never throws.
+ */
+export function parseReverbLevel(raw: string | null): number | null {
+  if (typeof raw !== 'string' || !/^\d{1,3}$/.test(raw)) return null;
+  const percent = Number(raw);
+  if (percent < REVERB_LEVEL.min * 100 || percent > REVERB_LEVEL.max * 100) return null;
+  return percent / 100;
+}

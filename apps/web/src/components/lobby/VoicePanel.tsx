@@ -18,6 +18,9 @@
  *   device ("Rejoin here"), sound held back by the browser ("Turn on
  *   sound"), voice closed or failed ("Rejoin", "Try again"), why the mic
  *   didn't start, and voice connecting or not on here at all;
+ * - in the drawer, while voice is on: your own Reverb level (how much of the
+ *   cave's echo you hear, 0 to 100%), for your ears only and kept in this
+ *   browser;
  * - the dock: Mic (its fill is the mic's level), Deafen and the people count,
  *   three icons in one bar. Without voice for good (signed out, the practice
  *   build, not set up) the dock is the count alone. On a phone the count
@@ -44,9 +47,9 @@
  * Names are the feed's, already sanitised, and reach the page as text only.
  */
 
-import { VOICE } from '@forge/lobby';
+import { REVERB_LEVEL, REVERB_LEVEL_STORAGE_ITEM, VOICE, parseReverbLevel, serializeReverbLevel } from '@forge/lobby';
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
-import type { ButtonHTMLAttributes, CSSProperties, ReactNode, RefObject } from 'react';
+import type { ButtonHTMLAttributes, ChangeEvent, CSSProperties, ReactNode, RefObject } from 'react';
 
 import { HeadphonesIcon, MicIcon, PeopleIcon, Spinner } from './icons';
 import styles from './Lobby.module.css';
@@ -592,6 +595,7 @@ export function VoicePanel({ feed, micRef, practice, onRejoin }: VoicePanelProps
           </button>
         </header>
         <People
+          reverb={voice.available ? <ReverbControl feed={feed} roomSound={voice.roomSound} /> : null}
           people={voice.people}
           voiced={voice.available}
           canMute={voice.available}
@@ -601,6 +605,81 @@ export function VoicePanel({ feed, micRef, practice, onRejoin }: VoicePanelProps
         />
       </section>
     </aside>
+  );
+}
+
+// ---------- your own reverb ----------
+
+/** The level this browser kept, or the cave's own when there is none (or storage is blocked). */
+function storedReverbLevel(): number {
+  try {
+    return parseReverbLevel(window.localStorage.getItem(REVERB_LEVEL_STORAGE_ITEM)) ?? REVERB_LEVEL.default;
+  } catch {
+    return REVERB_LEVEL.default;
+  }
+}
+
+/**
+ * How much of the cave's echo you hear: your own mix, nobody else's. It takes effect as the
+ * slider moves, and is kept in this browser (where storage is allowed) for next time.
+ */
+function ReverbControl({ feed, roomSound }: { feed: PresenceFeed | null; roomSound: VoiceSnapshot['roomSound'] }) {
+  const [level, setLevel] = useState<number>(REVERB_LEVEL.default);
+  const id = useId();
+  // The kept level, read after mount (the server has no storage), and given to the feed.
+  useEffect(() => {
+    setLevel(storedReverbLevel());
+  }, []);
+  useEffect(() => {
+    feed?.setReverbLevel(level);
+  }, [feed, level]);
+
+  const percent = Math.round(level * 100);
+  const words = percent === 0 ? 'off (dry voices)' : `${percent}%`;
+  const onChange = (event: ChangeEvent<HTMLInputElement>): void => {
+    const next = Number(event.target.value) / 100;
+    setLevel(next);
+    try {
+      window.localStorage.setItem(REVERB_LEVEL_STORAGE_ITEM, serializeReverbLevel(next));
+    } catch {
+      // Storage blocked: the level still holds for this visit.
+    }
+  };
+  const note =
+    roomSound === 'rendering'
+      ? 'The cave’s echo is loading…'
+      : roomSound === 'failed'
+        ? 'The cave’s echo didn’t load.'
+        : 'Your ears only: everyone sets their own.';
+
+  return (
+    <div className={styles.reverb} data-control="reverb">
+      <label htmlFor={id} className={styles.reverbHead}>
+        <span>Reverb</span>
+        <output htmlFor={id} className={styles.reverbValue}>
+          {words}
+        </output>
+      </label>
+      <input
+        id={id}
+        type="range"
+        min={REVERB_LEVEL.min * 100}
+        max={REVERB_LEVEL.max * 100}
+        step={REVERB_LEVEL.step * 100}
+        value={percent}
+        onChange={onChange}
+        aria-valuetext={percent === 0 ? 'Off, voices dry' : `${percent}% of the cave’s echo`}
+      />
+      <p className={styles.reverbNote} role="status">
+        {roomSound === 'rendering' && <Spinner />}
+        {note}
+        {roomSound === 'failed' && feed !== null && (
+          <button type="button" className={styles.reverbRetry} onClick={() => feed.retryRoomSound()}>
+            Try again
+          </button>
+        )}
+      </p>
+    </div>
   );
 }
 
@@ -633,7 +712,10 @@ function People({
   feed,
   room,
   handOff,
+  reverb,
 }: {
+  /** Your own Reverb control, at the top of what scrolls (so a short screen never loses the list to it). */
+  reverb: ReactNode;
   people: Person[];
   voiced: boolean;
   canMute: boolean;
@@ -683,20 +765,24 @@ function People({
   }, [hasPeople]);
 
   if (!hasPeople) {
-    if (room.sees) {
-      return <p className={styles.empty}>Nobody else is here yet.</p>;
-    }
     return (
-      <p className={styles.empty}>
-        {room.finding ? (
-          <>
-            <Spinner />
-            Finding who&apos;s here…
-          </>
+      <div className={styles.roster}>
+        {reverb}
+        {room.sees ? (
+          <p className={styles.empty}>Nobody else is here yet.</p>
         ) : (
-          "Can't see who's here right now."
+          <p className={styles.empty}>
+            {room.finding ? (
+              <>
+                <Spinner />
+                Finding who&apos;s here…
+              </>
+            ) : (
+              "Can't see who's here right now."
+            )}
+          </p>
         )}
-      </p>
+      </div>
     );
   }
 
@@ -769,6 +855,8 @@ function People({
           letGo();
         }}
       >
+        {/* Hidden while searching, never unmounted: a level storage couldn't keep still holds. */}
+        <div hidden={needle !== ''}>{reverb}</div>
         {found.length === 0 && <p className={styles.empty}>Nobody here by that name.</p>}
         {(['here', 'talking', 'earshot', 'far', 'muted'] as const).map((group) => {
           const members = groups.get(group);

@@ -223,6 +223,8 @@ export function localFeed(me: FeedIdentity): PresenceFeed {
         refreshVoice();
       }
     },
+    // The local feed plays no sound: the level only matters to a room with voices.
+    setReverbLevel() {},
     setMuted(peerId, muted) {
       if (process.env.NODE_ENV !== 'production' && fixture !== null) {
         fixture = {
