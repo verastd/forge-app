@@ -23,15 +23,21 @@
  * out on any screen without a LiveKit server (see `fullVoiceFixture`).
  */
 import {
+  acceptAction,
   acceptPacket,
+  createActionLimiter,
   createPacketLimiter,
   decodePosition,
+  encodeAction,
   encodePosition,
+  forgetActionSender,
   forgetSender,
+  parseAction,
   nearness,
   sanitizeName,
   sendPolicy,
 } from '@forge/lobby';
+import type { LobbyAction } from '@forge/lobby';
 
 import { NO_VOICE, sortPeople } from './noneFeed';
 import type { FeedIdentity, FeedStatus, PeerState, Person, PresenceFeed, SelfState, VoiceSnapshot } from './types';
@@ -48,7 +54,9 @@ const VOICE_INTERVAL_MS = 200;
 type Message =
   | { type: 'hello'; id: string; name: string; pos?: Uint8Array }
   | { type: 'pos'; id: string; name: string; pos: Uint8Array }
-  | { type: 'bye'; id: string };
+  | { type: 'bye'; id: string }
+  /** An action (a wave, a ball, a throw, a catch), as @forge/lobby's encodeAction writes it. */
+  | { type: 'act'; id: string; act: string };
 
 interface Seen {
   at: number;
@@ -63,6 +71,8 @@ export function localFeed(me: FeedIdentity): PresenceFeed {
   const joining = new Map<string, string>();
   const seen = new Map<string, Seen>();
   let limiter = createPacketLimiter();
+  const actionLimiter = createActionLimiter();
+  const actionListeners = new Set<(from: string, action: LobbyAction) => void>();
   let status: FeedStatus = { kind: 'local', state: 'connecting' };
   let id = '';
   let channel: BroadcastChannel | null = null;
@@ -112,6 +122,7 @@ export function localFeed(me: FeedIdentity): PresenceFeed {
     peers.delete(peerId);
     joining.delete(peerId);
     forgetSender(limiter, peerId);
+    forgetActionSender(actionLimiter, peerId);
   };
 
   const expire = (now: number): void => {
@@ -130,6 +141,13 @@ export function localFeed(me: FeedIdentity): PresenceFeed {
     if (message === null || message.id === id) return;
     if (message.type === 'bye') {
       drop(message.id);
+      return;
+    }
+    if (message.type === 'act') {
+      // Only from a tab this one already knows, within its own rate limit, and a message parseAction takes whole.
+      if (!seen.has(message.id) || !acceptAction(actionLimiter, message.id, performance.now())) return;
+      const action = parseAction(message.act);
+      if (action) for (const listener of actionListeners) listener(message.id, action);
       return;
     }
     const now = performance.now();
@@ -243,6 +261,21 @@ export function localFeed(me: FeedIdentity): PresenceFeed {
       }
       return Promise.resolve();
     },
+    actionsAvailable: () => channel !== null,
+
+    sendAction(action) {
+      if (channel === null) return false;
+      post({ type: 'act', id, act: encodeAction(action) });
+      return true;
+    },
+
+    onAction(listener) {
+      actionListeners.add(listener);
+      return () => {
+        actionListeners.delete(listener);
+      };
+    },
+
     retryRoomSound() {
       if (process.env.NODE_ENV !== 'production' && fixture !== null) {
         fixture = { ...fixture, roomSound: 'rendering' };
@@ -298,6 +331,10 @@ function parseMessage(data: unknown): Message | null {
   const { type, id, name, pos } = data as Record<string, unknown>;
   if (typeof id !== 'string' || !ID_PATTERN.test(id)) return null;
   if (type === 'bye') return { type, id };
+  if (type === 'act') {
+    const { act } = data as Record<string, unknown>;
+    return typeof act === 'string' ? { type, id, act } : null;
+  }
   if (type !== 'hello' && type !== 'pos') return null;
   if (pos !== undefined && !(pos instanceof Uint8Array)) return null;
   if (type === 'pos') {

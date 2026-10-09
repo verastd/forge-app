@@ -34,7 +34,7 @@ import { loadBody } from './robot/assets';
 import type { RobotAssets, RobotBody } from './robot/assets';
 import type { AvatarDirectory } from './robot/directory';
 import { EYE_DROP, ROBOT_SCALE, TAG_HEIGHT, createRobot } from './robot/view';
-import type { RobotView } from './robot/view';
+import type { RobotAct, RobotView } from './robot/view';
 
 /** CSS module class names the tags use (Lobby.module.css). */
 export interface PeerClasses {
@@ -66,6 +66,8 @@ export interface SelfFrame {
   talking: boolean;
   /** Whether it's drawn this frame: false while the camera is too close to it (in, or gliding into, first person). */
   shown: boolean;
+  /** What your arms are doing (a wave, a ball, a throw, a catch). */
+  act?: RobotAct;
 }
 
 export interface Peers {
@@ -81,7 +83,12 @@ export interface Peers {
     peers: ReadonlyMap<string, PeerState>,
     reducedMotion: boolean,
     viewer?: THREE.Vector3,
+    act?: (id: string) => RobotAct | undefined,
   ): void;
+  /** Someone's robot, once it's drawn (null while they're an orb, or gone). */
+  robotOf(id: string): RobotView | null;
+  /** Your own robot, while third person shows it. */
+  selfRobot(): RobotView | null;
   /** Draws your own robot (null: none), and says how it's doing. */
   updateSelf(dt: number, t: number, self: SelfFrame | null, reducedMotion: boolean): SelfRobotState;
   /** Loads the shared body again, after it failed: everyone's robot, and yours. */
@@ -266,7 +273,7 @@ export function createPeers(
   }
 
   return {
-    update(dt, t, camera, peers, reducedMotion, viewer = camera.position) {
+    update(dt, t, camera, peers, reducedMotion, viewer = camera.position, act = undefined) {
       const smoothing = 1 - Math.exp(-dt * 12);
       const width = layer.clientWidth;
       const height = layer.clientHeight;
@@ -349,6 +356,7 @@ export function createPeers(
             viewerDistance: view.dist,
             reducedMotion,
             talking: view.talking,
+            act: act?.(id),
           });
           tagY = robot.root.position.y + TAG_HEIGHT;
         }
@@ -445,9 +453,17 @@ export function createPeers(
           viewerDistance: Infinity,
           reducedMotion,
           talking: self.talking,
+          act: self.act,
         });
       }
       return robot.state === 'loading' ? 'loading' : 'ready';
+    },
+    robotOf(id) {
+      const view = views.get(id);
+      return view?.robot && view.handover >= 1 ? view.robot : null;
+    },
+    selfRobot() {
+      return mine.robot && mine.robot.root.visible ? mine.robot : null;
     },
     retryBody() {
       if (robots && bodyState === 'failed') takeBody(loadBody());

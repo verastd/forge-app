@@ -47,6 +47,8 @@ import { createControls, createPicker } from './controls';
 import type { Hit, Motion } from './controls';
 import { CAVE_PALETTE, shaderColor } from './palette';
 import { createPeers } from './peers';
+import { createPlay } from './play';
+import type { Play, PlayState } from './play';
 import { createRobotAssets } from './robot/assets';
 import { createAvatarDirectory } from './robot/directory';
 import type { PeerClasses, SelfRobotState } from './peers';
@@ -276,6 +278,10 @@ export interface CaveOptions {
   onToggleView?(): void;
   /** How your own robot is doing, whenever that changes ('off' in first person). */
   onSelf?(state: SelfRobotState): void;
+  /** Where you are in a game of catch (with avatars on), whenever that changes. */
+  onPlay?(state: PlayState): void;
+  /** Something about the game to say: "Incoming from …", "You caught it!". */
+  onPlayEvent?(text: string): void;
   /** The presence feed, read every frame; null while there is none. */
   feed(): PresenceFeed | null;
   hud: CaveHud;
@@ -296,6 +302,10 @@ export interface Cave {
   setView(view: CameraView): void;
   /** Loads the robot body again after it failed, so your robot (and everyone's) can show. */
   retrySelf(): void;
+  /** Get a ball, or throw it (as F does). */
+  ball(): void;
+  /** Wave (as G does). */
+  wave(): void;
   /** The camera now, clamped into the cave. */
   pose(): CameraState;
   dispose(): void;
@@ -474,6 +484,18 @@ export function createCave(canvas: HTMLCanvasElement, opts: CaveOptions): Cave {
     robotAssets && avatarDirectory ? { assets: robotAssets, directory: avatarDirectory } : null,
   );
   let robotCount = -1;
+  // Catch and waving, with avatars on: the camera joins the scene so a ball held in first person can ride in it.
+  const play: Play | null = opts.avatars
+    ? createPlay(scene, camera, opts.feed, {
+        onState: (state) => {
+          root.dataset.ball = state.phase;
+          root.dataset.wave = state.waving ? 'on' : 'off';
+          opts.onPlay?.(state);
+        },
+        onEvent: (text) => opts.onPlayEvent?.(text),
+      })
+    : null;
+  if (play) scene.add(camera);
 
   // ---------- controls ----------
   const { initial } = opts;
@@ -540,6 +562,8 @@ export function createCave(canvas: HTMLCanvasElement, opts: CaveOptions): Cave {
     fall: opts.hud.fall,
     pick: picker.pick,
     onToggleView: () => opts.onToggleView?.(),
+    onBall: play ? () => play.ball() : undefined,
+    onWave: play ? () => play.wave() : undefined,
     onTap(hit, pointerType) {
       setFocus(hit);
       // The tap wins over the crosshair until the camera moves again.
@@ -779,7 +803,7 @@ export function createCave(canvas: HTMLCanvasElement, opts: CaveOptions): Cave {
         feed.setListener(self);
         others = feed.peers();
       }
-      peers.update(dt, t, camera, others, reducedMotion, motion.pos);
+      peers.update(dt, t, camera, others, reducedMotion, motion.pos, play ? (id) => play.act(id) : undefined);
       const selfNow = peers.updateSelf(
         dt,
         t,
@@ -791,10 +815,21 @@ export function createCave(canvas: HTMLCanvasElement, opts: CaveOptions): Cave {
               yaw: motion.yaw,
               talking: feed ? feed.voice().speaking : false,
               shown: robotShown,
+              act: play?.selfAct(),
             }
           : null,
         reducedMotion,
       );
+      play?.update({
+        dt,
+        eye: motion.pos,
+        yaw: normalizeYaw(motion.yaw),
+        selfId: feed ? feed.selfId() : null,
+        peers: others,
+        robotOf: (id) => peers.robotOf(id),
+        selfRobot: robotShown ? peers.selfRobot() : null,
+        reducedMotion,
+      });
       if (selfNow !== selfState) {
         selfState = selfNow;
         root.dataset.self = selfNow;
@@ -919,6 +954,12 @@ export function createCave(canvas: HTMLCanvasElement, opts: CaveOptions): Cave {
     retrySelf() {
       peers.retryBody();
     },
+    ball() {
+      play?.ball();
+    },
+    wave() {
+      play?.wave();
+    },
     pose,
     dispose() {
       if (disposed) {
@@ -930,7 +971,10 @@ export function createCave(canvas: HTMLCanvasElement, opts: CaveOptions): Cave {
       window.removeEventListener('keydown', kick);
       canvas.removeEventListener('webglcontextlost', onContextLost);
       controls.dispose();
+      play?.dispose();
       peers.dispose();
+      delete root.dataset.ball;
+      delete root.dataset.wave;
       avatarDirectory?.dispose();
       robotAssets?.dispose();
       delete root.dataset.robots;

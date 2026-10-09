@@ -29,8 +29,19 @@
 
 import * as THREE from 'three';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { FACE_PANEL, HEAD_ANCHOR, HEAD_FIT, createBlinker, eyeRotations, hashId, robotPose, rotateAbout } from '@forge/lobby';
-import type { AvatarColors, Blinker, MotionInput, MotionPose } from '@forge/lobby';
+import {
+  FACE_PANEL,
+  HEAD_ANCHOR,
+  HEAD_FIT,
+  createBlinker,
+  eyeRotations,
+  foreDirection,
+  hashId,
+  reachArm,
+  robotPose,
+  rotateAbout,
+} from '@forge/lobby';
+import type { ArmAim, ArmsPose, AvatarColors, Blinker, MotionInput, MotionPose } from '@forge/lobby';
 import type { AvatarHead } from '@forge/shared';
 
 import type { RobotAssets, RobotBody } from './assets';
@@ -103,15 +114,32 @@ function positionIn(ancestor: THREE.Object3D, node: THREE.Object3D): THREE.Vecto
   return at;
 }
 
+/**
+ * What a robot's arms are doing over its own hover (a wave, a held ball, a
+ * throw, a catch): the pose from @forge/lobby's play.ts, and for a catch
+ * where (in the world) its hands reach for.
+ */
+export interface RobotAct {
+  arms: ArmsPose | null;
+  reach: THREE.Vector3 | null;
+}
+
 /** What drives one frame of a robot, besides its pose inputs. */
 export interface RobotFrame extends Omit<MotionInput, 'phase'> {
   dt: number;
   talking: boolean;
+  act?: RobotAct;
 }
 
 export interface RobotView {
   /** Add this to the scene; position and rotate it (yaw: rotation.y). */
   readonly root: THREE.Group;
+  /**
+   * The right palm: something held goes in here and moves with the hand. Its
+   * frame is the robot's own (unscaled: anything in it is drawn ROBOT_SCALE
+   * times its size).
+   */
+  readonly hand: THREE.Group;
   readonly look: RobotLook;
   /** 'loading' while a head or chest image it wears is still on its way. */
   readonly state: 'loading' | 'ready';
@@ -234,7 +262,46 @@ function cutHeadMaterial(material: THREE.Material, cut: HeadCut, toRoot: THREE.M
 interface Bones {
   head: THREE.Bone | null;
   spine: THREE.Bone | null;
-  arms: { upper: THREE.Bone; fore: THREE.Bone | null; side: 1 | -1 }[];
+  arms: { upper: THREE.Bone; fore: THREE.Bone | null; hand: THREE.Bone | null; side: 1 | -1 }[];
+}
+
+/**
+ * One arm, for gestures: where its shoulder is in the model, how long its
+ * bones are, the way each bone points (to the next joint) in its own frame,
+ * and the rotation it was last given, which the next eases from.
+ */
+interface ArmRig {
+  side: 1 | -1;
+  shoulder: THREE.Vector3;
+  upperLength: number;
+  foreLength: number;
+  upperDir: THREE.Vector3;
+  foreDir: THREE.Vector3 | null;
+  upperShown: THREE.Quaternion | null;
+  foreShown: THREE.Quaternion | null;
+}
+
+const qModel = new THREE.Quaternion();
+const qParent = new THREE.Quaternion();
+const qBind = new THREE.Quaternion();
+const qFix = new THREE.Quaternion();
+const vDir = new THREE.Vector3();
+const vAim = new THREE.Vector3();
+
+/**
+ * The local rotation that points `bone` (whose own way along the limb is
+ * `along`, in its frame) in `dir`, a direction in `model`'s frame: its bind
+ * rotation under its parent as it is now, turned the shortest way onto `dir`.
+ */
+function aimRotation(model: THREE.Object3D, bone: THREE.Bone, bind: THREE.Quaternion, along: THREE.Vector3, dir: THREE.Vector3, out: THREE.Quaternion): THREE.Quaternion {
+  model.getWorldQuaternion(qModel).invert();
+  if (bone.parent) bone.parent.getWorldQuaternion(qParent);
+  else qParent.identity();
+  qParent.premultiply(qModel);
+  qBind.copy(qParent).multiply(bind);
+  vDir.copy(along).applyQuaternion(qBind).normalize();
+  qFix.setFromUnitVectors(vDir, vAim.copy(dir).normalize());
+  return out.copy(qParent).invert().multiply(qFix).multiply(qParent).multiply(bind);
 }
 
 /** A bone's rest rotation, and the robot's axes expressed in the bone's own frame. */
@@ -326,7 +393,7 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
       ] as const
     ).flatMap(([s, side]) => {
       const upper = find(`CC_Base_${s}_Upperarm`);
-      return upper ? [{ upper, fore: find(`CC_Base_${s}_Forearm`), side }] : [];
+      return upper ? [{ upper, fore: find(`CC_Base_${s}_Forearm`), hand: find(`CC_Base_${s}_Hand`), side }] : [];
     }),
   };
   const rest = {
@@ -334,6 +401,46 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
     spine: bones.spine ? restOf(bones.spine) : null,
     arms: bones.arms.map((arm) => ({ side: arm.side, upper: restOf(arm.upper), fore: arm.fore ? restOf(arm.fore) : null })),
   };
+  // Each arm's rig for gestures, measured in the bind pose in the model's own frame.
+  const inModel = (bone: THREE.Bone): THREE.Vector3 => model.worldToLocal(bone.getWorldPosition(new THREE.Vector3()));
+  const alongTo = (bone: THREE.Bone, next: THREE.Bone): THREE.Vector3 => {
+    const toNext = next.getWorldPosition(new THREE.Vector3()).sub(bone.getWorldPosition(new THREE.Vector3()));
+    return toNext.applyQuaternion(bone.getWorldQuaternion(new THREE.Quaternion()).invert()).normalize();
+  };
+  const rigs: ArmRig[] = bones.arms.map((arm) => {
+    const shoulder = inModel(arm.upper);
+    const elbow = arm.fore ? inModel(arm.fore) : shoulder.clone().add(new THREE.Vector3(0, -0.2, 0));
+    const wrist = arm.hand ? inModel(arm.hand) : elbow.clone().add(new THREE.Vector3(0, -0.2, 0));
+    return {
+      side: arm.side,
+      shoulder,
+      upperLength: Math.max(0.05, shoulder.distanceTo(elbow)),
+      foreLength: Math.max(0.05, elbow.distanceTo(wrist)),
+      upperDir: arm.fore ? alongTo(arm.upper, arm.fore) : new THREE.Vector3(0, -1, 0),
+      foreDir: arm.fore && arm.hand ? alongTo(arm.fore, arm.hand) : null,
+      upperShown: null,
+      foreShown: null,
+    };
+  });
+  // The right palm, as the head slot: the model's own frame, at the palm, following the hand bone.
+  const hand = new THREE.Group();
+  hand.name = 'hand-slot';
+  hand.matrixAutoUpdate = false;
+  const rightArm = bones.arms.find((arm) => arm.side === -1);
+  if (rightArm?.hand && rightArm.fore) {
+    const wrist = inModel(rightArm.hand);
+    const palm = wrist.clone().add(wrist.clone().sub(inModel(rightArm.fore)).normalize().multiplyScalar(0.07));
+    const modelInverse = new THREE.Matrix4().copy(model.matrixWorld).invert();
+    hand.matrix
+      .multiplyMatrices(modelInverse, rightArm.hand.matrixWorld)
+      .invert()
+      .multiply(new THREE.Matrix4().makeTranslation(palm.x, palm.y, palm.z));
+    rightArm.hand.add(hand);
+  } else {
+    hand.matrix.makeTranslation(-0.3, 0.45, 0.1);
+    model.add(hand);
+  }
+
   const slot = new THREE.Group();
   slot.name = 'head-slot';
   slot.matrixAutoUpdate = false;
@@ -779,8 +886,56 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
     };
   };
 
+  const qAim = new THREE.Quaternion();
+  const reachAt = new THREE.Vector3();
+  /**
+   * The arms over the hover: each one a gesture names turned toward its aim
+   * (or reaching for a ball with IK), by the gesture's weight, and every arm
+   * easing from where it was, so nothing snaps as gestures come and go.
+   */
+  function poseArms(frame: RobotFrame): void {
+    const arms = frame.act?.arms ?? null;
+    const reach = frame.act?.reach ?? null;
+    const ease = 1 - Math.exp(-frame.dt * 16);
+    rest.arms.forEach((arm, i) => {
+      const rig = rigs[i];
+      if (!rig) return;
+      const aim: ArmAim | null = arms ? (arm.side === -1 ? arms.right : arms.left) : null;
+      if (aim && arms && arms.weight > 0) {
+        let upperDir: { x: number; y: number; z: number };
+        let foreDir: { x: number; y: number; z: number };
+        if (reach) {
+          // Reaching for something real: each hand to it, a little apart, the elbows down and out.
+          model.worldToLocal(reachAt.copy(reach));
+          reachAt.x += arm.side * 0.06;
+          const solved = reachArm(rig.shoulder, reachAt, rig.upperLength, rig.foreLength, { x: arm.side * 0.6, y: -1, z: 0 });
+          upperDir = solved.upper;
+          foreDir = solved.fore;
+        } else {
+          upperDir = aim.upper;
+          foreDir = foreDirection(aim);
+        }
+        aimRotation(model, arm.upper.bone, arm.upper.bind, rig.upperDir, vAim.set(upperDir.x, upperDir.y, upperDir.z), qAim);
+        arm.upper.bone.quaternion.slerp(qAim, arms.weight);
+        if (arm.fore && rig.foreDir) {
+          arm.upper.bone.updateMatrixWorld(true);
+          aimRotation(model, arm.fore.bone, arm.fore.bind, rig.foreDir, vAim.set(foreDir.x, foreDir.y, foreDir.z), qAim);
+          arm.fore.bone.quaternion.slerp(qAim, arms.weight);
+        }
+      }
+      // Ease every arm from where it was last frame: in and out of gestures alike.
+      if (rig.upperShown) arm.upper.bone.quaternion.copy(rig.upperShown.slerp(arm.upper.bone.quaternion, ease));
+      else rig.upperShown = arm.upper.bone.quaternion.clone();
+      if (arm.fore) {
+        if (rig.foreShown) arm.fore.bone.quaternion.copy(rig.foreShown.slerp(arm.fore.bone.quaternion, ease));
+        else rig.foreShown = arm.fore.bone.quaternion.clone();
+      }
+    });
+  }
+
   return {
     root,
+    hand,
     pickHead,
     get look() {
       return look;
@@ -825,6 +980,7 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
         pose(arm.upper, p.armSwing + arm.side * p.armSway);
         pose(arm.fore, p.armSwing * 0.45 + 0.08);
       }
+      poseArms(frame);
 
       const open = blinker.openness(frame.t);
       for (const eye of eyes) {
