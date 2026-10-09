@@ -159,8 +159,15 @@ export async function* paginateOffset<
   }
 }
 
+/** Linear, unlike `/\/+$/`, which backtracks on a long run of slashes. */
+function trimTrailingSlashes(url: string): string {
+  let end = url.length;
+  while (end > 0 && url[end - 1] === '/') end--;
+  return url.slice(0, end);
+}
+
 export function createLedgerClient(options: LedgerClientOptions = {}) {
-  const baseUrl = (options.baseUrl ?? '/bff/ledger').replace(/\/+$/, '');
+  const baseUrl = trimTrailingSlashes(options.baseUrl ?? '/bff/ledger');
   const timeoutMs = options.timeoutMs ?? 30_000;
   const credentials = options.credentials ?? 'same-origin';
   const doFetch: typeof fetch | undefined = options.fetch ?? globalThis.fetch?.bind(globalThis);
