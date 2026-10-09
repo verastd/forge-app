@@ -105,7 +105,9 @@ export function clearAt(at: Vec3, bodies: readonly Vec3[]): boolean {
  * as it can be, up to its full length, with the whole of it from the eye out
  * clear. However tight the space, never longer than that: with someone right
  * behind you the camera comes all the way in to your eye (the scene hides your
- * robot that close) rather than end up inside them.
+ * robot that close) rather than end up inside them. With your eye inside
+ * someone already, it starts from the first clear point out along the boom;
+ * with nowhere clear at all, it stays at your eye.
  */
 export function chaseCamera(
   eye: Vec3,
@@ -121,11 +123,15 @@ export function chaseCamera(
     z: eye.z + offset.z * fraction,
   });
   const { steps } = THIRD_PERSON;
-  // Out from the eye: the first step that isn't clear stops the boom one step short of it.
+  // Where the clear stretch starts: the eye, or, with the eye inside someone (for the frame
+  // before a bump parts you), the first step out along the boom that's clear of them.
+  let first = 0;
+  while (first <= steps && !clearAt(at(first / steps), bodies)) first += 1;
+  if (first > steps) return { position: at(0), fraction: 0 };
+  // Out from there: the first step that isn't clear stops the boom one step short of it.
   let fraction = 1;
-  for (let i = 1; i <= steps; i += 1) {
-    const k = i / steps;
-    if (!clearAt(at(k), bodies)) {
+  for (let i = first + 1; i <= steps; i += 1) {
+    if (!clearAt(at(i / steps), bodies)) {
       fraction = (i - 1) / steps;
       break;
     }
