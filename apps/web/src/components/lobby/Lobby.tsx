@@ -623,18 +623,6 @@ export function Lobby({ heading, directory }: { heading: ReactNode; directory: R
               Exit
             </Link>
           )}
-          {!fallback && live && (
-            <ViewToggle
-              view={shownView}
-              avatars={avatars}
-              self={self}
-              onChange={chooseView}
-              onRetry={() => setRetrySelf((n) => n + 1)}
-            />
-          )}
-          {!fallback && live && avatars && (
-            <PlayControls state={play} onBall={() => setBallPress((n) => n + 1)} onWave={() => setWavePress((n) => n + 1)} />
-          )}
           {/* While the wall is the page, from the server's first render on, the wall is
               the heading and the directory: both step out of sight but stay in the page
               for screen readers (the h1 is still the page's heading), and the directory
@@ -658,6 +646,20 @@ export function Lobby({ heading, directory }: { heading: ReactNode; directory: R
           <noscript>
             <style>{NO_SCRIPT_SHOWS_THE_PAGE}</style>
           </noscript>
+          {/* After the heading and the directory in the page's order (out of sight in the cave), so Exit
+              stays the stop just before the h1; on screen they sit right under Exit. */}
+          {!fallback && live && (
+            <ViewToggle
+              view={shownView}
+              avatars={avatars}
+              self={self}
+              onChange={chooseView}
+              onRetry={() => setRetrySelf((n) => n + 1)}
+            />
+          )}
+          {!fallback && live && avatars && (
+            <PlayControls state={play} onBall={() => setBallPress((n) => n + 1)} onWave={() => setWavePress((n) => n + 1)} />
+          )}
         </div>
         {live && <VoicePanel feed={feed} micRef={micRef} practice={practice} onRejoin={rejoin} />}
       </div>
