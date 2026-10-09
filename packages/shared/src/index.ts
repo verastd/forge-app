@@ -1349,6 +1349,10 @@ export const AvatarHeadScreenSchema = z.object({
 });
 export type AvatarHeadScreen = z.infer<typeof AvatarHeadScreenSchema>;
 
+/** What may fly over a head (`placement.flyer`). */
+export const AVATAR_HEAD_FLYERS = ['helicopter'] as const;
+export type AvatarHeadFlyer = (typeof AVATAR_HEAD_FLYERS)[number];
+
 export const AvatarHeadPlacementSchema = z.object({
   scale: z.number().min(AVATAR_PLACEMENT_SCALE_MIN).max(AVATAR_PLACEMENT_SCALE_MAX),
   offset: placementPoint,
@@ -1387,6 +1391,12 @@ export const AvatarHeadPlacementSchema = z.object({
    * eyes sit on it. Absent: the model's own face (a face Tripo modelled).
    */
   screen: AvatarHeadScreenSchema.nullish(),
+  /**
+   * Something that flies over the head, forever, for whoever wears it: a
+   * helicopter doing figure-8s above the model's top, a searchlight on what's
+   * below. Absent: nothing.
+   */
+  flyer: z.enum(AVATAR_HEAD_FLYERS).nullish(),
 });
 export type AvatarHeadPlacement = z.infer<typeof AvatarHeadPlacementSchema>;
 

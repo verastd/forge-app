@@ -34,6 +34,9 @@ import {
   HEAD_ANCHOR,
   HEAD_FIT,
   createBlinker,
+  flightArea,
+  flyerPhase,
+  roofGrid,
   eyeRotations,
   finishLook,
   foreDirection,
@@ -42,10 +45,12 @@ import {
   robotPose,
   rotateAbout,
 } from '@forge/lobby';
-import type { ArmAim, ArmsPose, AvatarColors, AvatarFinish, Blinker, MotionInput, MotionPose } from '@forge/lobby';
+import type { ArmAim, ArmsPose, AvatarColors, AvatarFinish, Blinker, FlightArea, MotionInput, MotionPose, RoofGrid } from '@forge/lobby';
 import type { AvatarHead } from '@forge/shared';
 
 import type { RobotAssets, RobotBody } from './assets';
+import { createHelicopter } from './helicopter';
+import type { Helicopter } from './helicopter';
 import { JOINT_COLOR, createBodyMaterial, finish, paint } from './material';
 
 /**
@@ -105,8 +110,8 @@ export function lookKey(look: RobotLook): string {
 /** A head's placement, to tell when only that changed. */
 function placementKey(head: AvatarHead | null): string {
   if (!head) return '';
-  const { scale, offset, eyes, eyeAngles, angles, eyeScale, screen } = head.placement;
-  return JSON.stringify([scale, offset, eyes ?? null, eyeAngles ?? null, angles ?? null, eyeScale ?? null, screen ?? null]);
+  const { scale, offset, eyes, eyeAngles, angles, eyeScale, screen, flyer } = head.placement;
+  return JSON.stringify([scale, offset, eyes ?? null, eyeAngles ?? null, angles ?? null, eyeScale ?? null, screen ?? null, flyer ?? null]);
 }
 
 /** Where `node` sits in `ancestor`'s frame (ancestor's own transform left out). */
@@ -148,6 +153,8 @@ export interface RobotView {
   readonly look: RobotLook;
   /** 'loading' while a head or chest image it wears is still on its way. */
   readonly state: 'loading' | 'ready';
+  /** Whether something flies over its head (a preview frames a little higher and wider for it). */
+  readonly flying: boolean;
   setLook(look: RobotLook): void;
   /** Shows the chestplate's loading scan (an upload on its way), or lets the image back. */
   holdChest(loading: boolean): void;
@@ -548,6 +555,10 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
   let key = '';
   let headObject: THREE.Object3D | null = null;
   let headMaterials: THREE.Material[] = [];
+  // What flies over the head (placement.flyer), where it may fly, and the roofs it shines on.
+  let flyer: Helicopter | null = null;
+  let flight: { area: FlightArea; grid: RoofGrid } | null = null;
+  const flyerStart = flyerPhase(initial.id);
   let pendingHead: string | null = null;
   let accessoryObject: THREE.Object3D | null = null;
   let accessoryMaterials: THREE.Material[] = [];
@@ -621,8 +632,77 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
     }
   };
 
+  /**
+   * A worn model's top as a grid of heights in its pivot's frame (its
+   * placement applied): its triangles and points, measured by roofGrid. Null
+   * with nothing to measure.
+   */
+  const measureRoofs = (object: THREE.Object3D, pivot: THREE.Object3D): RoofGrid | null => {
+    pivot.updateWorldMatrix(true, true);
+    const toPivot = pivot.matrixWorld.clone().invert();
+    const toFrame = new THREE.Matrix4();
+    const v = new THREE.Vector3();
+    const points: number[] = [];
+    const triangles: number[] = [];
+    object.traverse((node) => {
+      const mesh = node as THREE.Mesh;
+      const position = mesh.isMesh ? mesh.geometry.getAttribute('position') : undefined;
+      if (!position) return;
+      toFrame.multiplyMatrices(toPivot, mesh.matrixWorld);
+      const base = points.length / 3;
+      // A dense model needn't have every vertex looked at (its vertices cover its roofs on their
+      // own); a light one, a box-built city, is measured whole, triangles and all.
+      const step = Math.max(1, Math.floor(position.count / 80_000));
+      for (let i = 0; i < position.count; i += step) {
+        v.fromBufferAttribute(position, i).applyMatrix4(toFrame);
+        points.push(v.x, v.y, v.z);
+      }
+      if (step !== 1) return;
+      const index = mesh.geometry.getIndex();
+      if (index) {
+        for (let i = 0; i < index.count; i += 1) triangles.push(base + index.getX(i));
+      } else {
+        for (let i = 0; i < position.count; i += 1) triangles.push(base + i);
+      }
+    });
+    return roofGrid(points, triangles);
+  };
+
+  /** Which worn model the flyer is over: the head's, when both have one. */
+  let flyerOver: 'head' | 'accessory' | null = null;
+
+  const dropFlyer = (): void => {
+    flyer?.dispose();
+    flyer = null;
+    flight = null;
+    flyerOver = null;
+  };
+
+  /**
+   * Puts a worn model's flyer over it (measured as it is now placed), or takes
+   * it away. A head's flyer wins over an accessory's; with the head's gone,
+   * the accessory's takes over.
+   */
+  const placeFlyer = (slot: 'head' | 'accessory', worn: AvatarHead | null): void => {
+    const object = slot === 'head' ? headObject : accessoryObject;
+    const pivot = slot === 'head' ? headPivot : accessoryPivot;
+    if (slot === 'accessory' && flyerOver === 'head') return;
+    const grid = worn?.placement.flyer === 'helicopter' && object ? measureRoofs(object, pivot) : null;
+    const area = grid ? flightArea(grid) : null;
+    if (!grid || !area) {
+      if (flyerOver !== slot) return;
+      dropFlyer();
+      if (slot === 'head') placeFlyer('accessory', look.accessory ?? null);
+      return;
+    }
+    flight = { area, grid };
+    if (!flyer) flyer = createHelicopter(glow);
+    if (flyerOver !== slot) pivot.add(flyer.root);
+    flyerOver = slot;
+  };
+
   /** Scales and moves the worn head as `head.placement` says, and puts a replacing head's eyes. */
-  const placeHead = (head: AvatarHead): void => {
+  const fitHead = (head: AvatarHead): void => {
     if (!headObject) return;
     const { scale, offset, eyes, eyeAngles, eyeScale, screen: panel } = head.placement;
     const turns = eyeRotations(eyeAngles);
@@ -682,7 +762,15 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
     placeEyes(fittedSockets);
   };
 
+  /** Fits the worn head as `head.placement` says, and puts what flies over it. */
+  const placeHead = (head: AvatarHead): void => {
+    fitHead(head);
+    placeFlyer('head', head);
+  };
+
   const dropHead = (): void => {
+    const hadFlyer = flyerOver === 'head';
+    if (hadFlyer) dropFlyer();
     if (headObject) {
       headObject.removeFromParent();
       // Geometry and textures belong to the cached head; the materials are this robot's.
@@ -696,6 +784,8 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
     screen.visible = false;
     headCut.on.value = 0;
     placeEyes(ownSockets);
+    // An accessory's flyer, if it has one, takes over from the head's.
+    if (hadFlyer) placeFlyer('accessory', look.accessory ?? null);
   };
 
   /** Loads a library model's own copy for this robot: its materials cloned, double-sided, lit by the robots' map. */
@@ -736,9 +826,11 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
     turnPivot(accessoryPivot, accessory.placement);
     accessoryObject.scale.setScalar(accessory.placement.scale);
     accessoryObject.position.set(0, 0, 0);
+    placeFlyer('accessory', accessory);
   };
 
   const dropAccessory = (): void => {
+    if (flyerOver === 'accessory') dropFlyer();
     if (!accessoryObject) return;
     accessoryObject.removeFromParent();
     for (const each of accessoryMaterials) each.dispose();
@@ -982,6 +1074,9 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
     get look() {
       return look;
     },
+    get flying() {
+      return flyer !== null;
+    },
     get state() {
       return pendingHead !== null || pendingAccessory !== null || pendingChest !== null || holding ? 'loading' : 'ready';
     },
@@ -1033,6 +1128,7 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
       flame.scale.set(0.18 + 0.1 * p.thrust, (0.22 + 0.45 * p.thrust) * flicker, 1);
       flame.position.y = -0.04 - 0.1 * p.thrust;
       flameMaterial.opacity = 0.35 + 0.55 * p.thrust;
+      if (flyer && flight) flyer.fly(flight.area, flight.grid, frame.t, flyerStart, frame.reducedMotion);
       return p;
     },
     dispose() {
