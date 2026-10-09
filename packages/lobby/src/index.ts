@@ -6,7 +6,9 @@
  * presence.ts) the multiplayer packet and name rules, and the voice: Fable's
  * attenuation and acoustics (attenuation.ts, acoustics.ts) and the cave's
  * settings for them (voice.ts), members bumping into each other
- * (collide.ts) and fitting a library head to the robot (headFit.ts). No DOM, no three.js and no runtime
+ * (collide.ts), fitting a library head to the robot (headFit.ts) and the
+ * shared behaviours (behaviors/: the catalog, budgets, entities and the
+ * world, ADR-009). No DOM, no three.js and no runtime
  * dependencies (tsconfig.json and eslint.config.mjs enforce it), so the
  * scene, the shell, the presence feeds, the voice engine and next.config.mjs
  * all share one source of truth, and vitest can prove it in Node.
@@ -35,3 +37,4 @@ export * from './chase.js';
 export * from './actions.js';
 export * from './play.js';
 export * from './headFit.js';
+export * from './behaviors/index.js';
