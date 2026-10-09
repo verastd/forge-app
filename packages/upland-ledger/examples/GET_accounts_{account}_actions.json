@@ -1,0 +1,184 @@
+{
+  "data": [
+    {
+      "global_sequence": 351019346,
+      "timestamp": "2026-10-09T00:12:28.000Z",
+      "block_num": 91624466,
+      "block_id": "057614129e5689f13b37136b6d2eb71ac0a4c0faec8e960e979a32f6003c50dd",
+      "trx_id": "3ff8415d02d89cff745720f32c2419fcb7c4cbd848293c7501b1f50974dda65d",
+      "action_ordinal": 3,
+      "creator_action_ordinal": 0,
+      "contract": "playuplandme",
+      "action": "n5",
+      "receiver": "playuplandme",
+      "notified": [
+        "playuplandme"
+      ],
+      "actors": [
+        "ymc55j4fboxi"
+      ],
+      "authorization": [
+        {
+          "actor": "ymc55j4fboxi",
+          "permission": "upland"
+        }
+      ],
+      "receipts": [
+        {
+          "receiver": "playuplandme",
+          "global_sequence": "351019346",
+          "recv_sequence": "147815991",
+          "auth_sequence": [
+            {
+              "account": "ymc55j4fboxi",
+              "sequence": "81"
+            }
+          ]
+        }
+      ],
+      "data": {
+        "memo": "This transaction notarizes that Upland user kingbo with EOS account ymc55j4fboxi owns 2506 SEARSDALE AVE, Cleveland, OH on Upland. Initial minting transaction: a29e4a996279a9a3ef3175fabcd2cb8e20575dab5933f7fda39b4017806f37ad",
+        "p14": "ymc55j4fboxi",
+        "a45": "81826746578110",
+        "p24": "29999.00 UPX"
+      },
+      "producer": "uplandprod1e",
+      "cpu_usage_us": 0,
+      "irreversible": false,
+      "source": "hyperion",
+      "stream": "live",
+      "normalizer_version": 1,
+      "ingested_at": "2026-10-09T00:12:30.198Z"
+    },
+    {
+      "global_sequence": 351019343,
+      "timestamp": "2026-10-09T00:12:28.000Z",
+      "block_num": 91624466,
+      "block_id": "057614129e5689f13b37136b6d2eb71ac0a4c0faec8e960e979a32f6003c50dd",
+      "trx_id": "3ff8415d02d89cff745720f32c2419fcb7c4cbd848293c7501b1f50974dda65d",
+      "action_ordinal": 2,
+      "creator_action_ordinal": 0,
+      "contract": "upxtokenacct",
+      "action": "transfer",
+      "receiver": "upxtokenacct",
+      "notified": [
+        "upxtokenacct",
+        "ymc55j4fboxi",
+        "playuplandme"
+      ],
+      "actors": [
+        "ymc55j4fboxi"
+      ],
+      "authorization": [
+        {
+          "actor": "ymc55j4fboxi",
+          "permission": "upland"
+        }
+      ],
+      "receipts": [
+        {
+          "receiver": "upxtokenacct",
+          "global_sequence": "351019343",
+          "recv_sequence": "33655685",
+          "auth_sequence": [
+            {
+              "account": "ymc55j4fboxi",
+              "sequence": "78"
+            }
+          ]
+        },
+        {
+          "receiver": "ymc55j4fboxi",
+          "global_sequence": "351019344",
+          "recv_sequence": "23",
+          "auth_sequence": [
+            {
+              "account": "ymc55j4fboxi",
+              "sequence": "79"
+            }
+          ]
+        },
+        {
+          "receiver": "playuplandme",
+          "global_sequence": "351019345",
+          "recv_sequence": "147815990",
+          "auth_sequence": [
+            {
+              "account": "ymc55j4fboxi",
+              "sequence": "80"
+            }
+          ]
+        }
+      ],
+      "data": {
+        "from": "ymc55j4fboxi",
+        "to": "playuplandme",
+        "amount": 31498.95,
+        "symbol": "UPX",
+        "memo": "",
+        "quantity": "31498.95 UPX"
+      },
+      "producer": "uplandprod1e",
+      "cpu_usage_us": 0,
+      "irreversible": false,
+      "source": "hyperion",
+      "stream": "live",
+      "normalizer_version": 1,
+      "ingested_at": "2026-10-09T00:12:30.198Z"
+    },
+    {
+      "global_sequence": 351019119,
+      "timestamp": "2026-10-09T00:12:08.500Z",
+      "block_num": 91624427,
+      "block_id": "057613eb78c3596415ee33169456af91893d74d70fa316b69e1ff6c83c33db89",
+      "trx_id": "a70b5acd39ad7b2335af4dfa12b7a1ef6f11e0a406eac7b983e4a2a9502867d1",
+      "action_ordinal": 3,
+      "creator_action_ordinal": 0,
+      "contract": "playuplandme",
+      "action": "n5",
+      "receiver": "playuplandme",
+      "notified": [
+        "playuplandme"
+      ],
+      "actors": [
+        "ymc55j4fboxi"
+      ],
+      "authorization": [
+        {
+          "actor": "ymc55j4fboxi",
+          "permission": "upland"
+        }
+      ],
+      "receipts": [
+        {
+          "receiver": "playuplandme",
+          "global_sequence": "351019119",
+          "recv_sequence": "147815874",
+          "auth_sequence": [
+            {
+              "account": "ymc55j4fboxi",
+              "sequence": "77"
+            }
+          ]
+        }
+      ],
+      "data": {
+        "memo": "This transaction notarizes that Upland user kingbo with EOS account ymc55j4fboxi owns 2312 SEARSDALE AVE, Cleveland, OH on Upland. Initial minting transaction: ec745f9c2d705684a7d50c172a3ac81870f7d07bf706f4203a96a3dbf1016e6e",
+        "p14": "ymc55j4fboxi",
+        "a45": "81826746578131",
+        "p24": "20000.00 UPX"
+      },
+      "producer": "uplandprod1b",
+      "cpu_usage_us": 0,
+      "irreversible": false,
+      "source": "hyperion",
+      "stream": "live",
+      "normalizer_version": 1,
+      "ingested_at": "2026-10-09T00:12:10.232Z"
+    }
+  ],
+  "next_cursor": "eyJ0IjoxNzkxNTA0NzI4NTAwLCJnIjoiMzUxMDE5MTE5In0",
+  "count": 3,
+  "account": "ymc55j4fboxi",
+  "role": "actor"
+}

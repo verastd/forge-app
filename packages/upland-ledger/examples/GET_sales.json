@@ -1,0 +1,56 @@
+{
+  "data": [
+    {
+      "timestamp": "2026-10-09T00:12:28.000Z",
+      "property_id": "81826746578110",
+      "buyer": "ymc55j4fboxi",
+      "seller": "tlifor1bq435",
+      "trx_id": "3ff8415d02d89cff745720f32c2419fcb7c4cbd848293c7501b1f50974dda65d",
+      "address": "2506 SEARSDALE AVE",
+      "city": "Cleveland",
+      "neighborhood": "",
+      "mint_price_upx": 0,
+      "price_upx": 29999,
+      "buyer_paid_upx": 31498.95,
+      "seller_proceeds_upx": 28499.05,
+      "community_fee_upx": 2999.9,
+      "price_to_mint": 0
+    },
+    {
+      "timestamp": "2026-10-09T00:12:08.500Z",
+      "property_id": "81826746578131",
+      "buyer": "ymc55j4fboxi",
+      "seller": "inpnrc15kf4m",
+      "trx_id": "a70b5acd39ad7b2335af4dfa12b7a1ef6f11e0a406eac7b983e4a2a9502867d1",
+      "address": "2312 SEARSDALE AVE",
+      "city": "Cleveland",
+      "neighborhood": "",
+      "mint_price_upx": 0,
+      "price_upx": 20000,
+      "buyer_paid_upx": 21000,
+      "seller_proceeds_upx": 19000,
+      "community_fee_upx": 2000,
+      "price_to_mint": 0
+    },
+    {
+      "timestamp": "2026-10-09T00:11:38.000Z",
+      "property_id": "81368678506331",
+      "buyer": "rtnxbhjxmptt",
+      "seller": "mbrfcsyk2dn4",
+      "trx_id": "d287f1474b1ec660a7f0ed26c9bc7f10289ba0a88fb4d4a0dfac6c474e26c4c8",
+      "address": "11439 210TH ST",
+      "city": "Queens",
+      "neighborhood": "",
+      "mint_price_upx": 0,
+      "price_upx": 7030,
+      "buyer_paid_upx": 7381.5,
+      "seller_proceeds_upx": 6678.5,
+      "community_fee_upx": 703,
+      "price_to_mint": 0
+    }
+  ],
+  "count": 3,
+  "limit": 3,
+  "offset": 0,
+  "has_more": true
+}

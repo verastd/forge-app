@@ -1,0 +1,20 @@
+{
+  "property_id": "81826746578110",
+  "address": "2506 SEARSDALE AVE",
+  "city": "Cleveland",
+  "region": "OH",
+  "neighborhood": "",
+  "neighborhood_id": 0,
+  "mint_price_upx": 0,
+  "mint_price_source": "none",
+  "mint_kind": "",
+  "api_status": "",
+  "minted_at": null,
+  "sales": 1,
+  "last_sale_upx": 29999,
+  "last_sale_at": "2026-10-09T00:12:28.000Z",
+  "observations": 1,
+  "mint_band": null,
+  "chain_known": true,
+  "upland_api": null
+}

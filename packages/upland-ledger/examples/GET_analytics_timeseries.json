@@ -1,0 +1,52 @@
+{
+  "columns": [
+    {
+      "name": "day",
+      "type": "time"
+    },
+    {
+      "name": "actions",
+      "type": "number"
+    }
+  ],
+  "rows": [
+    [
+      "2026-10-02T00:00:00.000Z",
+      491536
+    ],
+    [
+      "2026-10-03T00:00:00.000Z",
+      478450
+    ],
+    [
+      "2026-10-04T00:00:00.000Z",
+      460184
+    ],
+    [
+      "2026-10-05T00:00:00.000Z",
+      484253
+    ],
+    [
+      "2026-10-06T00:00:00.000Z",
+      489146
+    ],
+    [
+      "2026-10-07T00:00:00.000Z",
+      488359
+    ],
+    [
+      "2026-10-08T00:00:00.000Z",
+      495578
+    ]
+  ],
+  "stats": {
+    "rows": 7,
+    "elapsed_ms": 9,
+    "rows_read": 8406,
+    "bytes_read": 100872,
+    "truncated": false,
+    "table": "actions_hourly",
+    "dedup": "exact"
+  },
+  "sql": "SELECT toDateTime(toStartOfDay(hour), 'UTC') AS d0,\n       sum(count) AS m0\nFROM upland.actions_hourly\nWHERE hour >= toDateTime({p0:String}, 'UTC')\n  AND hour <= toDateTime({p1:String}, 'UTC')\nGROUP BY d0\nORDER BY d0 ASC\nLIMIT 10000"
+}

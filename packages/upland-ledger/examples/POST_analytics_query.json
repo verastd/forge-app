@@ -1,0 +1,44 @@
+{
+  "columns": [
+    {
+      "name": "city",
+      "type": "string"
+    },
+    {
+      "name": "sales",
+      "type": "number"
+    },
+    {
+      "name": "median_price",
+      "type": "number"
+    }
+  ],
+  "rows": [
+    [
+      "Los Angeles",
+      420,
+      15000
+    ],
+    [
+      "Queens",
+      156,
+      9530
+    ],
+    [
+      "Detroit",
+      129,
+      6800
+    ]
+  ],
+  "stats": {
+    "rows": 3,
+    "elapsed_ms": 386,
+    "rows_read": 851282,
+    "bytes_read": 384742184,
+    "truncated": true,
+    "table": "events",
+    "dedup": "approximate"
+  },
+  "sql": "SELECT JSONExtractString(fields_json, 'city') AS d0,\n       count() AS m0,\n       quantile(0.5)(toFloat64(JSONExtractFloat(fields_json, 'price_upx'))) AS m1\nFROM upland.events\nWHERE event_type = 'property_sale'\n  AND timestamp >= toDateTime64({p0:String}, 3, 'UTC')\n  AND timestamp <= toDateTime64({p1:String}, 3, 'UTC')\nGROUP BY d0\nORDER BY m0 DESC\nLIMIT 3",
+  "chain": "upland"
+}

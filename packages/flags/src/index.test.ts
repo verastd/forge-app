@@ -40,6 +40,7 @@ describe('parseFlags', () => {
         proposals: true,
         house_spec: true,
         lobby_avatars: true,
+        upland_ledger: true,
       }),
     ).toEqual({
       csv_export: false,
@@ -52,6 +53,7 @@ describe('parseFlags', () => {
       proposals: true,
       house_spec: true,
       lobby_avatars: true,
+      upland_ledger: true,
     });
   });
 
@@ -67,6 +69,7 @@ describe('parseFlags', () => {
       proposals: DEFAULT_FLAGS.proposals,
       house_spec: DEFAULT_FLAGS.house_spec,
       lobby_avatars: DEFAULT_FLAGS.lobby_avatars,
+      upland_ledger: DEFAULT_FLAGS.upland_ledger,
     });
   });
 
@@ -86,6 +89,7 @@ describe('parseFlags', () => {
       proposals: false,
       house_spec: false,
       lobby_avatars: false,
+      upland_ledger: false,
     });
   });
 
@@ -102,6 +106,7 @@ describe('parseFlags', () => {
         proposals: false,
         house_spec: false,
         lobby_avatars: false,
+        upland_ledger: false,
         unknown_flag: true,
       }),
     ).toEqual({
@@ -115,6 +120,7 @@ describe('parseFlags', () => {
       proposals: false,
       house_spec: false,
       lobby_avatars: false,
+      upland_ledger: false,
     });
   });
 
@@ -130,6 +136,7 @@ describe('parseFlags', () => {
       proposals: false,
       house_spec: false,
       lobby_avatars: false,
+      upland_ledger: false,
     });
   });
 
@@ -183,7 +190,15 @@ describe('parseFlags', () => {
     expect(result.apps_lobby).toBe(true);
   });
 
-  it.each(['mcp_connector', 'agent_start', 'proposals', 'house_spec', 'lobby_avatars'])(
+  it('leaves upland_ledger off when a payload predates it', () => {
+    const before: Record<string, boolean> = { ...DEFAULT_FLAGS, upland_data: true };
+    delete before.upland_ledger;
+    const result = parseFlags(before);
+    expect(result.upland_ledger).toBe(false);
+    expect(result.upland_data).toBe(true);
+  });
+
+  it.each(['mcp_connector', 'agent_start', 'proposals', 'house_spec', 'lobby_avatars', 'upland_ledger'])(
     'a non-boolean %s fails every flag closed',
     (name) => {
       expect(parseFlags({ csv_export: true, mcp_connector: true, [name]: 'true' })).toEqual(DEFAULT_FLAGS);
@@ -224,6 +239,7 @@ describe('isEnabled', () => {
       proposals: true,
       house_spec: false,
       lobby_avatars: false,
+      upland_ledger: false,
     };
     expect(isEnabled(flags, 'csv_export')).toBe(true);
     expect(isEnabled(flags, 'contribute_bridge')).toBe(false);
@@ -271,6 +287,7 @@ describe('loadFlags precedence', () => {
         proposals: false,
         house_spec: false,
         lobby_avatars: false,
+        upland_ledger: false,
       });
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -296,6 +313,7 @@ describe('loadFlags precedence', () => {
         proposals: DEFAULT_FLAGS.proposals,
         house_spec: DEFAULT_FLAGS.house_spec,
         lobby_avatars: DEFAULT_FLAGS.lobby_avatars,
+        upland_ledger: DEFAULT_FLAGS.upland_ledger,
       });
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -324,6 +342,7 @@ describe('loadFlags precedence', () => {
         proposals: true,
         house_spec: true,
         lobby_avatars: true,
+        upland_ledger: true,
       });
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -356,6 +375,7 @@ describe('loadFlags precedence', () => {
         proposals: false,
         house_spec: false,
         lobby_avatars: false,
+        upland_ledger: false,
       });
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -369,7 +389,7 @@ describe('loadFlags precedence', () => {
     // is what keeps local/demo behavior enabled (see core.ts); agent_start
     // stays off there until its rails pass the live tests, and proposals and
     // house_spec are on so the operator can test the floor and the house model,
-    // and lobby_avatars puts the robots in the lobby.
+    // lobby_avatars puts the robots in the lobby, and upland_ledger opens the ledger gateway.
     const result = await loadFlags({ env: {} });
     expect(result).toEqual({
       csv_export: true,
@@ -382,6 +402,7 @@ describe('loadFlags precedence', () => {
       proposals: true,
       house_spec: true,
       lobby_avatars: true,
+      upland_ledger: true,
     });
   });
 
@@ -402,6 +423,7 @@ describe('loadFlags precedence', () => {
         proposals: false,
         house_spec: false,
         lobby_avatars: false,
+        upland_ledger: false,
       });
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -445,6 +467,7 @@ describe('loadFlags precedence', () => {
         proposals: false,
         house_spec: false,
         lobby_avatars: false,
+        upland_ledger: false,
       });
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -473,6 +496,7 @@ describe('loadFlags precedence', () => {
         proposals: DEFAULT_FLAGS.proposals,
         house_spec: DEFAULT_FLAGS.house_spec,
         lobby_avatars: DEFAULT_FLAGS.lobby_avatars,
+        upland_ledger: DEFAULT_FLAGS.upland_ledger,
       });
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -503,6 +527,7 @@ describe('loadFlags precedence', () => {
           proposals: false,
           house_spec: false,
           lobby_avatars: false,
+          upland_ledger: false,
         });
       } finally {
         await rm(dir, { recursive: true, force: true });
@@ -529,6 +554,7 @@ describe('loadFlags precedence', () => {
           proposals: false,
           house_spec: false,
           lobby_avatars: false,
+          upland_ledger: false,
         });
       } finally {
         await rm(dir, { recursive: true, force: true });
@@ -552,6 +578,7 @@ describe('loadFlags precedence', () => {
           proposals: false,
           house_spec: false,
           lobby_avatars: false,
+          upland_ledger: false,
         });
       } finally {
         await rm(dir, { recursive: true, force: true });
@@ -576,6 +603,7 @@ describe('loadFlags precedence', () => {
           proposals: false,
           house_spec: false,
           lobby_avatars: false,
+          upland_ledger: false,
         });
       } finally {
         await rm(dir, { recursive: true, force: true });
@@ -607,6 +635,7 @@ describe('loadFlags precedence', () => {
           proposals: false,
           house_spec: false,
           lobby_avatars: false,
+          upland_ledger: false,
         });
       } finally {
         await rm(dir, { recursive: true, force: true });
@@ -629,6 +658,7 @@ describe('loadFlags precedence', () => {
           proposals: false,
           house_spec: false,
           lobby_avatars: false,
+          upland_ledger: false,
         });
       } finally {
         await rm(dir, { recursive: true, force: true });
@@ -654,6 +684,7 @@ describe('loadFlags precedence', () => {
           proposals: false,
           house_spec: false,
           lobby_avatars: false,
+          upland_ledger: false,
         });
       } finally {
         await rm(dir, { recursive: true, force: true });

@@ -30,6 +30,9 @@
       },
       "lobby_avatars": {
         "type": "boolean"
+      },
+      "upland_ledger": {
+        "type": "boolean"
       }
     },
     "TaskCard": {

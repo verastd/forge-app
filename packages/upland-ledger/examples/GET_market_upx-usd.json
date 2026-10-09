@@ -1,0 +1,56 @@
+{
+  "methods": [
+    "weighted_comps"
+  ],
+  "preferred": "weighted_comps",
+  "points": [
+    {
+      "day": "2026-10-06",
+      "method": "weighted_comps",
+      "upx_per_usd": 5566.519023644128,
+      "usd_per_upx": 0.00017964548324589196,
+      "p25": 4337.374008767731,
+      "p75": 6342.4148976523975,
+      "upx_listings": 5572,
+      "fiat_listings": 3774,
+      "samples": 76,
+      "cities": 27,
+      "upx_per_usd_smooth": 5566.519023644128
+    },
+    {
+      "day": "2026-10-07",
+      "method": "weighted_comps",
+      "upx_per_usd": 5610.998799368486,
+      "usd_per_upx": 0.0001782213890533267,
+      "p25": 4482.213667285096,
+      "p75": 6294.726952463003,
+      "upx_listings": 5300,
+      "fiat_listings": 3661,
+      "samples": 76,
+      "cities": 27,
+      "upx_per_usd_smooth": 5588.758911506307
+    },
+    {
+      "day": "2026-10-08",
+      "method": "weighted_comps",
+      "upx_per_usd": 5516.705516705517,
+      "usd_per_upx": 0.0001812676056338028,
+      "p25": 4308.921382189239,
+      "p75": 6295.198893275086,
+      "upx_listings": 5049,
+      "fiat_listings": 3498,
+      "samples": 75,
+      "cities": 26,
+      "upx_per_usd_smooth": 5566.519023644128
+    }
+  ],
+  "latest": {
+    "weighted_comps": 5516.705516705517
+  },
+  "spread": null,
+  "notes": [
+    "No USD price exists on the appchain. Every value here is inferred from Upland running two order books over the same property market: a listing carries either a UPX ask or a FIAT ask, never both.",
+    "global_comps has the most samples and the least control for which properties are in each book; paired_property has the fewest samples and holds the property constant.",
+    "A wide spread between methods is a real signal, not noise: it means the two books have drifted apart."
+  ]
+}

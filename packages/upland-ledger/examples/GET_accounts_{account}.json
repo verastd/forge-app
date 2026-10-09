@@ -1,0 +1,26 @@
+{
+  "account": "ymc55j4fboxi",
+  "username": "kingbo",
+  "usernames": [
+    "kingbo"
+  ],
+  "username_changes": 1,
+  "first_seen": "2026-01-01T03:26:16.000Z",
+  "last_seen": "2026-10-09T00:12:28.000Z",
+  "active_days": 5,
+  "events": 40,
+  "buys": 0,
+  "sells": 1,
+  "upx_spent": 0,
+  "upx_received": 33250,
+  "median_buy_latency_s": 0,
+  "sub_5s_buys": 0,
+  "pct_buys_under_1m": 0,
+  "likely_bot": false,
+  "upx_net": 33250,
+  "income": {
+    "yield_upx": 1500.78,
+    "visit_upx": 380,
+    "yield_collections": 4
+  }
+}

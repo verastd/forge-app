@@ -1,0 +1,44 @@
+{
+  "data": [
+    {
+      "collection_id": 16,
+      "name": "The Curator",
+      "city_id": 1,
+      "amount": 3,
+      "rarity_level": 5,
+      "description": "Aristocrat",
+      "requirements": "Own 3 Museums in San Francisco",
+      "yield_boost": 3,
+      "one_time_reward": 100000,
+      "image": "https://static.upland.me/collections-assets/the_curator-16-banner.png"
+    },
+    {
+      "collection_id": 419,
+      "name": "High Tea",
+      "city_id": 59,
+      "amount": 3,
+      "rarity_level": 5,
+      "description": "Collection",
+      "requirements": "Own 3 High Tea in London as curated by the Upland team (this list is final and is not subject to change)",
+      "yield_boost": 2.94,
+      "one_time_reward": 87000,
+      "image": "https://static.upland.me/collections-assets/YYIWaKrurinCMOeAytCCnpcb4VGhRnyC-banner.png"
+    },
+    {
+      "collection_id": 481,
+      "name": "Sunset Blvd.",
+      "city_id": 32,
+      "amount": 3,
+      "rarity_level": 5,
+      "description": "Collection",
+      "requirements": "Own 3 properties on Sunset Blvd. in Beverly Hills",
+      "yield_boost": 2.93,
+      "one_time_reward": 83000,
+      "image": "https://static.upland.me/collections-assets/snfY614v2SwDHLJdXNKheIplwTja2Mid-banner.png"
+    }
+  ],
+  "count": 3,
+  "limit": 3,
+  "offset": 0,
+  "has_more": true
+}

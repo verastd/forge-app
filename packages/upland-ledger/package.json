@@ -1,0 +1,46 @@
+{
+  "name": "@forge/upland-ledger",
+  "version": "0.0.0",
+  "private": true,
+  "description": "OpenAPI contract, zod schemas and typed client for the Upland Ledger REST API behind /bff/ledger. Standalone: zod is the only dependency.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./openapi.yaml": "./openapi.yaml"
+  },
+  "files": [
+    "dist",
+    "openapi.yaml",
+    "examples"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint src",
+    "typecheck": "tsc --noEmit",
+    "capture-examples": "./scripts/capture-examples.sh"
+  },
+  "dependencies": {
+    "zod": "^3.23"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9",
+    "@types/node": "^22",
+    "@vitest/coverage-v8": "^2.1",
+    "eslint": "^9",
+    "typescript": "~5.6",
+    "typescript-eslint": "^8",
+    "vitest": "^2.1"
+  }
+}

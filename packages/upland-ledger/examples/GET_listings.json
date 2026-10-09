@@ -1,0 +1,44 @@
+{
+  "data": [
+    {
+      "timestamp": "2026-10-09T00:08:57.000Z",
+      "property_id": "72064554951399",
+      "seller": "oumfkb1vplp5",
+      "address": "150 SW 21ST RD",
+      "city": "Miami",
+      "neighborhood": "",
+      "mint_price_upx": 0,
+      "ask_upx": 0,
+      "ask_fiat": 7.99,
+      "ask_to_mint": 0
+    },
+    {
+      "timestamp": "2026-10-09T00:08:41.000Z",
+      "property_id": "72060981403865",
+      "seller": "oumfkb1vplp5",
+      "address": "1400 SW 22ND ST",
+      "city": "Miami",
+      "neighborhood": "",
+      "mint_price_upx": 0,
+      "ask_upx": 0,
+      "ask_fiat": 7.99,
+      "ask_to_mint": 0
+    },
+    {
+      "timestamp": "2026-10-09T00:03:20.000Z",
+      "property_id": "81837333004827",
+      "seller": "zqaoab5arg4x",
+      "address": "3867 E 147th St",
+      "city": "Cleveland",
+      "neighborhood": "",
+      "mint_price_upx": 0,
+      "ask_upx": 0,
+      "ask_fiat": 8,
+      "ask_to_mint": 0
+    }
+  ],
+  "count": 3,
+  "limit": 3,
+  "offset": 0,
+  "has_more": true
+}

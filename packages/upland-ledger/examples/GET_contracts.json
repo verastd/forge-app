@@ -1,0 +1,90 @@
+{
+  "data": [
+    {
+      "contract": "playuplandme",
+      "action_count": 114459266,
+      "action_types": [
+        "a25",
+        "a32",
+        "a4",
+        "a44",
+        "addcol",
+        "datamove",
+        "i44",
+        "n111",
+        "n112",
+        "n12",
+        "n121",
+        "n13",
+        "n131",
+        "n14",
+        "n15",
+        "n151",
+        "n154",
+        "n155",
+        "n2",
+        "n21",
+        "n211",
+        "n24",
+        "n31",
+        "n33",
+        "n34",
+        "n4",
+        "n41",
+        "n43",
+        "n44",
+        "n45",
+        "n5",
+        "n51",
+        "n511",
+        "n512",
+        "n52",
+        "payforcpu"
+      ],
+      "first_seen_at": "2025-04-28T09:07:32.500Z",
+      "last_seen_at": "2026-10-09T00:21:13.000Z"
+    },
+    {
+      "contract": "eosio",
+      "action_count": 102622607,
+      "action_types": [
+        "activate",
+        "buyram",
+        "buyrambytes",
+        "delegatebw",
+        "deleteauth",
+        "init",
+        "linkauth",
+        "logbuyram",
+        "logramchange",
+        "newaccount",
+        "onblock",
+        "ramtransfer",
+        "refund",
+        "regproducer",
+        "setabi",
+        "setcode",
+        "setparams",
+        "setpriv",
+        "undelegatebw",
+        "unlinkauth",
+        "updateauth",
+        "voteproducer"
+      ],
+      "first_seen_at": "2025-04-26T17:45:16.000Z",
+      "last_seen_at": "2026-10-09T00:21:13.000Z"
+    },
+    {
+      "contract": "upxtokenacct",
+      "action_count": 33656123,
+      "action_types": [
+        "datamove",
+        "transfer"
+      ],
+      "first_seen_at": "2025-04-28T09:19:28.000Z",
+      "last_seen_at": "2026-10-09T00:21:13.000Z"
+    }
+  ],
+  "count": 3,
+  "approximate": true
+}

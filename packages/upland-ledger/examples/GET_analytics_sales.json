@@ -1,0 +1,127 @@
+{
+  "series": {
+    "columns": [
+      {
+        "name": "day",
+        "type": "time"
+      },
+      {
+        "name": "median_price",
+        "type": "number"
+      },
+      {
+        "name": "sales",
+        "type": "number"
+      }
+    ],
+    "rows": [
+      [
+        "2026-10-02T00:00:00.000Z",
+        19363.05,
+        323
+      ],
+      [
+        "2026-10-03T00:00:00.000Z",
+        13872.075,
+        492
+      ],
+      [
+        "2026-10-04T00:00:00.000Z",
+        16767.45,
+        323
+      ],
+      [
+        "2026-10-05T00:00:00.000Z",
+        15435,
+        423
+      ],
+      [
+        "2026-10-06T00:00:00.000Z",
+        18111.975,
+        308
+      ],
+      [
+        "2026-10-07T00:00:00.000Z",
+        26250,
+        362
+      ],
+      [
+        "2026-10-08T00:00:00.000Z",
+        19950,
+        360
+      ]
+    ],
+    "stats": {
+      "rows": 7,
+      "elapsed_ms": 806,
+      "rows_read": 0,
+      "bytes_read": 0,
+      "truncated": false,
+      "table": "actions_raw+transfers",
+      "dedup": "approximate"
+    },
+    "sql": "SELECT toDateTime(toStartOfDay(t), 'UTC') AS b,\n              toString(count()) AS sales,\n              toString(countIf(priced)) AS priced_n,\n              sumIf(upx, priced) AS total,\n              medianIf(upx, priced) AS med,\n              quantileIf(0.9)(upx, priced) AS p90,\n              minIf(upx, priced) AS lo,\n              maxIf(upx, priced) AS hi\n       FROM (\n    SELECT s.trx_id AS trx_id, s.first_ts AS t, p.upx AS upx, p.matched AS priced\n    FROM (\n      SELECT trx_id, min(timestamp) AS first_ts\n      FROM upland.actions_raw\n      WHERE timestamp >= toDateTime64({after:String}, 3, 'UTC')\n        AND timestamp <= toDateTime64({before:String}, 3, 'UTC')\n        AND contract = {contract:String} AND action = {action:String}\n      GROUP BY trx_id\n    ) AS s\n    LEFT JOIN (\n      SELECT trx_id, sum(amount) AS upx, toUInt8(1) AS matched\n      FROM upland.transfers\n      WHERE timestamp >= toDateTime64({after:String}, 3, 'UTC')\n        AND timestamp <= toDateTime64({before:String}, 3, 'UTC')\n        AND contract = {token:String} AND symbol = {symbol:String} AND to_account = {payee:String}\n      GROUP BY trx_id\n    ) AS p ON s.trx_id = p.trx_id)\n       GROUP BY b ORDER BY b ASC"
+  },
+  "histogram": {
+    "columns": [
+      {
+        "name": "bin",
+        "type": "number"
+      },
+      {
+        "name": "sales",
+        "type": "number"
+      }
+    ],
+    "rows": [
+      [
+        4.2,
+        2582
+      ],
+      [
+        748128.1499999999,
+        6
+      ],
+      [
+        1496252.0999999999,
+        2
+      ],
+      [
+        2244376.05,
+        1
+      ]
+    ],
+    "stats": {
+      "rows": 4,
+      "elapsed_ms": 806,
+      "rows_read": 0,
+      "bytes_read": 0,
+      "truncated": false,
+      "table": "actions_raw+transfers",
+      "dedup": "approximate"
+    },
+    "sql": "SELECT {lo:Float64} + least(floor((upx - {lo:Float64}) / {w:Float64}), {last:Float64}) * {w:Float64} AS bin,\n              toString(count()) AS n\n       FROM (\n    SELECT s.trx_id AS trx_id, s.first_ts AS t, p.upx AS upx, p.matched AS priced\n    FROM (\n      SELECT trx_id, min(timestamp) AS first_ts\n      FROM upland.actions_raw\n      WHERE timestamp >= toDateTime64({after:String}, 3, 'UTC')\n        AND timestamp <= toDateTime64({before:String}, 3, 'UTC')\n        AND contract = {contract:String} AND action = {action:String}\n      GROUP BY trx_id\n    ) AS s\n    LEFT JOIN (\n      SELECT trx_id, sum(amount) AS upx, toUInt8(1) AS matched\n      FROM upland.transfers\n      WHERE timestamp >= toDateTime64({after:String}, 3, 'UTC')\n        AND timestamp <= toDateTime64({before:String}, 3, 'UTC')\n        AND contract = {token:String} AND symbol = {symbol:String} AND to_account = {payee:String}\n      GROUP BY trx_id\n    ) AS p ON s.trx_id = p.trx_id) WHERE priced = 1\n       GROUP BY bin ORDER BY bin ASC"
+  },
+  "fields_used": [
+    "upland.actions_raw rows with contract='playuplandme' AND action='n5' are the sales",
+    "upland.transfers rows with contract='upxtokenacct' AND symbol='UPX' AND to_account='playuplandme' are the payments",
+    "the two are joined on trx_id, inside the requested range only",
+    "the price is transfers.amount, the numeric prefix of the upstream quantity string",
+    "a sale with no matching transfer is counted in `unmatched` and in `sales`, but in no price statistic"
+  ],
+  "note": "Evidence-based only: no price is inferred from data_json.",
+  "chain": "upland",
+  "action": {
+    "contract": "playuplandme",
+    "action": "n5",
+    "label": null,
+    "confidence": null
+  },
+  "range": {
+    "after": "2026-10-02T00:00:00.000Z",
+    "before": "2026-10-08T23:59:59.999Z"
+  },
+  "bucket": "day",
+  "matched": 2591,
+  "unmatched": 0
+}

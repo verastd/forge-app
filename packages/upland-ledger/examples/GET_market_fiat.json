@@ -1,0 +1,443 @@
+{
+  "window": {
+    "after": "2026-10-02T00:21:18.348Z",
+    "before": "2026-10-09T00:21:18.348Z",
+    "days": 7
+  },
+  "totals": {
+    "listings": 1819,
+    "cleared": 87,
+    "asked_usd": 109219.27,
+    "cleared_usd": 989.61,
+    "clear_rate": 0.04782847718526663
+  },
+  "daily": [
+    {
+      "day": "2026-10-02",
+      "listings": 286,
+      "cleared": 22,
+      "asked_usd": 6230.43,
+      "cleared_usd": 335.59
+    },
+    {
+      "day": "2026-10-03",
+      "listings": 272,
+      "cleared": 20,
+      "asked_usd": 10009.75,
+      "cleared_usd": 112.32
+    },
+    {
+      "day": "2026-10-04",
+      "listings": 254,
+      "cleared": 11,
+      "asked_usd": 14629.52,
+      "cleared_usd": 94.09
+    },
+    {
+      "day": "2026-10-05",
+      "listings": 273,
+      "cleared": 14,
+      "asked_usd": 4445.35,
+      "cleared_usd": 107.41
+    },
+    {
+      "day": "2026-10-06",
+      "listings": 271,
+      "cleared": 11,
+      "asked_usd": 8101.64,
+      "cleared_usd": 264.33
+    },
+    {
+      "day": "2026-10-07",
+      "listings": 251,
+      "cleared": 4,
+      "asked_usd": 58171.94,
+      "cleared_usd": 19.17
+    },
+    {
+      "day": "2026-10-08",
+      "listings": 209,
+      "cleared": 5,
+      "asked_usd": 7606.66,
+      "cleared_usd": 56.7
+    },
+    {
+      "day": "2026-10-09",
+      "listings": 3,
+      "cleared": 0,
+      "asked_usd": 23.98,
+      "cleared_usd": 0
+    }
+  ],
+  "by_city": [
+    {
+      "city": "Buenos Aires",
+      "listings": 69,
+      "cleared": 2,
+      "cleared_usd": 255.19,
+      "median_usd": 6,
+      "clear_rate": 0.029
+    },
+    {
+      "city": "Miami",
+      "listings": 41,
+      "cleared": 5,
+      "cleared_usd": 192,
+      "median_usd": 7.99,
+      "clear_rate": 0.122
+    },
+    {
+      "city": "Amsterdam",
+      "listings": 258,
+      "cleared": 11,
+      "cleared_usd": 85.54,
+      "median_usd": 10.9,
+      "clear_rate": 0.0426
+    },
+    {
+      "city": "Miami Beach",
+      "listings": 17,
+      "cleared": 3,
+      "cleared_usd": 68.4,
+      "median_usd": 25,
+      "clear_rate": 0.1765
+    },
+    {
+      "city": "London",
+      "listings": 48,
+      "cleared": 8,
+      "cleared_usd": 58.55,
+      "median_usd": 7.95,
+      "clear_rate": 0.1667
+    },
+    {
+      "city": "Hong Kong",
+      "listings": 68,
+      "cleared": 3,
+      "cleared_usd": 41.65,
+      "median_usd": 27,
+      "clear_rate": 0.0441
+    },
+    {
+      "city": "Queens",
+      "listings": 56,
+      "cleared": 7,
+      "cleared_usd": 35.7,
+      "median_usd": 4.95,
+      "clear_rate": 0.125
+    },
+    {
+      "city": "Washington",
+      "listings": 79,
+      "cleared": 2,
+      "cleared_usd": 33.84,
+      "median_usd": 27.99,
+      "clear_rate": 0.0253
+    },
+    {
+      "city": "Seattle",
+      "listings": 120,
+      "cleared": 6,
+      "cleared_usd": 28.31,
+      "median_usd": 20.1,
+      "clear_rate": 0.05
+    },
+    {
+      "city": "Los Angeles",
+      "listings": 174,
+      "cleared": 6,
+      "cleared_usd": 27.65,
+      "median_usd": 5.65,
+      "clear_rate": 0.0345
+    },
+    {
+      "city": "Vancouver",
+      "listings": 32,
+      "cleared": 7,
+      "cleared_usd": 24.75,
+      "median_usd": 4.12,
+      "clear_rate": 0.2188
+    },
+    {
+      "city": "Singapore",
+      "listings": 29,
+      "cleared": 3,
+      "cleared_usd": 18.54,
+      "median_usd": 7.89,
+      "clear_rate": 0.1034
+    },
+    {
+      "city": "Cape Town",
+      "listings": 61,
+      "cleared": 3,
+      "cleared_usd": 18.16,
+      "median_usd": 5.79,
+      "clear_rate": 0.0492
+    },
+    {
+      "city": "Berlin",
+      "listings": 13,
+      "cleared": 3,
+      "cleared_usd": 14.19,
+      "median_usd": 6,
+      "clear_rate": 0.2308
+    },
+    {
+      "city": "Sydney",
+      "listings": 39,
+      "cleared": 1,
+      "cleared_usd": 13,
+      "median_usd": 14,
+      "clear_rate": 0.0256
+    },
+    {
+      "city": "San Francisco",
+      "listings": 19,
+      "cleared": 3,
+      "cleared_usd": 9.25,
+      "median_usd": 3.25,
+      "clear_rate": 0.1579
+    },
+    {
+      "city": "Madrid",
+      "listings": 86,
+      "cleared": 2,
+      "cleared_usd": 8.58,
+      "median_usd": 11,
+      "clear_rate": 0.0233
+    },
+    {
+      "city": "Santa Clara",
+      "listings": 5,
+      "cleared": 1,
+      "cleared_usd": 8,
+      "median_usd": 8,
+      "clear_rate": 0.2
+    },
+    {
+      "city": "Las Vegas",
+      "listings": 83,
+      "cleared": 2,
+      "cleared_usd": 7.7,
+      "median_usd": 11.2,
+      "clear_rate": 0.0241
+    },
+    {
+      "city": "Tokyo",
+      "listings": 10,
+      "cleared": 2,
+      "cleared_usd": 7.19,
+      "median_usd": 7.92,
+      "clear_rate": 0.2
+    },
+    {
+      "city": "Paris",
+      "listings": 21,
+      "cleared": 1,
+      "cleared_usd": 6,
+      "median_usd": 6,
+      "clear_rate": 0.0476
+    },
+    {
+      "city": "Porto",
+      "listings": 10,
+      "cleared": 1,
+      "cleared_usd": 6,
+      "median_usd": 6.5,
+      "clear_rate": 0.1
+    },
+    {
+      "city": "Sao Paulo",
+      "listings": 14,
+      "cleared": 1,
+      "cleared_usd": 5.61,
+      "median_usd": 5,
+      "clear_rate": 0.0714
+    },
+    {
+      "city": "Nashville",
+      "listings": 21,
+      "cleared": 1,
+      "cleared_usd": 4.59,
+      "median_usd": 4.5,
+      "clear_rate": 0.0476
+    },
+    {
+      "city": "Inglewood",
+      "listings": 1,
+      "cleared": 1,
+      "cleared_usd": 4.22,
+      "median_usd": 4.22,
+      "clear_rate": 1
+    },
+    {
+      "city": "Park City",
+      "listings": 7,
+      "cleared": 1,
+      "cleared_usd": 4,
+      "median_usd": 10,
+      "clear_rate": 0.1429
+    },
+    {
+      "city": "Rio de Janeiro",
+      "listings": 14,
+      "cleared": 1,
+      "cleared_usd": 3,
+      "median_usd": 3,
+      "clear_rate": 0.0714
+    },
+    {
+      "city": "Rome",
+      "listings": 73,
+      "cleared": 0,
+      "cleared_usd": 0,
+      "median_usd": 14.49,
+      "clear_rate": 0
+    },
+    {
+      "city": "Florence",
+      "listings": 46,
+      "cleared": 0,
+      "cleared_usd": 0,
+      "median_usd": 13,
+      "clear_rate": 0
+    },
+    {
+      "city": "Omaha",
+      "listings": 34,
+      "cleared": 0,
+      "cleared_usd": 0,
+      "median_usd": 4.03,
+      "clear_rate": 0
+    },
+    {
+      "city": "Detroit",
+      "listings": 33,
+      "cleared": 0,
+      "cleared_usd": 0,
+      "median_usd": 6,
+      "clear_rate": 0
+    },
+    {
+      "city": "Chicago",
+      "listings": 31,
+      "cleared": 0,
+      "cleared_usd": 0,
+      "median_usd": 6.5,
+      "clear_rate": 0
+    },
+    {
+      "city": "Dallas",
+      "listings": 31,
+      "cleared": 0,
+      "cleared_usd": 0,
+      "median_usd": 27.3,
+      "clear_rate": 0
+    },
+    {
+      "city": "Kansas City",
+      "listings": 28,
+      "cleared": 0,
+      "cleared_usd": 0,
+      "median_usd": 4.06,
+      "clear_rate": 0
+    },
+    {
+      "city": "Stockton",
+      "listings": 27,
+      "cleared": 0,
+      "cleared_usd": 0,
+      "median_usd": 3.7,
+      "clear_rate": 0
+    },
+    {
+      "city": "Takasaki",
+      "listings": 25,
+      "cleared": 0,
+      "cleared_usd": 0,
+      "median_usd": 13,
+      "clear_rate": 0
+    },
+    {
+      "city": "Fresno",
+      "listings": 16,
+      "cleared": 0,
+      "cleared_usd": 0,
+      "median_usd": 36.5,
+      "clear_rate": 0
+    },
+    {
+      "city": "Frederick",
+      "listings": 10,
+      "cleared": 0,
+      "cleared_usd": 0,
+      "median_usd": 3,
+      "clear_rate": 0
+    },
+    {
+      "city": "New Orleans",
+      "listings": 9,
+      "cleared": 0,
+      "cleared_usd": 0,
+      "median_usd": 4.95,
+      "clear_rate": 0
+    },
+    {
+      "city": "Bermuda",
+      "listings": 8,
+      "cleared": 0,
+      "cleared_usd": 0,
+      "median_usd": 29,
+      "clear_rate": 0
+    }
+  ],
+  "upx_equivalent": [
+    {
+      "category": "Uppie",
+      "sales": 293,
+      "upx_volume": 17468097,
+      "usd_equivalent": 3129.98,
+      "median_upx": 19500
+    },
+    {
+      "category": "Uncategorised",
+      "sales": 6605,
+      "upx_volume": 15064713,
+      "usd_equivalent": 2704.97,
+      "median_upx": 400
+    },
+    {
+      "category": "Seeds",
+      "sales": 6247,
+      "upx_volume": 5747987,
+      "usd_equivalent": 1033.71,
+      "median_upx": 690
+    },
+    {
+      "category": "Vehicle",
+      "sales": 561,
+      "upx_volume": 2424534,
+      "usd_equivalent": 438.2,
+      "median_upx": 1
+    },
+    {
+      "category": "Essential",
+      "sales": 111,
+      "upx_volume": 452059,
+      "usd_equivalent": 81.38,
+      "median_upx": 800
+    },
+    {
+      "category": "Totem",
+      "sales": 2,
+      "upx_volume": 310000,
+      "usd_equivalent": 55.61,
+      "median_upx": 155000
+    }
+  ],
+  "notes": [
+    "Only property carries a FIAT price on this chain. Seeds, Uppies, Vehicles and every other item are priced and settled in UPX, so their dollar figures here are a conversion at the implied rate, not a price anyone quoted.",
+    "A FIAT listing never settles on chain. \"Cleared\" means the property changed hands while that listing was live — the owner did not pull it first.",
+    "Asked and cleared differ by orders of magnitude because most FIAT listings are not meant to sell. Blocking asks reach $100,000; the default cap keeps them out of the totals."
+  ]
+}

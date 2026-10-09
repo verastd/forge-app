@@ -1,0 +1,1819 @@
+openapi: 3.1.0
+info:
+  title: Upland Ledger API (via /bff/ledger)
+  version: 1.0.0
+  summary: Read-only REST API over the Upland appchain ledger — raw chain, analytics, market layer and entities.
+  description: |
+    Derived from the ledger SOURCE (`/srv/upland-ledger/apps/api/src`: `routes.ts`,
+    `params.ts`, `serialize.ts`, `errors.ts`, `queries/`, `analytics/`, `market/`,
+    `entities/`) on 2026-10-08, and checked against live responses captured in
+    `examples/` (see `examples/CAPTURED.md`). Where the source and
+    `docs/API.md` disagree, this file follows the source.
+
+    **Paths.** Every path here is relative to the ledger's `/v1`. The browser
+    calls them as `/bff/ledger/<path>` (e.g. `/bff/ledger/properties/123/history?limit=50`);
+    the web app's server authenticates the session and forwards to forge-api
+    `/api/ledger/*`, which forwards to the ledger `/v1/*`. `/health` and
+    `/metrics` exist on the ledger but are not exposed.
+
+    **Auth.** Same-origin session cookie. There is no token for the browser to
+    send. A 401 `{"error":"..."}` from the gateway means the user is signed out.
+
+    **Errors.** Two shapes, distinguishable by the type of `error`:
+    - ledger: `{"error": {"code": "validation_error", "message": "..."}}` (passed through unchanged)
+    - gateway: `{"error": "<code>"}` — 401, 404 (route not allowed / flag off), 502/504, 503.
+
+    **Pagination.** Three envelopes:
+    - cursor (`/actions`, `/transfers`, `/contracts/{contract}/actions`,
+      `/accounts/{account}/actions`): `{data, next_cursor, count}`. Pass
+      `next_cursor` back as `cursor`; `null` = last page. `count` is the page
+      size, never a total.
+    - aggregate (`/contracts`, `/stats/actions`): `{data, count, approximate}`.
+    - offset (all entity routes): `{data, count, limit, offset, has_more}`.
+    Analytics, market and signal routes return bare objects or arrays.
+
+    **Validation.** The raw-chain, analytics and market routes reject unknown
+    query parameters with 400. The entity routes (`/properties`, `/accounts`,
+    `/listings`, `/sales`, `/offers`, `/neighborhoods`, `/collections`,
+    `/treasures`, `/rates`, `/search`) silently IGNORE unknown parameters.
+
+    **Freshness.** Chain actions are live (~1 s lag). Decoded events
+    (`/properties/{id}/history`, `/sales`, `/listings`) every 15 min. Market
+    layer (`/properties`, `/accounts`, `/market/*`, `/signals`, `/rates`,
+    `/offers`) every 6 h at :17. Reference data (`/neighborhoods`,
+    `/collections`, `/treasures`, Upland API fields) daily 04:43 UTC.
+
+    **Shared heavy-query slot.** Every analytics/market request that reaches
+    ClickHouse (a cache miss on `/analytics/*`, `/ingest/windows`,
+    `/market/*`, `/signals`, and every `POST /analytics/query`) takes the
+    ledger's query gate: 4 in flight in total, 1 per client IP
+    (`QueryGate(4, 1)`, hard-coded, no config knob). The gateway is a single
+    IP, so ALL app users share ONE in-flight slot: those requests queue behind
+    each other. Avoid firing many at once (no per-keystroke queries); the 15 s
+    response cache absorbs identical GETs.
+
+    **Numbers.** `global_sequence`/`block_num` are JSON numbers (safe below
+    2^53 for this chain). Property ids are strings — keep them strings.
+servers:
+  - url: /bff/ledger
+    description: Same-origin BFF. Paths are relative to the ledger's /v1.
+tags:
+  - name: system
+  - name: chain
+    description: RAW / CANONICAL — every action as the chain emitted it.
+  - name: analytics
+    description: Aggregates over the canonical tables and rollups.
+  - name: market
+    description: DERIVED market layer — rates, city stats, signals.
+  - name: entities
+    description: DERIVED entities — properties, accounts, order book, reference data.
+
+paths:
+  # ------------------------------------------------------------------ system
+  /status:
+    get:
+      tags: [system]
+      operationId: getStatus
+      summary: Ingestion and backfill status
+      description: ClickHouse and upstream reachability, newest stored action, lag, and backfill window counts. Upstream health is cached 10 s. camelCase on the wire.
+      x-example: examples/GET_status.json
+      parameters: [{ $ref: '#/components/parameters/chain' }]
+      responses:
+        '200':
+          description: Status
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Status' }
+              examples: { captured: { externalValue: examples/GET_status.json } }
+        default: { $ref: '#/components/responses/Error' }
+
+  /chains:
+    get:
+      tags: [system]
+      operationId: listChains
+      summary: Configured chains
+      description: Bare array in configured order; the first entry is the default chain. `actionCount` comes from `action_types` (counts rows as inserted). Cached 15 s. camelCase on the wire.
+      x-example: examples/GET_chains.json
+      parameters: [{ $ref: '#/components/parameters/chain' }]
+      responses:
+        '200':
+          description: Chains
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/ChainSummary' } }
+              examples: { captured: { externalValue: examples/GET_chains.json } }
+        default: { $ref: '#/components/responses/Error' }
+
+  # ------------------------------------------------------------------- chain
+  /actions:
+    get:
+      tags: [chain]
+      operationId: listActions
+      summary: Raw actions (cursor-paginated)
+      description: Every stored action matching all given filters, deduplicated (`FINAL`). Keyset pagination over `(timestamp, global_sequence)`. Unknown parameters are a 400.
+      x-example: examples/GET_actions.json
+      parameters:
+        - { $ref: '#/components/parameters/after' }
+        - { $ref: '#/components/parameters/before' }
+        - { name: contract, in: query, schema: { $ref: '#/components/schemas/AntelopeName' } }
+        - { name: action, in: query, schema: { $ref: '#/components/schemas/AntelopeName' } }
+        - { name: receiver, in: query, schema: { $ref: '#/components/schemas/AntelopeName' } }
+        - { name: actor, in: query, description: 'has(actors, x)', schema: { $ref: '#/components/schemas/AntelopeName' } }
+        - { name: notified, in: query, description: 'has(notified, x)', schema: { $ref: '#/components/schemas/AntelopeName' } }
+        - { name: trx_id, in: query, schema: { $ref: '#/components/schemas/TrxId' } }
+        - { name: block_num, in: query, schema: { $ref: '#/components/schemas/UInt64String' } }
+        - { name: min_global_sequence, in: query, schema: { $ref: '#/components/schemas/UInt64String' } }
+        - { name: max_global_sequence, in: query, schema: { $ref: '#/components/schemas/UInt64String' } }
+        - { $ref: '#/components/parameters/limit100' }
+        - { $ref: '#/components/parameters/cursor' }
+        - { $ref: '#/components/parameters/sortDesc' }
+        - { $ref: '#/components/parameters/include_raw' }
+        - { $ref: '#/components/parameters/chain' }
+      responses:
+        '200':
+          description: One page of actions
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ActionPage' }
+              examples: { captured: { externalValue: examples/GET_actions.json } }
+        default: { $ref: '#/components/responses/Error' }
+
+  /actions/{globalSequence}:
+    get:
+      tags: [chain]
+      operationId: getAction
+      summary: One action by global sequence
+      description: 404 `not_found` when no action has that `global_sequence`.
+      x-example: examples/GET_actions_{globalSequence}.json
+      parameters:
+        - { name: globalSequence, in: path, required: true, schema: { $ref: '#/components/schemas/UInt64String' } }
+        - { $ref: '#/components/parameters/include_raw' }
+        - { $ref: '#/components/parameters/chain' }
+      responses:
+        '200':
+          description: The action
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Action' }
+              examples: { captured: { externalValue: 'examples/GET_actions_{globalSequence}.json' } }
+        default: { $ref: '#/components/responses/Error' }
+
+  /transactions/{trxId}:
+    get:
+      tags: [chain]
+      operationId: getTransaction
+      summary: Every stored action of one transaction
+      description: Actions ordered by `action_ordinal`, then `global_sequence` (≤10000). `timestamp`/`block_num` are the first action's. 404 when nothing is stored for the id. The id is lower-cased.
+      x-example: examples/GET_transactions_{trxId}.json
+      parameters:
+        - { name: trxId, in: path, required: true, schema: { $ref: '#/components/schemas/TrxId' } }
+        - { $ref: '#/components/parameters/include_raw' }
+        - { $ref: '#/components/parameters/chain' }
+      responses:
+        '200':
+          description: The transaction
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Transaction' }
+              examples: { captured: { externalValue: 'examples/GET_transactions_{trxId}.json' } }
+        default: { $ref: '#/components/responses/Error' }
+
+  /contracts:
+    get:
+      tags: [chain]
+      operationId: listContracts
+      summary: Contracts with action counts
+      description: Ordered by action count desc. Without `after`/`before` the counts come from `action_types` and `approximate` is true; with either, an exact count over `actions_raw FINAL` (`approximate` false).
+      x-example: examples/GET_contracts.json
+      parameters:
+        - { $ref: '#/components/parameters/after' }
+        - { $ref: '#/components/parameters/before' }
+        - { $ref: '#/components/parameters/limit1000' }
+        - { $ref: '#/components/parameters/chain' }
+      responses:
+        '200':
+          description: Contracts
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ContractList' }
+              examples: { captured: { externalValue: examples/GET_contracts.json } }
+        default: { $ref: '#/components/responses/Error' }
+
+  /contracts/{contract}/actions:
+    get:
+      tags: [chain]
+      operationId: listContractActions
+      summary: Raw actions of one contract
+      description: Same parameters and envelope as `/actions`, with `contract` fixed by the path. A conflicting `?contract=` is a 400.
+      x-example: examples/GET_contracts_{contract}_actions.json
+      parameters:
+        - { name: contract, in: path, required: true, schema: { $ref: '#/components/schemas/AntelopeName' } }
+        - { $ref: '#/components/parameters/after' }
+        - { $ref: '#/components/parameters/before' }
+        - { name: action, in: query, schema: { $ref: '#/components/schemas/AntelopeName' } }
+        - { name: receiver, in: query, schema: { $ref: '#/components/schemas/AntelopeName' } }
+        - { name: actor, in: query, schema: { $ref: '#/components/schemas/AntelopeName' } }
+        - { name: notified, in: query, schema: { $ref: '#/components/schemas/AntelopeName' } }
+        - { name: trx_id, in: query, schema: { $ref: '#/components/schemas/TrxId' } }
+        - { name: block_num, in: query, schema: { $ref: '#/components/schemas/UInt64String' } }
+        - { name: min_global_sequence, in: query, schema: { $ref: '#/components/schemas/UInt64String' } }
+        - { name: max_global_sequence, in: query, schema: { $ref: '#/components/schemas/UInt64String' } }
+        - { $ref: '#/components/parameters/limit100' }
+        - { $ref: '#/components/parameters/cursor' }
+        - { $ref: '#/components/parameters/sortDesc' }
+        - { $ref: '#/components/parameters/include_raw' }
+        - { $ref: '#/components/parameters/chain' }
+      responses:
+        '200':
+          description: One page of actions
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ActionPage' }
+              examples: { captured: { externalValue: 'examples/GET_contracts_{contract}_actions.json' } }
+        default: { $ref: '#/components/responses/Error' }
+
+  /transfers:
+    get:
+      tags: [chain]
+      operationId: listTransfers
+      summary: Token transfers (cursor-paginated)
+      description: Token `transfer` actions only (UPX, SPARKLT, STEM, …), not every economic event. Keyset-paginated like `/actions`.
+      x-example: examples/GET_transfers.json
+      parameters:
+        - { name: from, in: query, schema: { $ref: '#/components/schemas/AntelopeName' } }
+        - { name: to, in: query, schema: { $ref: '#/components/schemas/AntelopeName' } }
+        - { $ref: '#/components/parameters/symbol' }
+        - { name: contract, in: query, schema: { $ref: '#/components/schemas/AntelopeName' } }
+        - { $ref: '#/components/parameters/after' }
+        - { $ref: '#/components/parameters/before' }
+        - { $ref: '#/components/parameters/limit100' }
+        - { $ref: '#/components/parameters/cursor' }
+        - { $ref: '#/components/parameters/sortDesc' }
+        - { $ref: '#/components/parameters/chain' }
+      responses:
+        '200':
+          description: One page of transfers
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TransferPage' }
+              examples: { captured: { externalValue: examples/GET_transfers.json } }
+        default: { $ref: '#/components/responses/Error' }
+
+  /stats/actions:
+    get:
+      tags: [chain]
+      operationId: getActionStats
+      summary: Counts per (contract, action)
+      description: Ordered by count desc. Same `approximate` rule as `/contracts`.
+      x-example: examples/GET_stats_actions.json
+      parameters:
+        - { $ref: '#/components/parameters/after' }
+        - { $ref: '#/components/parameters/before' }
+        - { name: contract, in: query, schema: { $ref: '#/components/schemas/AntelopeName' } }
+        - { $ref: '#/components/parameters/limit1000' }
+        - { $ref: '#/components/parameters/chain' }
+      responses:
+        '200':
+          description: Stats
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ActionStatList' }
+              examples: { captured: { externalValue: examples/GET_stats_actions.json } }
+        default: { $ref: '#/components/responses/Error' }
+
+  /accounts/{account}/actions:
+    get:
+      tags: [chain]
+      operationId: listAccountActions
+      summary: Raw actions involving one account
+      description: |
+        `role` picks one involvement kind, never a mix: `actor` (signed it,
+        default), `receiver` (receipt receiver) or `notified`. Same filters and
+        envelope as `/actions`, plus `account` and `role` echoed back. The path
+        must be a valid Antelope account name (`AntelopeAccount`), else 400.
+      x-example: examples/GET_accounts_{account}_actions.json
+      parameters:
+        - { name: account, in: path, required: true, schema: { $ref: '#/components/schemas/AntelopeAccount' } }
+        - { name: role, in: query, schema: { type: string, enum: [actor, receiver, notified], default: actor } }
+        - { $ref: '#/components/parameters/after' }
+        - { $ref: '#/components/parameters/before' }
+        - { name: contract, in: query, schema: { $ref: '#/components/schemas/AntelopeName' } }
+        - { name: action, in: query, schema: { $ref: '#/components/schemas/AntelopeName' } }
+        - { name: receiver, in: query, schema: { $ref: '#/components/schemas/AntelopeName' } }
+        - { name: actor, in: query, schema: { $ref: '#/components/schemas/AntelopeName' } }
+        - { name: notified, in: query, schema: { $ref: '#/components/schemas/AntelopeName' } }
+        - { name: trx_id, in: query, schema: { $ref: '#/components/schemas/TrxId' } }
+        - { name: block_num, in: query, schema: { $ref: '#/components/schemas/UInt64String' } }
+        - { name: min_global_sequence, in: query, schema: { $ref: '#/components/schemas/UInt64String' } }
+        - { name: max_global_sequence, in: query, schema: { $ref: '#/components/schemas/UInt64String' } }
+        - { $ref: '#/components/parameters/limit100' }
+        - { $ref: '#/components/parameters/cursor' }
+        - { $ref: '#/components/parameters/sortDesc' }
+        - { $ref: '#/components/parameters/include_raw' }
+        - { $ref: '#/components/parameters/chain' }
+      responses:
+        '200':
+          description: One page of actions
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AccountActionPage' }
+              examples: { captured: { externalValue: 'examples/GET_accounts_{account}_actions.json' } }
+        default: { $ref: '#/components/responses/Error' }
+
+  # --------------------------------------------------------------- analytics
+  /analytics/overview:
+    get:
+      tags: [analytics]
+      operationId: getOverview
+      summary: Dashboard headline numbers
+      description: Totals, last-24h activity, top actions, transfer volume by symbol, backfill counts. `lag_seconds` is null for a chain that is not live. Cached 15 s.
+      x-example: examples/GET_analytics_overview.json
+      parameters: [{ $ref: '#/components/parameters/chain' }]
+      responses:
+        '200':
+          description: Overview
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Overview' }
+              examples: { captured: { externalValue: examples/GET_analytics_overview.json } }
+        default: { $ref: '#/components/responses/Error' }
+
+  /analytics/timeseries:
+    get:
+      tags: [analytics]
+      operationId: getTimeseries
+      summary: Metric per time bucket, optionally split
+      description: |
+        Compiled to a query spec and answered from rollups where possible. The
+        range is snapped outward to whole buckets; when omitted, `before`
+        defaults to now and `after` to a bucket-dependent span (minute 6 h,
+        hour 30 d, day 365 d, week 3 y, month 10 y). `split_by=symbol` needs
+        metric transfers|amount; `split_by=action` and `action=` need metric
+        actions|transactions; `symbol=` needs transfers|amount — otherwise 400.
+        When split, the top `top` series are kept and the rest folded into one.
+        Result columns: `[<bucket>, (<split>,) <metric>]`. Cached 15 s.
+      x-example: examples/GET_analytics_timeseries.json
+      parameters:
+        - { $ref: '#/components/parameters/chain' }
+        - { name: metric, in: query, schema: { $ref: '#/components/schemas/Metric' } }
+        - { name: bucket, in: query, schema: { $ref: '#/components/schemas/TimeBucket' } }
+        - { $ref: '#/components/parameters/after' }
+        - { $ref: '#/components/parameters/before' }
+        - { name: contract, in: query, schema: { $ref: '#/components/schemas/AntelopeName' } }
+        - { name: action, in: query, schema: { $ref: '#/components/schemas/AntelopeName' } }
+        - { $ref: '#/components/parameters/symbol' }
+        - { name: split_by, in: query, schema: { type: string, enum: [contract, action, symbol, none], default: none } }
+        - { name: top, in: query, schema: { type: integer, minimum: 1, maximum: 50, default: 10 } }
+      responses:
+        '200':
+          description: Analytics result
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AnalyticsResult' }
+              examples: { captured: { externalValue: examples/GET_analytics_timeseries.json } }
+        default: { $ref: '#/components/responses/Error' }
+
+  /analytics/keys:
+    get:
+      tags: [analytics]
+      operationId: listDataKeys
+      summary: Known JSON payload keys per (contract, action)
+      description: Rows of `data_keys`, the allow-list for JSON fields in `POST /analytics/query`. Bare array. NOTE (2026-10-08) the table is empty on the live ledger, so this returns `[]` and JSON-field queries are rejected.
+      x-example: examples/GET_analytics_keys.json
+      parameters:
+        - { $ref: '#/components/parameters/chain' }
+        - { name: contract, in: query, schema: { $ref: '#/components/schemas/AntelopeName' } }
+        - { name: action, in: query, schema: { $ref: '#/components/schemas/AntelopeName' } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 5000, default: 1000 } }
+      responses:
+        '200':
+          description: Data keys
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/DataKey' } }
+              examples: { captured: { externalValue: examples/GET_analytics_keys.json } }
+        default: { $ref: '#/components/responses/Error' }
+
+  /analytics/flows:
+    get:
+      tags: [analytics]
+      operationId: getFlows
+      summary: Token flow graph (sankey / network)
+      description: Top account→account edges by amount from `transfer_edges_daily`, plus per-node in/out totals. Day-aligned range; default the last 365 days. `account=` keeps only that account's edges. Cached 15 s.
+      x-example: examples/GET_analytics_flows.json
+      parameters:
+        - { $ref: '#/components/parameters/chain' }
+        - { name: symbol, in: query, schema: { type: string, pattern: '^[A-Za-z0-9]{1,16}$', default: UPX } }
+        - { name: contract, in: query, schema: { $ref: '#/components/schemas/AntelopeName' } }
+        - { $ref: '#/components/parameters/after' }
+        - { $ref: '#/components/parameters/before' }
+        - { name: min_amount, in: query, schema: { type: number } }
+        - { name: account, in: query, schema: { $ref: '#/components/schemas/AntelopeName' } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 2000, default: 200 } }
+      responses:
+        '200':
+          description: Flow graph
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Flows' }
+              examples: { captured: { externalValue: examples/GET_analytics_flows.json } }
+        default: { $ref: '#/components/responses/Error' }
+
+  /analytics/accounts/top:
+    get:
+      tags: [analytics]
+      operationId: getTopAccounts
+      summary: Most active / largest accounts
+      description: Bare array ranked desc. `by=actions` (hour-aligned, default 30 d) fills `actions`; `sent`/`received` (day-aligned, default 365 d) fill `transfers` and `amount`. `value` is always the ranked metric. Cached 15 s.
+      x-example: examples/GET_analytics_accounts_top.json
+      parameters:
+        - { $ref: '#/components/parameters/chain' }
+        - { name: by, in: query, schema: { type: string, enum: [actions, sent, received], default: actions } }
+        - { $ref: '#/components/parameters/symbol' }
+        - { name: contract, in: query, schema: { $ref: '#/components/schemas/AntelopeName' } }
+        - { $ref: '#/components/parameters/after' }
+        - { $ref: '#/components/parameters/before' }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 50 } }
+      responses:
+        '200':
+          description: Ranked accounts
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/TopAccount' } }
+              examples: { captured: { externalValue: examples/GET_analytics_accounts_top.json } }
+        default: { $ref: '#/components/responses/Error' }
+
+  /analytics/calendar:
+    get:
+      tags: [analytics]
+      operationId: getCalendar
+      summary: Daily totals (calendar heatmap)
+      description: Bare array of `{day, value}`, ascending. Default the last 365 days. `action` and `account` apply only to actions metrics, `symbol` only to transfer metrics (silently ignored otherwise). Cached 15 s.
+      x-example: examples/GET_analytics_calendar.json
+      parameters:
+        - { $ref: '#/components/parameters/chain' }
+        - { name: metric, in: query, schema: { $ref: '#/components/schemas/Metric' } }
+        - { name: contract, in: query, schema: { $ref: '#/components/schemas/AntelopeName' } }
+        - { name: action, in: query, schema: { $ref: '#/components/schemas/AntelopeName' } }
+        - { $ref: '#/components/parameters/symbol' }
+        - { name: account, in: query, schema: { $ref: '#/components/schemas/AntelopeName' } }
+        - { $ref: '#/components/parameters/after' }
+        - { $ref: '#/components/parameters/before' }
+      responses:
+        '200':
+          description: Days
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/CalendarDay' } }
+              examples: { captured: { externalValue: examples/GET_analytics_calendar.json } }
+        default: { $ref: '#/components/responses/Error' }
+
+  /analytics/sales:
+    get:
+      tags: [analytics]
+      operationId: getSalesAnalytics
+      summary: Evidence-based property sale prices (series + histogram)
+      description: |
+        A sale is a `(contract, action)` action (default `playuplandme:n5`);
+        its price is the sum of same-transaction UPX transfers to the contract.
+        Never inferred from `data_json`. Unpriced sales count in `unmatched`
+        and `sales` but in no price statistic. `series` columns are
+        `[<bucket>, median_price, sales]`, `histogram` `[bin, sales]`.
+        `fields_used` says exactly which rows were used. Cached 15 s.
+      x-example: examples/GET_analytics_sales.json
+      parameters:
+        - { $ref: '#/components/parameters/chain' }
+        - { $ref: '#/components/parameters/after' }
+        - { $ref: '#/components/parameters/before' }
+        - { name: bucket, in: query, schema: { type: string, enum: [hour, day, week, month], default: day } }
+        - { name: contract, in: query, schema: { $ref: '#/components/schemas/AntelopeName', default: playuplandme } }
+        - { name: action, in: query, schema: { $ref: '#/components/schemas/AntelopeName', default: n5 } }
+        - { name: bins, in: query, schema: { type: integer, minimum: 4, maximum: 100, default: 24 } }
+      responses:
+        '200':
+          description: Sales analytics
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SalesAnalytics' }
+              examples: { captured: { externalValue: examples/GET_analytics_sales.json } }
+        default: { $ref: '#/components/responses/Error' }
+
+  /analytics/query:
+    post:
+      tags: [analytics]
+      operationId: runQuery
+      summary: General aggregation query (query spec)
+      description: |
+        docs/ANALYTICS.md §3. The body is validated (strict), compiled to one
+        parameterised ClickHouse statement against `source`, and run with
+        guard rails (30 s, result row cap = `limit`). Column names allowed per
+        source are enforced by the compiler (400 with the reason). Every source
+        except `properties` and `accounts` needs `range`. NOT cached; always takes
+        the shared heavy-query slot (one per client IP; the gateway is one IP). Body limit 64 KiB.
+      x-example: examples/POST_analytics_query.json
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/QuerySpec' }
+            example:
+              source: sales
+              range: { after: '2026-10-01T00:00:00Z', before: '2026-10-07T23:59:59Z' }
+              dimensions: [{ field: city }]
+              measures: [{ fn: count, alias: sales }, { fn: median, field: price_upx, alias: median_price }]
+              orderBy: [{ measure: sales, dir: desc }]
+              limit: 3
+      responses:
+        '200':
+          description: Analytics result
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/QueryResult' }
+              examples: { captured: { externalValue: examples/POST_analytics_query.json } }
+        default: { $ref: '#/components/responses/Error' }
+
+  /ingest/windows:
+    get:
+      tags: [analytics]
+      operationId: listIngestWindows
+      summary: Backfill window ledger
+      description: Bare array of window rows (counts and status only; never the archive). `after`/`before` match windows overlapping the range. Cached 15 s.
+      x-example: examples/GET_ingest_windows.json
+      parameters:
+        - { $ref: '#/components/parameters/chain' }
+        - { $ref: '#/components/parameters/after' }
+        - { $ref: '#/components/parameters/before' }
+        - { name: status, in: query, schema: { type: string, enum: [pending, running, complete, verified, failed, split] } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 5000, default: 500 } }
+        - { name: sort, in: query, schema: { type: string, enum: [asc, desc], default: asc } }
+      responses:
+        '200':
+          description: Windows
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/IngestWindow' } }
+              examples: { captured: { externalValue: examples/GET_ingest_windows.json } }
+        default: { $ref: '#/components/responses/Error' }
+
+  # ------------------------------------------------------------------ market
+  /market/upx-usd:
+    get:
+      tags: [market]
+      operationId: getUpxUsd
+      summary: Implied UPX/USD exchange rate series
+      description: |
+        docs/MARKET.md. No USD price exists on chain; each method infers one
+        from the UPX and FIAT order books. `preferred` is the method to quote.
+        `points` holds the NEWEST `limit` days PER METHOD (inside
+        `after`/`before` when given), returned ordered by method, then day
+        ascending (ready to chart). `upx_per_usd_smooth` is a trailing median
+        over `smooth` days, computed over every filtered day before the cut.
+        Cached 15 s.
+      x-example: examples/GET_market_upx-usd.json
+      parameters:
+        - { $ref: '#/components/parameters/chain' }
+        - { name: method, in: query, schema: { $ref: '#/components/schemas/RateMethod' } }
+        - { $ref: '#/components/parameters/afterDay' }
+        - { $ref: '#/components/parameters/beforeDay' }
+        - { name: smooth, in: query, schema: { type: integer, minimum: 1, maximum: 30, default: 7 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 2000, default: 1000 } }
+      responses:
+        '200':
+          description: Rate series
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UpxUsd' }
+              examples: { captured: { externalValue: examples/GET_market_upx-usd.json } }
+        default: { $ref: '#/components/responses/Error' }
+
+  /market/cities:
+    get:
+      tags: [market]
+      operationId: listCityDays
+      summary: Per-city daily market state
+      description: Bare array of `market_city_daily` rows, newest day first, then by sales. Medians are null on days with nothing to take a median of. Cached 15 s.
+      x-example: examples/GET_market_cities.json
+      parameters:
+        - { $ref: '#/components/parameters/chain' }
+        - { name: city, in: query, schema: { type: string, minLength: 1, maxLength: 64 } }
+        - { $ref: '#/components/parameters/afterDay' }
+        - { $ref: '#/components/parameters/beforeDay' }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 5000, default: 2000 } }
+      responses:
+        '200':
+          description: City days
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/CityDay' } }
+              examples: { captured: { externalValue: examples/GET_market_cities.json } }
+        default: { $ref: '#/components/responses/Error' }
+
+  /market/fiat:
+    get:
+      tags: [market]
+      operationId: getFiatActivity
+      summary: FIAT asks and what actually cleared
+      description: |
+        Only property carries a FIAT price. "Cleared" = the property changed
+        hands while that listing was live. `upx_equivalent` converts UPX-only
+        item sales (Uppies, Seeds, …) at the day's `weighted_comps` rate — a
+        conversion, not a quoted price. Not documented in docs/MARKET.md.
+        Cached 15 s.
+      x-example: examples/GET_market_fiat.json
+      parameters:
+        - { $ref: '#/components/parameters/chain' }
+        - { name: days, in: query, schema: { type: integer, minimum: 1, maximum: 365, default: 90 } }
+        - { name: city, in: query, schema: { type: string, minLength: 1, maxLength: 64 } }
+        - { name: min_usd, in: query, schema: { type: number, minimum: 0, maximum: 1000000, default: 0.5 } }
+        - { name: max_usd, in: query, schema: { type: number, exclusiveMinimum: 0, maximum: 10000000, default: 100000 } }
+        - { name: cleared_only, in: query, schema: { type: string, enum: ['true', 'false'], default: 'false' } }
+      responses:
+        '200':
+          description: FIAT activity
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Fiat' }
+              examples: { captured: { externalValue: examples/GET_market_fiat.json } }
+        default: { $ref: '#/components/responses/Error' }
+
+  /signals:
+    get:
+      tags: [market]
+      operationId: listSignals
+      summary: Opportunity signals
+      description: Bare array ranked by score then expected USD edge. Advisory only; `evidence` says what produced each row. Cached 15 s.
+      x-example: examples/GET_signals.json
+      parameters:
+        - { $ref: '#/components/parameters/chain' }
+        - { name: type, in: query, schema: { type: string, enum: [cross_book_arb, under_comps, regime_shift, yield_value, sub_mint_arb] } }
+        - { name: city, in: query, schema: { type: string, minLength: 1, maxLength: 64 } }
+        - { name: entity_id, in: query, schema: { type: string, maxLength: 64 } }
+        - { name: min_score, in: query, schema: { type: number, minimum: 0, maximum: 1, default: 0 } }
+        - { name: active_only, in: query, description: Hide signals whose expires_at has passed., schema: { type: string, enum: ['true', 'false'], default: 'true' } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 100 } }
+      responses:
+        '200':
+          description: Signals
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Signal' } }
+              examples: { captured: { externalValue: examples/GET_signals.json } }
+        default: { $ref: '#/components/responses/Error' }
+
+  # ---------------------------------------------------------------- entities
+  /properties:
+    get:
+      tags: [entities]
+      operationId: listProperties
+      summary: Properties (derived dimension)
+      description: Properties known from chain mint/sale events (~398 K that have traded or minted inside the chain window, not all ~4.9 M). Tiebreak `property_id`. Unknown parameters are ignored.
+      x-example: examples/GET_properties.json
+      parameters:
+        - { $ref: '#/components/parameters/entityChain' }
+        - { name: city, in: query, schema: { type: string, maxLength: 64 } }
+        - { name: neighborhood, in: query, schema: { type: string, maxLength: 120 } }
+        - { name: region, in: query, schema: { type: string, maxLength: 64 } }
+        - { name: status, in: query, description: Upland API status (api_status)., schema: { type: string, maxLength: 32 } }
+        - { name: mint_source, in: query, schema: { type: string, enum: [chain, api, none] } }
+        - { name: min_mint, in: query, schema: { type: number } }
+        - { name: max_mint, in: query, schema: { type: number } }
+        - { name: min_sales, in: query, schema: { type: integer, minimum: 0 } }
+        - { $ref: '#/components/parameters/traded' }
+        - { name: address, in: query, description: Case-insensitive substring., schema: { type: string, minLength: 1, maxLength: 120 } }
+        - { name: sort, in: query, schema: { type: string, enum: [mint_price_upx, last_sale_upx, last_sale_at, minted_at, sales, address], default: mint_price_upx } }
+        - { $ref: '#/components/parameters/order' }
+        - { $ref: '#/components/parameters/entityLimit' }
+        - { $ref: '#/components/parameters/offset' }
+      responses:
+        '200':
+          description: One page of properties
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PropertyPage' }
+              examples: { captured: { externalValue: examples/GET_properties.json } }
+        default: { $ref: '#/components/responses/Error' }
+
+  /properties/{propertyId}:
+    get:
+      tags: [entities]
+      operationId: getProperty
+      summary: One property
+      description: The derived row plus `chain_known` and the Upland API row (`upland_api`, or null). A property that never traded inside the chain window but is in the API dimension still answers 200 with `chain_known:false`. 404 only when neither knows it.
+      x-example: examples/GET_properties_{propertyId}.json
+      parameters:
+        - { $ref: '#/components/parameters/propertyId' }
+        - { $ref: '#/components/parameters/entityChain' }
+      responses:
+        '200':
+          description: The property
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PropertyDetail' }
+              examples: { captured: { externalValue: 'examples/GET_properties_{propertyId}.json' } }
+        default: { $ref: '#/components/responses/Error' }
+
+  /properties/{propertyId}/history:
+    get:
+      tags: [entities]
+      operationId: getPropertyHistory
+      summary: Every decoded event for one property
+      description: Newest first. An unknown property is an empty page, not a 404. `fields` keys depend on `event_type` (e.g. `property_sale` has price_upx, buyer_paid_upx, seller_proceeds_upx, community_fee_upx).
+      x-example: examples/GET_properties_{propertyId}_history.json
+      parameters:
+        - { $ref: '#/components/parameters/propertyId' }
+        - { $ref: '#/components/parameters/entityChain' }
+        - { name: event_type, in: query, schema: { type: string, maxLength: 48 } }
+        - { $ref: '#/components/parameters/after' }
+        - { $ref: '#/components/parameters/before' }
+        - { $ref: '#/components/parameters/entityLimit' }
+        - { $ref: '#/components/parameters/offset' }
+      responses:
+        '200':
+          description: One page of events
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PropertyHistory' }
+              examples: { captured: { externalValue: 'examples/GET_properties_{propertyId}_history.json' } }
+        default: { $ref: '#/components/responses/Error' }
+
+  /accounts:
+    get:
+      tags: [entities]
+      operationId: listAccounts
+      summary: Accounts (derived dimension)
+      description: |
+        Usernames, trading activity and bot-likeness per chain account.
+        `likely_bot` is an advisory inference. Every sort column orders
+        numerically (or chronologically for first_seen/last_seen).
+      x-example: examples/GET_accounts.json
+      parameters:
+        - { $ref: '#/components/parameters/entityChain' }
+        - { name: username, in: query, description: Case-insensitive substring of the Upland username., schema: { type: string, minLength: 1, maxLength: 120 } }
+        - { name: likely_bot, in: query, schema: { $ref: '#/components/schemas/EntityFlag' } }
+        - { name: named, in: query, description: 'Only accounts with (true) / without (false) a username.', schema: { $ref: '#/components/schemas/EntityFlag' } }
+        - { name: min_buys, in: query, schema: { type: integer, minimum: 0 } }
+        - { name: min_sells, in: query, schema: { type: integer, minimum: 0 } }
+        - { name: min_events, in: query, schema: { type: integer, minimum: 0 } }
+        - { name: max_median_latency_s, in: query, schema: { type: integer, minimum: 0 } }
+        - { name: sort, in: query, schema: { type: string, enum: [events, buys, sells, upx_spent, upx_received, active_days, first_seen, last_seen, median_buy_latency_s], default: events } }
+        - { $ref: '#/components/parameters/order' }
+        - { $ref: '#/components/parameters/entityLimit' }
+        - { $ref: '#/components/parameters/offset' }
+      responses:
+        '200':
+          description: One page of accounts
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AccountPage' }
+              examples: { captured: { externalValue: examples/GET_accounts.json } }
+        default: { $ref: '#/components/responses/Error' }
+
+  /accounts/{account}:
+    get:
+      tags: [entities]
+      operationId: getAccount
+      summary: One account profile
+      description: The derived account row plus `income` (yield and visit earnings from events). 404 when the account is not in the dimension. The path must be a valid Antelope account name (`AntelopeAccount`), else 400.
+      x-example: examples/GET_accounts_{account}.json
+      parameters:
+        - { name: account, in: path, required: true, schema: { $ref: '#/components/schemas/AntelopeAccount' } }
+        - { $ref: '#/components/parameters/entityChain' }
+      responses:
+        '200':
+          description: The account
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AccountDetail' }
+              examples: { captured: { externalValue: 'examples/GET_accounts_{account}.json' } }
+        default: { $ref: '#/components/responses/Error' }
+
+  /listings:
+    get:
+      tags: [entities]
+      operationId: listListings
+      summary: Property listings (order book)
+      description: '`listing_created` events joined to the property. A listing carries exactly one of `ask_upx` / `ask_fiat`. `open=true` keeps listings whose property''s newest listing/removal/sale event (last 180 days) is still this listing. `ask_to_mint` is 0 when mint is unknown.'
+      x-example: examples/GET_listings.json
+      parameters:
+        - { $ref: '#/components/parameters/entityChain' }
+        - { name: city, in: query, schema: { type: string, maxLength: 64 } }
+        - { name: neighborhood, in: query, schema: { type: string, maxLength: 120 } }
+        - { name: book, in: query, schema: { type: string, enum: [upx, fiat] } }
+        - { name: open, in: query, schema: { $ref: '#/components/schemas/EntityFlag' } }
+        - { name: min_ask, in: query, description: 'On greatest(ask_upx, ask_fiat).', schema: { type: number } }
+        - { name: max_ask, in: query, schema: { type: number } }
+        - { name: min_ask_to_mint, in: query, schema: { type: number } }
+        - { name: max_ask_to_mint, in: query, schema: { type: number } }
+        - { $ref: '#/components/parameters/after' }
+        - { $ref: '#/components/parameters/before' }
+        - { name: sort, in: query, schema: { type: string, enum: [timestamp, ask_upx, ask_fiat, ask_to_mint], default: timestamp } }
+        - { $ref: '#/components/parameters/order' }
+        - { $ref: '#/components/parameters/entityLimit' }
+        - { $ref: '#/components/parameters/offset' }
+      responses:
+        '200':
+          description: One page of listings
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ListingPage' }
+              examples: { captured: { externalValue: examples/GET_listings.json } }
+        default: { $ref: '#/components/responses/Error' }
+
+  /sales:
+    get:
+      tags: [entities]
+      operationId: listSales
+      summary: Property sales
+      description: '`property_sale` events. `price_upx` is the headline; `buyer_paid_upx` (+5 %) and `seller_proceeds_upx` (−5 %) are what actually moved. `buyer` is the event account, `seller` the counterparty.'
+      x-example: examples/GET_sales.json
+      parameters:
+        - { $ref: '#/components/parameters/entityChain' }
+        - { name: city, in: query, schema: { type: string, maxLength: 64 } }
+        - { name: neighborhood, in: query, schema: { type: string, maxLength: 120 } }
+        - { name: buyer, in: query, schema: { $ref: '#/components/schemas/AntelopeAccount' } }
+        - { name: seller, in: query, schema: { $ref: '#/components/schemas/AntelopeAccount' } }
+        - { name: property_id, in: query, schema: { type: string, pattern: '^\d{1,20}$' } }
+        - { name: min_price, in: query, schema: { type: number } }
+        - { name: max_price, in: query, schema: { type: number } }
+        - { name: max_price_to_mint, in: query, schema: { type: number } }
+        - { $ref: '#/components/parameters/after' }
+        - { $ref: '#/components/parameters/before' }
+        - { name: sort, in: query, schema: { type: string, enum: [timestamp, price_upx, price_to_mint], default: timestamp } }
+        - { $ref: '#/components/parameters/order' }
+        - { $ref: '#/components/parameters/entityLimit' }
+        - { $ref: '#/components/parameters/offset' }
+      responses:
+        '200':
+          description: One page of sales
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SalePage' }
+              examples: { captured: { externalValue: examples/GET_sales.json } }
+        default: { $ref: '#/components/responses/Error' }
+
+  /offers:
+    get:
+      tags: [entities]
+      operationId: listOffers
+      summary: Properties transferred through accepted offers
+      description: Invisible in `/sales`. The acceptor is the SELLER (opposite polarity to `/sales`). Prices often unrelated to the order book. `resolved_by` = address | mint_trx | both.
+      x-example: examples/GET_offers.json
+      parameters:
+        - { $ref: '#/components/parameters/entityChain' }
+        - { name: city, in: query, schema: { type: string, maxLength: 64 } }
+        - { name: buyer, in: query, schema: { $ref: '#/components/schemas/AntelopeAccount' } }
+        - { name: seller, in: query, schema: { $ref: '#/components/schemas/AntelopeAccount' } }
+        - { name: buyer_username, in: query, schema: { type: string, minLength: 1, maxLength: 120 } }
+        - { name: property_id, in: query, schema: { type: string, pattern: '^\d{1,20}$' } }
+        - { name: min_price_to_mint, in: query, schema: { type: number } }
+        - { name: max_price_to_mint, in: query, schema: { type: number } }
+        - { $ref: '#/components/parameters/after' }
+        - { $ref: '#/components/parameters/before' }
+        - { name: sort, in: query, schema: { type: string, enum: [timestamp, price_upx, price_to_mint, mint_price_upx], default: timestamp } }
+        - { $ref: '#/components/parameters/order' }
+        - { $ref: '#/components/parameters/entityLimit' }
+        - { $ref: '#/components/parameters/offset' }
+      responses:
+        '200':
+          description: One page of offer transfers
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OfferPage' }
+              examples: { captured: { externalValue: examples/GET_offers.json } }
+        default: { $ref: '#/components/responses/Error' }
+
+  /neighborhoods:
+    get:
+      tags: [entities]
+      operationId: listNeighborhoods
+      summary: Neighborhoods (Upland reference data)
+      description: 'Ordered by city_id, name. `boundaries` only with `include_boundaries=true`: the polygon as parsed JSON (nested arrays of [lng, lat] numbers), or null when the stored text is not valid JSON.'
+      x-example: examples/GET_neighborhoods.json
+      parameters:
+        - { $ref: '#/components/parameters/entityChain' }
+        - { name: city, in: query, description: Exact city name., schema: { type: string, maxLength: 64 } }
+        - { name: city_id, in: query, schema: { type: integer, minimum: 0 } }
+        - { name: name, in: query, schema: { type: string, minLength: 1, maxLength: 120 } }
+        - { name: include_boundaries, in: query, schema: { $ref: '#/components/schemas/EntityFlag' } }
+        - { $ref: '#/components/parameters/entityLimit' }
+        - { $ref: '#/components/parameters/offset' }
+      responses:
+        '200':
+          description: One page of neighborhoods
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NeighborhoodPage' }
+              examples: { captured: { externalValue: examples/GET_neighborhoods.json } }
+        default: { $ref: '#/components/responses/Error' }
+
+  /collections:
+    get:
+      tags: [entities]
+      operationId: listCollections
+      summary: Collections (Upland reference data)
+      description: Yield boost and one-time reward per collection. Tiebreak collection_id.
+      x-example: examples/GET_collections.json
+      parameters:
+        - { $ref: '#/components/parameters/entityChain' }
+        - { name: city_id, in: query, schema: { type: integer, minimum: 0 } }
+        - { name: name, in: query, schema: { type: string, minLength: 1, maxLength: 120 } }
+        - { name: min_yield_boost, in: query, schema: { type: number } }
+        - { name: min_reward, in: query, schema: { type: number } }
+        - { name: rarity_level, in: query, schema: { type: integer, minimum: 0, maximum: 255 } }
+        - { name: sort, in: query, schema: { type: string, enum: [yield_boost, one_time_reward, amount, rarity_level, name], default: yield_boost } }
+        - { $ref: '#/components/parameters/order' }
+        - { $ref: '#/components/parameters/entityLimit' }
+        - { $ref: '#/components/parameters/offset' }
+      responses:
+        '200':
+          description: One page of collections
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CollectionPage' }
+              examples: { captured: { externalValue: examples/GET_collections.json } }
+        default: { $ref: '#/components/responses/Error' }
+
+  /treasures:
+    get:
+      tags: [entities]
+      operationId: listTreasures
+      summary: Treasure hunt finds (Upland reference data)
+      description: '`user_name` is an Upland username, not a chain account. `lock_seconds` = spawn → lock.'
+      x-example: examples/GET_treasures.json
+      parameters:
+        - { $ref: '#/components/parameters/entityChain' }
+        - { name: user_name, in: query, schema: { type: string, minLength: 1, maxLength: 120 } }
+        - { name: treasure_type, in: query, schema: { type: string, maxLength: 32 } }
+        - { name: min_reward, in: query, schema: { type: number } }
+        - { name: max_lock_seconds, in: query, schema: { type: integer, minimum: 0 } }
+        - { name: after, in: query, description: On spawn_at., schema: { $ref: '#/components/schemas/InstantParam' } }
+        - { name: before, in: query, description: On spawn_at., schema: { $ref: '#/components/schemas/InstantParam' } }
+        - { name: sort, in: query, schema: { type: string, enum: [spawn_at, reward_upx, lock_seconds], default: spawn_at } }
+        - { $ref: '#/components/parameters/order' }
+        - { $ref: '#/components/parameters/entityLimit' }
+        - { $ref: '#/components/parameters/offset' }
+      responses:
+        '200':
+          description: One page of treasures
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TreasurePage' }
+              examples: { captured: { externalValue: examples/GET_treasures.json } }
+        default: { $ref: '#/components/responses/Error' }
+
+  /rates:
+    get:
+      tags: [entities]
+      operationId: listRates
+      summary: Daily UPX/USD rate rows (raw table)
+      description: |
+        `upx_usd_daily` rows, one per (day, method), ordered day DESC then
+        method, offset-paginated like every entity list: `limit` counts rows,
+        `count <= limit`, `has_more` is true when the page is full and
+        `offset` echoes the request. `after`/`before` bound the day. Prefer
+        `/market/upx-usd` for charts (per-method series, smoothing).
+      x-example: examples/GET_rates.json
+      parameters:
+        - { $ref: '#/components/parameters/entityChain' }
+        - { name: method, in: query, schema: { type: string, maxLength: 48 } }
+        - { $ref: '#/components/parameters/after' }
+        - { $ref: '#/components/parameters/before' }
+        - { $ref: '#/components/parameters/entityLimit' }
+        - { $ref: '#/components/parameters/offset' }
+      responses:
+        '200':
+          description: Rate rows
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RatePage' }
+              examples: { captured: { externalValue: examples/GET_rates.json } }
+        default: { $ref: '#/components/responses/Error' }
+
+  /search:
+    get:
+      tags: [entities]
+      operationId: search
+      summary: Search across entity kinds
+      description: One bounded query per kind (property, account, neighborhood, collection, city); a key is present only for kinds searched. A bare number searches property ids exactly; otherwise substrings.
+      x-example: examples/GET_search.json
+      parameters:
+        - { $ref: '#/components/parameters/entityChain' }
+        - { name: q, in: query, required: true, schema: { type: string, minLength: 2, maxLength: 120 } }
+        - { name: kind, in: query, schema: { type: string, enum: [property, account, neighborhood, collection, city] } }
+        - { name: limit, in: query, description: Per kind., schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SearchResult' }
+              examples: { captured: { externalValue: examples/GET_search.json } }
+        default: { $ref: '#/components/responses/Error' }
+
+components:
+  parameters:
+    chain:
+      name: chain
+      in: query
+      description: Chain name (see /chains). Omitted = default chain. Unknown chain = 400.
+      schema: { type: string, minLength: 1, maxLength: 32, pattern: '^[A-Za-z0-9][A-Za-z0-9_-]*$' }
+    entityChain:
+      name: chain
+      in: query
+      description: Chain name. Omitted = default chain. Unknown chain = 400.
+      schema: { type: string, minLength: 1, maxLength: 64 }
+    after:
+      name: after
+      in: query
+      description: Inclusive lower bound (ISO-8601; no zone = UTC).
+      schema: { $ref: '#/components/schemas/InstantParam' }
+    before:
+      name: before
+      in: query
+      description: Inclusive upper bound (ISO-8601; no zone = UTC).
+      schema: { $ref: '#/components/schemas/InstantParam' }
+    afterDay:
+      name: after
+      in: query
+      description: Inclusive first day (UTC).
+      schema: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$' }
+    beforeDay:
+      name: before
+      in: query
+      description: Inclusive last day (UTC).
+      schema: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$' }
+    limit100:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 1000, default: 100 }
+    limit1000:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 1000, default: 1000 }
+    entityLimit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 1000, default: 100 }
+    offset:
+      name: offset
+      in: query
+      schema: { type: integer, minimum: 0, default: 0 }
+    order:
+      name: order
+      in: query
+      schema: { type: string, enum: [asc, desc], default: desc }
+    cursor:
+      name: cursor
+      in: query
+      description: Opaque; pass back `next_cursor` exactly. Format is base64url(JSON {t:ms, g:"global_sequence"}) of the previous page's last row.
+      schema: { type: string, minLength: 1 }
+    sortDesc:
+      name: sort
+      in: query
+      schema: { type: string, enum: [asc, desc], default: desc }
+    include_raw:
+      name: include_raw
+      in: query
+      description: Include the untouched upstream document as `raw`. Truthy values 1|true|yes|on; anything else is false.
+      schema: { type: string, default: 'false' }
+    symbol:
+      name: symbol
+      in: query
+      schema: { type: string, pattern: '^[A-Za-z0-9]{1,16}$' }
+    traded:
+      name: traded
+      in: query
+      description: true = sales > 0, false = sales = 0.
+      schema: { $ref: '#/components/schemas/EntityFlag' }
+    propertyId:
+      name: propertyId
+      in: path
+      required: true
+      schema: { type: string, pattern: '^\d{1,20}$' }
+
+  responses:
+    Error:
+      description: |
+        Ledger error (`LedgerError` — object `error`) or gateway error
+        (`GatewayError` — string `error`). Ledger statuses: 400
+        validation_error (bad or unknown parameter), 404 not_found, 408
+        request_timeout, 413 payload_too_large, 429 rate_limited, 500
+        internal_error (message is always "internal server error"). Gateway
+        statuses: 401 signed out, 404 route not allowed / feature flag off,
+        413/414/415 request rejected by the gateway, 502 ledger unreachable or
+        bad response, 503 gateway not configured, 504 ledger timeout.
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - { $ref: '#/components/schemas/LedgerError' }
+              - { $ref: '#/components/schemas/GatewayError' }
+          examples:
+            validation_error: { externalValue: examples/ERROR_validation_error.json }
+            not_found: { externalValue: examples/ERROR_not_found.json }
+            gateway_unauthenticated: { value: { error: unauthenticated } }
+
+  schemas:
+    # ---------------------------------------------------------- primitives
+    IsoInstant: { type: string, format: date-time, description: 'ISO-8601 UTC with Z, ms precision.', pattern: '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$' }
+    IsoDay: { type: string, format: date, pattern: '^\d{4}-\d{2}-\d{2}$' }
+    NestedNumbers: { type: array, items: { oneOf: [{ type: number }, { $ref: '#/components/schemas/NestedNumbers' }] } }
+    InstantParam: { type: string, minLength: 1, description: 'ISO-8601; a missing zone is read as UTC.' }
+    AntelopeAccount: { type: string, pattern: '^(?:[a-z1-5.]{1,12}|[a-z1-5.]{12}[a-j1-5])$', description: 'A real Antelope account name: up to 12 of [a-z1-5.], or 12 plus a 13th from [a-j1-5]. Used by /accounts/{account}, /accounts/{account}/actions and the buyer/seller filters on /sales and /offers; anything else is a 400 validation_error.' }
+    AntelopeName: { type: string, minLength: 1, maxLength: 64, pattern: '^[A-Za-z0-9._@:-]+$' }
+    TrxId: { type: string, pattern: '^[0-9a-fA-F]{64}$' }
+    UInt64String: { type: string, pattern: '^\d+$', description: 'Non-negative integer, ≤ UInt64.' }
+    EntityFlag: { type: string, description: 'Truthy: 1|true|yes|on (case-insensitive). Anything else is false.' }
+    Metric: { type: string, enum: [actions, transactions, transfers, amount], default: actions }
+    TimeBucket: { type: string, enum: [minute, hour, day, week, month], default: hour }
+    RateMethod: { type: string, enum: [global_comps, city_comps, city_band_comps, paired_property, settled_comps, weighted_comps] }
+
+    # -------------------------------------------------------------- errors
+    LedgerError:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string, enum: [validation_error, not_found, rate_limited, request_timeout, payload_too_large, upstream_unavailable, internal_error] }
+            message: { type: string }
+    GatewayError:
+      type: object
+      required: [error]
+      description: Produced by the BFF / forge-api gateway, never by the ledger.
+      properties:
+        error:
+          type: string
+          description: |
+            Machine code. As implemented in forge-app on 2026-10-08
+            (apps/web/src/app/bff/ledger, apps/api services/ledger/gateway.py):
+            401 unauthenticated (signed out, or the practice/demo account);
+            404 not_found (route not on the allowlist) or ledger-disabled (the upland_ledger flag is off);
+            413 too_large; 414 query_too_long; 415 unsupported_media_type;
+            502 ledger_unavailable | ledger_bad_response | ledger_response_too_large;
+            503 ledger_not_configured; 504 ledger_timeout.
+          examples: [unauthenticated, not_found, ledger_unavailable, ledger_timeout, ledger_not_configured]
+
+    # ------------------------------------------------------------- actions
+    Action:
+      type: object
+      required: [global_sequence, timestamp, block_num, block_id, trx_id, action_ordinal, creator_action_ordinal, contract, action, receiver, notified, actors, authorization, receipts, data, producer, cpu_usage_us, irreversible, source, stream, normalizer_version, ingested_at]
+      properties:
+        global_sequence: { type: number, description: Canonical identity. }
+        timestamp: { oneOf: [{ $ref: '#/components/schemas/IsoInstant' }, { type: 'null' }] }
+        block_num: { type: number }
+        block_id: { type: string }
+        trx_id: { type: string }
+        action_ordinal: { type: number }
+        creator_action_ordinal: { type: number }
+        contract: { type: string }
+        action: { type: string }
+        receiver: { type: string, description: 'receipts[0].receiver' }
+        notified: { type: array, items: { type: string } }
+        actors: { type: array, items: { type: string } }
+        authorization: { type: array, items: { type: object, required: [actor, permission], properties: { actor: { type: string }, permission: { type: string } } } }
+        receipts:
+          type: array
+          items:
+            type: object
+            required: [receiver, global_sequence, recv_sequence, auth_sequence]
+            additionalProperties: true
+            properties:
+              receiver: { type: string }
+              global_sequence: { type: string }
+              recv_sequence: { type: string }
+              auth_sequence: { type: array, items: { type: object, properties: { account: { type: string }, sequence: { type: string } } } }
+        data: { type: object, additionalProperties: true, description: ABI-decoded action data. }
+        producer: { type: string }
+        cpu_usage_us: { type: number }
+        irreversible: { type: boolean }
+        source: { type: string }
+        stream: { type: string }
+        normalizer_version: { type: number }
+        ingested_at: { oneOf: [{ $ref: '#/components/schemas/IsoInstant' }, { type: 'null' }] }
+        raw: { description: 'Only with include_raw=true.' }
+    ActionPage:
+      type: object
+      required: [data, next_cursor, count]
+      properties:
+        data: { type: array, items: { $ref: '#/components/schemas/Action' } }
+        next_cursor: { type: [string, 'null'], description: 'null = last page (page shorter than limit).' }
+        count: { type: number, description: Rows in this page. }
+    AccountActionPage:
+      allOf:
+        - { $ref: '#/components/schemas/ActionPage' }
+        - type: object
+          required: [account, role]
+          properties:
+            account: { type: string }
+            role: { type: string, enum: [actor, receiver, notified] }
+    Transaction:
+      type: object
+      required: [trx_id, timestamp, block_num, actions]
+      properties:
+        trx_id: { type: string }
+        timestamp: { oneOf: [{ $ref: '#/components/schemas/IsoInstant' }, { type: 'null' }] }
+        block_num: { type: number }
+        actions: { type: array, items: { $ref: '#/components/schemas/Action' } }
+    Transfer:
+      type: object
+      required: [global_sequence, timestamp, block_num, trx_id, contract, from, to, quantity, amount, symbol, memo]
+      properties:
+        global_sequence: { type: number }
+        timestamp: { oneOf: [{ $ref: '#/components/schemas/IsoInstant' }, { type: 'null' }] }
+        block_num: { type: number }
+        trx_id: { type: string }
+        contract: { type: string }
+        from: { type: string }
+        to: { type: string }
+        quantity: { type: string, examples: ['375.00 UPX'] }
+        amount: { type: number }
+        symbol: { type: string }
+        memo: { type: string }
+    TransferPage:
+      type: object
+      required: [data, next_cursor, count]
+      properties:
+        data: { type: array, items: { $ref: '#/components/schemas/Transfer' } }
+        next_cursor: { type: [string, 'null'] }
+        count: { type: number }
+    Contract:
+      type: object
+      required: [contract, action_count, action_types, first_seen_at, last_seen_at]
+      properties:
+        contract: { type: string }
+        action_count: { type: number }
+        action_types: { type: array, items: { type: string } }
+        first_seen_at: { type: [string, 'null'], format: date-time }
+        last_seen_at: { type: [string, 'null'], format: date-time }
+    ContractList:
+      type: object
+      required: [data, count, approximate]
+      properties:
+        data: { type: array, items: { $ref: '#/components/schemas/Contract' } }
+        count: { type: number }
+        approximate: { type: boolean }
+    ActionStat:
+      type: object
+      required: [contract, action, count, first_seen_at, last_seen_at]
+      properties:
+        contract: { type: string }
+        action: { type: string }
+        count: { type: number }
+        first_seen_at: { type: [string, 'null'], format: date-time }
+        last_seen_at: { type: [string, 'null'], format: date-time }
+    ActionStatList:
+      type: object
+      required: [data, count, approximate]
+      properties:
+        data: { type: array, items: { $ref: '#/components/schemas/ActionStat' } }
+        count: { type: number }
+        approximate: { type: boolean }
+
+    # -------------------------------------------------------------- status
+    Status:
+      type: object
+      required: [clickhouse, upstream, ingestion, history]
+      properties:
+        clickhouse:
+          type: object
+          required: [connected, database]
+          properties: { connected: { type: boolean }, database: { type: string }, error: { type: string } }
+        upstream:
+          type: object
+          required: [connected, checkedAt]
+          properties: { connected: { type: boolean }, checkedAt: { type: string, format: date-time }, error: { type: string } }
+        ingestion:
+          type: object
+          required: [latestTimestamp, latestBlock, latestGlobalSequence, lagSeconds, checkpoint]
+          properties:
+            latestTimestamp: { type: [string, 'null'], format: date-time }
+            latestBlock: { type: [number, 'null'] }
+            latestGlobalSequence: { type: [number, 'null'] }
+            lagSeconds: { type: [number, 'null'] }
+            checkpoint:
+              type: [object, 'null']
+              required: [stream, lastTimestamp, lastBlock, lastGlobalSequence, updatedAt]
+              properties:
+                stream: { type: string }
+                lastTimestamp: { type: [string, 'null'], format: date-time }
+                lastBlock: { type: number }
+                lastGlobalSequence: { type: number }
+                updatedAt: { type: [string, 'null'], format: date-time }
+        history:
+          type: object
+          required: [chainName, chainStart, chainEnd, live, earliestStoredTimestamp, backfillComplete, completedWindows, pendingWindows, failedWindows, windowsByStatus]
+          properties:
+            chainName: { type: string }
+            chainStart: { type: [string, 'null'], format: date-time }
+            chainEnd: { type: [string, 'null'], format: date-time, description: 'null while the chain is still producing.' }
+            live: { type: boolean }
+            earliestStoredTimestamp: { type: [string, 'null'], format: date-time }
+            backfillComplete: { type: boolean }
+            completedWindows: { type: number }
+            pendingWindows: { type: number }
+            failedWindows: { type: number }
+            windowsByStatus: { type: object, additionalProperties: { type: number } }
+
+    # ----------------------------------------------------------- analytics
+    ChainSummary:
+      type: object
+      required: [name, database, chainStart, chainEnd, live, latestTimestamp, earliestTimestamp, actionCount]
+      properties:
+        name: { type: string }
+        database: { type: string }
+        chainStart: { type: [string, 'null'], format: date-time }
+        chainEnd: { type: [string, 'null'], format: date-time }
+        live: { type: boolean }
+        latestTimestamp: { type: [string, 'null'], format: date-time }
+        earliestTimestamp: { type: [string, 'null'], format: date-time }
+        actionCount: { type: number }
+        error: { type: string, description: "Present when the chain's database could not be read." }
+    Overview:
+      type: object
+      required: [chain, actions_total, actions_24h, contracts, action_types, transfers_24h_by_symbol, lag_seconds, backfill, earliest, latest, top_actions_24h]
+      properties:
+        chain: { type: string }
+        actions_total: { type: number }
+        actions_24h: { type: number }
+        contracts: { type: number }
+        action_types: { type: number }
+        transfers_24h_by_symbol: { type: array, items: { type: object, required: [symbol, transfers, amount], properties: { symbol: { type: string }, transfers: { type: number }, amount: { type: number } } } }
+        lag_seconds: { type: [number, 'null'] }
+        backfill: { type: object, required: [verified, pending, failed], properties: { verified: { type: number }, pending: { type: number }, failed: { type: number } } }
+        earliest: { type: [string, 'null'], format: date-time }
+        latest: { type: [string, 'null'], format: date-time }
+        top_actions_24h: { type: array, items: { type: object, required: [contract, action, count], properties: { contract: { type: string }, action: { type: string }, count: { type: number } } } }
+    AnalyticsResult:
+      type: object
+      required: [columns, rows, stats, sql]
+      description: '`rows[i][j]` is typed by `columns[j].type` (time → ISO instant string, number, string); any cell may be null.'
+      properties:
+        columns: { type: array, items: { type: object, required: [name, type], properties: { name: { type: string }, type: { type: string, enum: [time, string, number] } } } }
+        rows: { type: array, items: { type: array, items: { type: [string, number, 'null'] } } }
+        stats:
+          type: object
+          required: [rows, elapsed_ms, rows_read, bytes_read, truncated, table, dedup]
+          properties:
+            rows: { type: number }
+            elapsed_ms: { type: number }
+            rows_read: { type: number }
+            bytes_read: { type: number }
+            truncated: { type: boolean, description: 'true when the row cap was reached.' }
+            table: { type: string }
+            dedup: { type: string, enum: [exact, approximate] }
+        sql: { type: string, description: 'The compiled statement, for transparency.' }
+    QueryResult:
+      allOf:
+        - { $ref: '#/components/schemas/AnalyticsResult' }
+        - { type: object, required: [chain], properties: { chain: { type: string } } }
+    DataKey:
+      type: object
+      required: [contract, action, key, value_type, sample_count, present_count, distinct_estimate, sample_values, refreshed_at]
+      properties:
+        contract: { type: string }
+        action: { type: string }
+        key: { type: string }
+        value_type: { type: string }
+        sample_count: { type: number }
+        present_count: { type: number }
+        distinct_estimate: { type: number }
+        sample_values: { type: array, items: { type: string } }
+        refreshed_at: { type: [string, 'null'], format: date-time }
+    Flows:
+      type: object
+      required: [chain, symbol, range, nodes, links]
+      properties:
+        chain: { type: string }
+        symbol: { type: string }
+        range: { type: object, required: [after, before], properties: { after: { type: string, format: date-time }, before: { type: string, format: date-time } } }
+        nodes: { type: array, items: { type: object, required: [id, in, out], properties: { id: { type: string }, in: { type: number }, out: { type: number } } } }
+        links: { type: array, items: { type: object, required: [source, target, transfers, amount], properties: { source: { type: string }, target: { type: string }, transfers: { type: number }, amount: { type: number } } } }
+    TopAccount:
+      type: object
+      required: [account, value]
+      properties:
+        account: { type: string }
+        value: { type: number, description: The ranked metric. }
+        actions: { type: number, description: 'by=actions only' }
+        transfers: { type: number, description: 'by=sent|received only' }
+        amount: { type: number, description: 'by=sent|received only' }
+    CalendarDay:
+      type: object
+      required: [day, value]
+      properties: { day: { $ref: '#/components/schemas/IsoDay' }, value: { type: number } }
+    SalesAnalytics:
+      type: object
+      required: [series, histogram, fields_used, note, chain, action, range, bucket, matched, unmatched]
+      properties:
+        series: { $ref: '#/components/schemas/AnalyticsResult' }
+        histogram: { $ref: '#/components/schemas/AnalyticsResult' }
+        fields_used: { type: array, items: { type: string } }
+        note: { type: string }
+        chain: { type: string }
+        action: { type: object, required: [contract, action, label, confidence], properties: { contract: { type: string }, action: { type: string }, label: { type: [string, 'null'] }, confidence: { type: [number, 'null'] } } }
+        range: { type: object, required: [after, before], properties: { after: { type: string, format: date-time }, before: { type: string, format: date-time } } }
+        bucket: { type: string }
+        matched: { type: number }
+        unmatched: { type: number }
+    IngestWindow:
+      type: object
+      required: [window_id, after, before, status, attempts, expected_count, received_count, unique_count, updated_at, min_global_sequence, max_global_sequence, min_block, max_block, started_at, completed_at, last_error, worker_id, parent_id, depth]
+      properties:
+        window_id: { type: string }
+        after: { type: [string, 'null'], format: date-time }
+        before: { type: [string, 'null'], format: date-time }
+        status: { type: string }
+        attempts: { type: number }
+        expected_count: { type: number }
+        received_count: { type: number }
+        unique_count: { type: number }
+        updated_at: { type: [string, 'null'], format: date-time }
+        min_global_sequence: { type: number }
+        max_global_sequence: { type: number }
+        min_block: { type: number }
+        max_block: { type: number }
+        started_at: { type: [string, 'null'], format: date-time }
+        completed_at: { type: [string, 'null'], format: date-time }
+        last_error: { type: string }
+        worker_id: { type: string }
+        parent_id: { type: string }
+        depth: { type: number }
+    QuerySpec:
+      type: object
+      required: [source, measures]
+      additionalProperties: false
+      properties:
+        chain: { type: string, maxLength: 32 }
+        source: { type: string, enum: [actions, transfers, events, properties, accounts, sales, listings, offers, signals, rates, treasures, city_daily] }
+        range:
+          type: object
+          additionalProperties: false
+          required: [after, before]
+          description: Required for every source except properties and accounts. after ≤ before.
+          properties: { after: { type: string }, before: { type: string } }
+        filters:
+          type: array
+          maxItems: 24
+          items:
+            oneOf:
+              - { type: object, additionalProperties: false, required: [field, op, value], properties: { field: { type: string, enum: [actor, notified] }, op: { const: has }, value: { type: string, minLength: 1, maxLength: 64 } } }
+              - { type: object, additionalProperties: false, required: [json, op, value], properties: { json: { $ref: '#/components/schemas/JsonRef' }, op: { type: string, enum: [eq, neq, in, gte, lte, between, like] }, value: {} } }
+              - { type: object, additionalProperties: false, required: [field, op, value], properties: { field: { type: string, pattern: '^[A-Za-z_][A-Za-z0-9_]*$' }, op: { type: string, enum: [eq, neq, in, nin] }, value: {} } }
+              - { type: object, additionalProperties: false, required: [field, op, value], properties: { field: { type: string, pattern: '^[A-Za-z_][A-Za-z0-9_]*$' }, op: { type: string, enum: [gte, lte, between] }, value: {} } }
+        dimensions:
+          type: array
+          maxItems: 4
+          items:
+            oneOf:
+              - { type: object, additionalProperties: false, required: [time], properties: { time: { type: object, required: [bucket], properties: { bucket: { $ref: '#/components/schemas/TimeBucket' } } } } }
+              - { type: object, additionalProperties: false, required: [json], properties: { json: { $ref: '#/components/schemas/JsonRef' } } }
+              - { type: object, additionalProperties: false, required: [bin], properties: { bin: { type: object, required: [field], properties: { field: {}, width: { type: number, exclusiveMinimum: 0 }, edges: { type: array, minItems: 2, maxItems: 64, items: { type: number } } } } } }
+              - { type: object, additionalProperties: false, required: [field], properties: { field: { type: string, pattern: '^[A-Za-z_][A-Za-z0-9_]*$' } } }
+        measures:
+          type: array
+          minItems: 1
+          maxItems: 8
+          items:
+            type: object
+            additionalProperties: false
+            required: [fn]
+            properties:
+              fn: { type: string, enum: [count, uniq, sum, avg, min, max, median, p90, p99] }
+              field: { description: 'Column name or {json: JsonRef}; count takes none, every other fn needs one.' }
+              alias: { type: string, pattern: '^[A-Za-z_][A-Za-z0-9_]*$', maxLength: 64 }
+        orderBy:
+          type: array
+          maxItems: 4
+          items:
+            oneOf:
+              - { type: object, additionalProperties: false, required: [measure], properties: { measure: { type: [string, integer] }, dir: { type: string, enum: [asc, desc], default: desc } } }
+              - { type: object, additionalProperties: false, required: [dimension], properties: { dimension: { type: integer, minimum: 0 }, dir: { type: string, enum: [asc, desc], default: desc } } }
+        limit: { type: integer, minimum: 1, maximum: 10000, default: 1000 }
+        topN:
+          type: object
+          additionalProperties: false
+          required: [dimension, n]
+          properties: { dimension: { type: integer, minimum: 0 }, n: { type: integer, minimum: 1, maximum: 200 }, others: { type: boolean, default: true } }
+    JsonRef:
+      type: object
+      additionalProperties: false
+      required: [key, type]
+      properties: { key: { type: string, minLength: 1, maxLength: 128 }, type: { type: string, enum: [number, string] } }
+
+    # -------------------------------------------------------------- market
+    RatePoint:
+      type: object
+      required: [day, method, upx_per_usd, usd_per_upx, upx_per_usd_smooth, p25, p75, upx_listings, fiat_listings, samples, cities]
+      properties:
+        day: { $ref: '#/components/schemas/IsoDay' }
+        method: { type: string }
+        upx_per_usd: { type: number }
+        usd_per_upx: { type: number }
+        upx_per_usd_smooth: { type: number }
+        p25: { type: number }
+        p75: { type: number }
+        upx_listings: { type: number }
+        fiat_listings: { type: number }
+        samples: { type: number }
+        cities: { type: number }
+    UpxUsd:
+      type: object
+      required: [methods, preferred, points, latest, spread, notes]
+      properties:
+        methods: { type: array, items: { type: string } }
+        preferred: { type: string }
+        points: { type: array, items: { $ref: '#/components/schemas/RatePoint' } }
+        latest: { type: object, additionalProperties: { type: number }, description: 'method → upx_per_usd on its newest returned day.' }
+        spread: { type: [number, 'null'], description: 'max/min − 1 across methods on the most recent common day.' }
+        notes: { type: array, items: { type: string } }
+    CityDay:
+      type: object
+      required: [day, city, sales, volume_upx, median_sale_upx, median_ask_upx, median_ask_usd, listings_new, listings_removed, mints, median_mint_upx, median_sale_to_mint, yield_payout_upx, distinct_buyers, distinct_sellers]
+      properties:
+        day: { $ref: '#/components/schemas/IsoDay' }
+        city: { type: string }
+        sales: { type: number }
+        volume_upx: { type: number }
+        median_sale_upx: { type: [number, 'null'] }
+        median_ask_upx: { type: [number, 'null'] }
+        median_ask_usd: { type: [number, 'null'] }
+        listings_new: { type: number }
+        listings_removed: { type: number }
+        mints: { type: number }
+        median_mint_upx: { type: [number, 'null'] }
+        median_sale_to_mint: { type: [number, 'null'] }
+        yield_payout_upx: { type: number }
+        distinct_buyers: { type: number }
+        distinct_sellers: { type: number }
+    Fiat:
+      type: object
+      required: [window, totals, daily, by_city, upx_equivalent, notes]
+      properties:
+        window: { type: object, required: [after, before, days], properties: { after: { type: string, format: date-time }, before: { type: string, format: date-time }, days: { type: number } } }
+        totals: { type: object, required: [listings, cleared, clear_rate, asked_usd, cleared_usd], properties: { listings: { type: number }, cleared: { type: number }, clear_rate: { type: number }, asked_usd: { type: number }, cleared_usd: { type: number } } }
+        daily: { type: array, items: { type: object, required: [day, listings, cleared, asked_usd, cleared_usd], properties: { day: { $ref: '#/components/schemas/IsoDay' }, listings: { type: number }, cleared: { type: number }, asked_usd: { type: number }, cleared_usd: { type: number } } } }
+        by_city: { type: array, maxItems: 40, items: { type: object, required: [city, listings, cleared, cleared_usd, median_usd, clear_rate], properties: { city: { type: string }, listings: { type: number }, cleared: { type: number }, cleared_usd: { type: number }, median_usd: { type: number }, clear_rate: { type: number } } } }
+        upx_equivalent: { type: array, maxItems: 25, items: { type: object, required: [category, sales, upx_volume, usd_equivalent, median_upx], properties: { category: { type: string }, sales: { type: number }, upx_volume: { type: number }, usd_equivalent: { type: number }, median_upx: { type: number } } } }
+        notes: { type: array, items: { type: string } }
+    Signal:
+      type: object
+      required: [observed_at, signal_type, entity_type, entity_id, city, score, expected_edge_upx, expected_edge_usd, horizon_hours, evidence, rule_version, expires_at]
+      properties:
+        observed_at: { $ref: '#/components/schemas/IsoInstant' }
+        signal_type: { type: string }
+        entity_type: { type: string, description: 'property | city | account' }
+        entity_id: { type: string }
+        city: { type: string }
+        score: { type: number, minimum: 0, maximum: 1 }
+        expected_edge_upx: { type: number }
+        expected_edge_usd: { type: number }
+        horizon_hours: { type: number }
+        evidence: { type: object, additionalProperties: { type: string } }
+        rule_version: { type: number }
+        expires_at: { $ref: '#/components/schemas/IsoInstant' }
+
+    # ------------------------------------------------------------ entities
+    OffsetPageMeta:
+      type: object
+      required: [count, limit, offset, has_more]
+      properties:
+        count: { type: number, description: Rows in this page. }
+        limit: { type: number }
+        offset: { type: number }
+        has_more: { type: boolean, description: 'count === limit; page until false.' }
+    Property:
+      type: object
+      required: [property_id, address, city, region, neighborhood, neighborhood_id, mint_price_upx, mint_price_source, mint_kind, api_status, minted_at, sales, last_sale_upx, last_sale_at, observations, mint_band]
+      properties:
+        property_id: { type: string, pattern: '^\d{1,20}$' }
+        address: { type: string }
+        city: { type: string }
+        region: { type: string }
+        neighborhood: { type: string }
+        neighborhood_id: { type: number }
+        mint_price_upx: { type: number }
+        mint_price_source: { type: string, description: 'chain | api | none' }
+        mint_kind: { type: string }
+        api_status: { type: string }
+        minted_at: { type: [string, 'null'], format: date-time }
+        sales: { type: number }
+        last_sale_upx: { type: number }
+        last_sale_at: { type: [string, 'null'], format: date-time }
+        observations: { type: number }
+        mint_band: { type: [number, 'null'], description: 'floor(log2(mint_price_upx)); null without a mint price.' }
+    PropertyPage:
+      allOf:
+        - { $ref: '#/components/schemas/OffsetPageMeta' }
+        - { type: object, required: [data], properties: { data: { type: array, items: { $ref: '#/components/schemas/Property' } } } }
+    PropertyDetail:
+      allOf:
+        - { $ref: '#/components/schemas/Property' }
+        - type: object
+          required: [chain_known, upland_api]
+          properties:
+            chain_known: { type: boolean }
+            upland_api:
+              type: [object, 'null']
+              required: [address, city, neighborhood, neighborhood_id, collection, status, mint_price_upx]
+              properties:
+                address: { type: string }
+                city: { type: string }
+                neighborhood: { type: string }
+                neighborhood_id: { type: number }
+                collection: { type: string }
+                status: { type: string }
+                mint_price_upx: { type: number }
+    PropertyEvent:
+      type: object
+      required: [timestamp, event_type, account, counterparty, amount_upx, trx_id, fields]
+      properties:
+        timestamp: { type: [string, 'null'], format: date-time }
+        event_type: { type: string }
+        account: { type: string }
+        counterparty: { type: string }
+        amount_upx: { type: [number, 'null'] }
+        trx_id: { type: string }
+        fields: { type: object, additionalProperties: true }
+    PropertyHistory:
+      allOf:
+        - { $ref: '#/components/schemas/OffsetPageMeta' }
+        - { type: object, required: [data], properties: { data: { type: array, items: { $ref: '#/components/schemas/PropertyEvent' } } } }
+    Account:
+      type: object
+      required: [account, username, usernames, username_changes, first_seen, last_seen, active_days, events, buys, sells, upx_spent, upx_received, median_buy_latency_s, sub_5s_buys, pct_buys_under_1m, likely_bot, upx_net]
+      properties:
+        account: { type: string }
+        username: { type: string }
+        usernames: { type: array, items: { type: string } }
+        username_changes: { type: number }
+        first_seen: { type: [string, 'null'], format: date-time }
+        last_seen: { type: [string, 'null'], format: date-time }
+        active_days: { type: number }
+        events: { type: number }
+        buys: { type: number }
+        sells: { type: number }
+        upx_spent: { type: number }
+        upx_received: { type: number }
+        median_buy_latency_s: { type: number }
+        sub_5s_buys: { type: number }
+        pct_buys_under_1m: { type: number, description: Percent (0..100). }
+        likely_bot: { type: boolean, description: Advisory inference. }
+        upx_net: { type: number }
+    AccountPage:
+      allOf:
+        - { $ref: '#/components/schemas/OffsetPageMeta' }
+        - { type: object, required: [data], properties: { data: { type: array, items: { $ref: '#/components/schemas/Account' } } } }
+    AccountDetail:
+      allOf:
+        - { $ref: '#/components/schemas/Account' }
+        - type: object
+          required: [income]
+          properties:
+            income: { type: object, required: [yield_upx, visit_upx, yield_collections], properties: { yield_upx: { type: number }, visit_upx: { type: number }, yield_collections: { type: number } } }
+    Listing:
+      type: object
+      required: [timestamp, property_id, seller, address, city, neighborhood, mint_price_upx, ask_upx, ask_fiat, ask_to_mint]
+      properties:
+        timestamp: { type: [string, 'null'], format: date-time }
+        property_id: { type: string }
+        seller: { type: string }
+        address: { type: string }
+        city: { type: string }
+        neighborhood: { type: string }
+        mint_price_upx: { type: number }
+        ask_upx: { type: number }
+        ask_fiat: { type: number }
+        ask_to_mint: { type: number }
+    ListingPage:
+      allOf:
+        - { $ref: '#/components/schemas/OffsetPageMeta' }
+        - { type: object, required: [data], properties: { data: { type: array, items: { $ref: '#/components/schemas/Listing' } } } }
+    Sale:
+      type: object
+      required: [timestamp, property_id, buyer, seller, trx_id, address, city, neighborhood, mint_price_upx, price_upx, buyer_paid_upx, seller_proceeds_upx, community_fee_upx, price_to_mint]
+      properties:
+        timestamp: { type: [string, 'null'], format: date-time }
+        property_id: { type: string }
+        buyer: { type: string }
+        seller: { type: string }
+        trx_id: { type: string }
+        address: { type: string }
+        city: { type: string }
+        neighborhood: { type: string }
+        mint_price_upx: { type: number }
+        price_upx: { type: number }
+        buyer_paid_upx: { type: number }
+        seller_proceeds_upx: { type: number }
+        community_fee_upx: { type: number }
+        price_to_mint: { type: number }
+    SalePage:
+      allOf:
+        - { $ref: '#/components/schemas/OffsetPageMeta' }
+        - { type: object, required: [data], properties: { data: { type: array, items: { $ref: '#/components/schemas/Sale' } } } }
+    Offer:
+      type: object
+      required: [timestamp, property_id, trx_id, offer_id, seller, buyer, buyer_username, price_upx, seller_proceeds_upx, community_fee_upx, address, city, region, mint_price_upx, price_to_mint, resolved_by]
+      properties:
+        timestamp: { type: [string, 'null'], format: date-time }
+        property_id: { type: string }
+        trx_id: { type: string }
+        offer_id: { type: string }
+        seller: { type: string }
+        buyer: { type: string }
+        buyer_username: { type: string }
+        price_upx: { type: number }
+        seller_proceeds_upx: { type: number }
+        community_fee_upx: { type: number }
+        address: { type: string }
+        city: { type: string }
+        region: { type: string }
+        mint_price_upx: { type: number }
+        price_to_mint: { type: number }
+        resolved_by: { type: string }
+    OfferPage:
+      allOf:
+        - { $ref: '#/components/schemas/OffsetPageMeta' }
+        - { type: object, required: [data], properties: { data: { type: array, items: { $ref: '#/components/schemas/Offer' } } } }
+    Neighborhood:
+      type: object
+      required: [neighborhood_id, name, city_id, city, area_m2, center_lat, center_lng]
+      properties:
+        neighborhood_id: { type: number }
+        name: { type: string }
+        city_id: { type: number }
+        city: { type: string }
+        area_m2: { type: number }
+        center_lat: { type: number }
+        center_lng: { type: number }
+        boundaries:
+          description: 'Only with include_boundaries=true. Parsed polygon: nested arrays of numbers ([lng, lat] pairs); null when unparseable.'
+          oneOf: [{ $ref: '#/components/schemas/NestedNumbers' }, { type: 'null' }]
+    NeighborhoodPage:
+      allOf:
+        - { $ref: '#/components/schemas/OffsetPageMeta' }
+        - { type: object, required: [data], properties: { data: { type: array, items: { $ref: '#/components/schemas/Neighborhood' } } } }
+    Collection:
+      type: object
+      required: [collection_id, name, city_id, amount, rarity_level, description, requirements, yield_boost, one_time_reward, image]
+      properties:
+        collection_id: { type: number }
+        name: { type: string }
+        city_id: { type: number }
+        amount: { type: number }
+        rarity_level: { type: number }
+        description: { type: string }
+        requirements: { type: string }
+        yield_boost: { type: number }
+        one_time_reward: { type: number }
+        image: { type: string }
+    CollectionPage:
+      allOf:
+        - { $ref: '#/components/schemas/OffsetPageMeta' }
+        - { type: object, required: [data], properties: { data: { type: array, items: { $ref: '#/components/schemas/Collection' } } } }
+    Treasure:
+      type: object
+      required: [user_name, reward_upx, full_address, treasure_type, lock_seconds, spawn_at, locked_at]
+      properties:
+        user_name: { type: string }
+        reward_upx: { type: number }
+        full_address: { type: string }
+        treasure_type: { type: string }
+        lock_seconds: { type: number }
+        spawn_at: { type: [string, 'null'], format: date-time }
+        locked_at: { type: [string, 'null'], format: date-time }
+    TreasurePage:
+      allOf:
+        - { $ref: '#/components/schemas/OffsetPageMeta' }
+        - { type: object, required: [data], properties: { data: { type: array, items: { $ref: '#/components/schemas/Treasure' } } } }
+    RateRow:
+      type: object
+      required: [day, method, upx_per_usd, usd_per_upx, p25, p75, upx_listings, fiat_listings, samples, cities, method_version]
+      properties:
+        day: { $ref: '#/components/schemas/IsoDay' }
+        method: { type: string }
+        upx_per_usd: { type: number }
+        usd_per_upx: { type: number }
+        p25: { type: number }
+        p75: { type: number }
+        upx_listings: { type: number }
+        fiat_listings: { type: number }
+        samples: { type: number }
+        cities: { type: number }
+        method_version: { type: number }
+    RatePage:
+      allOf:
+        - { $ref: '#/components/schemas/OffsetPageMeta' }
+        - { type: object, required: [data], properties: { data: { type: array, items: { $ref: '#/components/schemas/RateRow' } } } }
+    SearchResult:
+      type: object
+      required: [query]
+      properties:
+        query: { type: string }
+        properties: { type: array, items: { type: object, required: [property_id, address, city, neighborhood, mint_price_upx, sales], properties: { property_id: { type: string }, address: { type: string }, city: { type: string }, neighborhood: { type: string }, mint_price_upx: { type: number }, sales: { type: number } } } }
+        accounts: { type: array, items: { type: object, required: [account, username, buys, sells, likely_bot], properties: { account: { type: string }, username: { type: string }, buys: { type: number }, sells: { type: number }, likely_bot: { type: boolean } } } }
+        neighborhoods: { type: array, items: { type: object, required: [neighborhood_id, name, city_id, center_lat, center_lng], properties: { neighborhood_id: { type: number }, name: { type: string }, city_id: { type: number }, center_lat: { type: number }, center_lng: { type: number } } } }
+        collections: { type: array, items: { type: object, required: [collection_id, name, city_id, yield_boost, one_time_reward, requirements], properties: { collection_id: { type: number }, name: { type: string }, city_id: { type: number }, yield_boost: { type: number }, one_time_reward: { type: number }, requirements: { type: string } } } }
+        cities: { type: array, items: { type: object, required: [city_id, name, state_name, country_name], properties: { city_id: { type: number }, name: { type: string }, state_name: { type: string }, country_name: { type: string } } } }

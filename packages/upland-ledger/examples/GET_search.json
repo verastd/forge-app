@@ -1,0 +1,72 @@
+{
+  "query": "main",
+  "properties": [
+    {
+      "property_id": "86707019253261",
+      "address": "910 MAINLAND ST",
+      "city": "Vancouver",
+      "neighborhood": "",
+      "mint_price_upx": 3720381,
+      "sales": 0
+    },
+    {
+      "property_id": "86706683708904",
+      "address": "1020 MAINLAND ST",
+      "city": "Vancouver",
+      "neighborhood": "",
+      "mint_price_upx": 445875,
+      "sales": 0
+    }
+  ],
+  "accounts": [
+    {
+      "account": "srexinftriez",
+      "username": "multimaine",
+      "buys": 1,
+      "sells": 0,
+      "likely_bot": false
+    },
+    {
+      "account": "ut2np2dvmctl",
+      "username": "leromain",
+      "buys": 0,
+      "sells": 6,
+      "likely_bot": false
+    }
+  ],
+  "neighborhoods": [
+    {
+      "neighborhood_id": 1969,
+      "name": "MAIN STREET DISTRICT",
+      "city_id": 40,
+      "center_lat": 32.78127023545208,
+      "center_lng": -96.79626772816349
+    },
+    {
+      "neighborhood_id": 2565,
+      "name": "SAINT-GERMAIN-DES-PRES",
+      "city_id": 91,
+      "center_lat": 48.85504895748765,
+      "center_lng": 2.333585759301118
+    }
+  ],
+  "collections": [
+    {
+      "collection_id": 64,
+      "name": "Main St.",
+      "city_id": 6,
+      "yield_boost": 2.87,
+      "one_time_reward": 45000,
+      "requirements": "Own 2 properties on Main Street in Brooklyn"
+    },
+    {
+      "collection_id": 586,
+      "name": "Main St.",
+      "city_id": 102,
+      "yield_boost": 2.39,
+      "one_time_reward": 12700,
+      "requirements": "Own any 3 Properties on Main St."
+    }
+  ],
+  "cities": []
+}

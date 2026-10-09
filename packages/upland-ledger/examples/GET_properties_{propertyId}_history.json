@@ -1,0 +1,28 @@
+{
+  "data": [
+    {
+      "timestamp": "2026-10-09T00:12:28.000Z",
+      "event_type": "property_sale",
+      "account": "ymc55j4fboxi",
+      "counterparty": "tlifor1bq435",
+      "amount_upx": 29999,
+      "trx_id": "3ff8415d02d89cff745720f32c2419fcb7c4cbd848293c7501b1f50974dda65d",
+      "fields": {
+        "price_upx": 29999,
+        "seller_proceeds_upx": 28499.05,
+        "buyer_paid_upx": 31498.95,
+        "community_fee_upx": 2999.9,
+        "address": "2506 SEARSDALE AVE",
+        "city": "Cleveland",
+        "region": "OH",
+        "owner_username": "kingbo",
+        "owner_account": "ymc55j4fboxi",
+        "mint_trx_id": "a29e4a996279a9a3ef3175fabcd2cb8e20575dab5933f7fda39b4017806f37ad"
+      }
+    }
+  ],
+  "count": 1,
+  "limit": 3,
+  "offset": 0,
+  "has_more": false
+}

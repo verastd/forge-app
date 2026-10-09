@@ -30,6 +30,7 @@ export const DEFAULT_FLAGS: FlagConfig = {
   proposals: false,
   house_spec: false,
   lobby_avatars: false,
+  upland_ledger: false,
 };
 
 /**

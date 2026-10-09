@@ -1,0 +1,47 @@
+{
+  "data": [
+    {
+      "day": "2026-10-08",
+      "method": "city_band_comps",
+      "upx_per_usd": 4722.441503971466,
+      "usd_per_upx": 0.00021175487280446413,
+      "p25": 2556.987130909258,
+      "p75": 7155.837538829368,
+      "upx_listings": 46,
+      "fiat_listings": 37,
+      "samples": 4,
+      "cities": 3,
+      "method_version": 2
+    },
+    {
+      "day": "2026-10-08",
+      "method": "city_comps",
+      "upx_per_usd": 2810.5839416058398,
+      "usd_per_upx": 0.0003557979483184002,
+      "p25": 2105,
+      "p75": 8666.666666666666,
+      "upx_listings": 378,
+      "fiat_listings": 183,
+      "samples": 21,
+      "cities": 21,
+      "method_version": 2
+    },
+    {
+      "day": "2026-10-08",
+      "method": "global_comps",
+      "upx_per_usd": 2500,
+      "usd_per_upx": 0.0004,
+      "p25": 2440.677966101695,
+      "p75": 2475,
+      "upx_listings": 812,
+      "fiat_listings": 577,
+      "samples": 1389,
+      "cities": 0,
+      "method_version": 2
+    }
+  ],
+  "count": 3,
+  "limit": 3,
+  "offset": 1,
+  "has_more": true
+}

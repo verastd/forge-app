@@ -27,6 +27,7 @@ export const FLAG_NAMES = [
   'proposals',
   'house_spec',
   'lobby_avatars',
+  'upland_ledger',
 ] as const;
 export type FlagName = (typeof FLAG_NAMES)[number];
 
@@ -50,6 +51,11 @@ export const FlagConfigSchema = z.object({
   house_spec: z.boolean(),
   /** Robot avatars in the Apps lobby (in place of the orbs), and the admin's avatar editor. */
   lobby_avatars: z.boolean(),
+  /**
+   * The Upland Ledger gateway: /bff/ledger/* on the web, /api/ledger/* on the API, which
+   * forwards an allowlist of reads (and the analytics query) to the ledger behind it.
+   */
+  upland_ledger: z.boolean(),
 });
 export type FlagConfig = z.infer<typeof FlagConfigSchema>;
 

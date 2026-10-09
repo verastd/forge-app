@@ -1,0 +1,62 @@
+{
+  "data": [
+    {
+      "timestamp": "2026-10-08T19:24:41.000Z",
+      "property_id": "56872591727532",
+      "trx_id": "6f59655097631ee0198e0d27439316cce2dbda059e6925c1f246668e66524086",
+      "offer_id": "3457108",
+      "seller": "hsbkyhq3ycen",
+      "buyer": "e4xryauqnpei",
+      "buyer_username": "milredi8041",
+      "price_upx": 20000,
+      "seller_proceeds_upx": 19000,
+      "community_fee_upx": 2000,
+      "address": "6 JLN RABU",
+      "city": "Singapore",
+      "region": "SG",
+      "mint_price_upx": 0,
+      "price_to_mint": 0,
+      "resolved_by": "mint_trx"
+    },
+    {
+      "timestamp": "2026-10-08T12:51:03.000Z",
+      "property_id": "81709288899293",
+      "trx_id": "73056ff1cc4bfc2d3f2fe9f804814e7ae5396040688e36ad641680fb011a374a",
+      "offer_id": "3461102",
+      "seller": "mggwa31u3rzx",
+      "buyer": "zshovbs32kxy",
+      "buyer_username": "sirness4",
+      "price_upx": 25000,
+      "seller_proceeds_upx": 23750,
+      "community_fee_upx": 2500,
+      "address": "3523 PACIFIC ST",
+      "city": "Omaha",
+      "region": "NE",
+      "mint_price_upx": 0,
+      "price_to_mint": 0,
+      "resolved_by": "mint_trx"
+    },
+    {
+      "timestamp": "2026-10-08T11:25:33.000Z",
+      "property_id": "82076561912971",
+      "trx_id": "877de8a864d94153eb0c7b69cc3e68c9110218f5de0dbcf86cb95df56086d069",
+      "offer_id": "3461778",
+      "seller": "zdviwpgjiceu",
+      "buyer": "msdnfvb2yqds",
+      "buyer_username": "skru",
+      "price_upx": 25404,
+      "seller_proceeds_upx": 24133.8,
+      "community_fee_upx": 2540.4,
+      "address": "VIA BAGNARA CALABRA, 7",
+      "city": "Rome",
+      "region": "RM",
+      "mint_price_upx": 0,
+      "price_to_mint": 0,
+      "resolved_by": "mint_trx"
+    }
+  ],
+  "count": 3,
+  "limit": 3,
+  "offset": 0,
+  "has_more": true
+}

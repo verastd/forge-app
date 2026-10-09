@@ -1,0 +1,53 @@
+[
+  {
+    "day": "2026-10-08",
+    "city": "Los Angeles",
+    "sales": 25,
+    "volume_upx": 930858,
+    "median_sale_upx": 35000,
+    "median_ask_upx": 39000,
+    "median_ask_usd": 5.300000000000001,
+    "listings_new": 59,
+    "listings_removed": 42,
+    "mints": 0,
+    "median_mint_upx": null,
+    "median_sale_to_mint": null,
+    "yield_payout_upx": 0,
+    "distinct_buyers": 18,
+    "distinct_sellers": 17
+  },
+  {
+    "day": "2026-10-08",
+    "city": "Las Vegas",
+    "sales": 17,
+    "volume_upx": 1013455,
+    "median_sale_upx": 32000,
+    "median_ask_upx": 41000,
+    "median_ask_usd": 10.1,
+    "listings_new": 15,
+    "listings_removed": 10,
+    "mints": 7,
+    "median_mint_upx": 49704,
+    "median_sale_to_mint": 1.1311068439892846,
+    "yield_payout_upx": 0,
+    "distinct_buyers": 15,
+    "distinct_sellers": 9
+  },
+  {
+    "day": "2026-10-08",
+    "city": "Rome",
+    "sales": 17,
+    "volume_upx": 572877,
+    "median_sale_upx": 23333,
+    "median_ask_upx": 37500,
+    "median_ask_usd": 9,
+    "listings_new": 18,
+    "listings_removed": 11,
+    "mints": 0,
+    "median_mint_upx": null,
+    "median_sale_to_mint": 2.567997685185185,
+    "yield_payout_upx": 58.4,
+    "distinct_buyers": 13,
+    "distinct_sellers": 5
+  }
+]

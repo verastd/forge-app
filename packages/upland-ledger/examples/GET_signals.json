@@ -1,0 +1,71 @@
+[
+  {
+    "observed_at": "2026-10-08T00:00:00.000Z",
+    "signal_type": "regime_shift",
+    "entity_type": "city",
+    "entity_id": "Fresno",
+    "city": "Fresno",
+    "score": 1,
+    "expected_edge_upx": 0,
+    "expected_edge_usd": 0,
+    "horizon_hours": 336,
+    "rule_version": 3,
+    "expires_at": "2026-10-22T00:00:00.000Z",
+    "evidence": {
+      "rule": "trailing 7d vs preceding 28d, city median sale/mint and sale count",
+      "recent_sale_to_mint": "7994",
+      "prior_sale_to_mint": "312500",
+      "price_change": "-0.9744192",
+      "recent_sales": "13",
+      "prior_sales": "93",
+      "volume_change": "-0.4408602150537635",
+      "direction": "falling"
+    }
+  },
+  {
+    "observed_at": "2026-10-05T00:00:00.000Z",
+    "signal_type": "regime_shift",
+    "entity_type": "city",
+    "entity_id": "Fresno",
+    "city": "Fresno",
+    "score": 1,
+    "expected_edge_upx": 0,
+    "expected_edge_usd": 0,
+    "horizon_hours": 336,
+    "rule_version": 3,
+    "expires_at": "2026-10-19T00:00:00.000Z",
+    "evidence": {
+      "rule": "trailing 7d vs preceding 28d, city median sale/mint and sale count",
+      "recent_sale_to_mint": "3998",
+      "prior_sale_to_mint": "325000",
+      "price_change": "-0.9876984615384615",
+      "recent_sales": "23",
+      "prior_sales": "86",
+      "volume_change": "0.06976744186046502",
+      "direction": "falling"
+    }
+  },
+  {
+    "observed_at": "2026-10-06T00:00:00.000Z",
+    "signal_type": "regime_shift",
+    "entity_type": "city",
+    "entity_id": "South Lake Tahoe",
+    "city": "South Lake Tahoe",
+    "score": 1,
+    "expected_edge_upx": 0,
+    "expected_edge_usd": 0,
+    "horizon_hours": 336,
+    "rule_version": 3,
+    "expires_at": "2026-10-20T00:00:00.000Z",
+    "evidence": {
+      "rule": "trailing 7d vs preceding 28d, city median sale/mint and sale count",
+      "recent_sale_to_mint": "0.7673860911270983",
+      "prior_sale_to_mint": "2.576923076923077",
+      "price_change": "-0.7022083825476932",
+      "recent_sales": "10",
+      "prior_sales": "25",
+      "volume_change": "0.6000000000000001",
+      "direction": "falling"
+    }
+  }
+]

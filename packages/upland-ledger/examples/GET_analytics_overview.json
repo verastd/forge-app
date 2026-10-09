@@ -1,0 +1,84 @@
+{
+  "chain": "upland",
+  "actions_total": 266336428,
+  "actions_24h": 503550,
+  "contracts": 13,
+  "action_types": 130,
+  "transfers_24h_by_symbol": [
+    {
+      "symbol": "UPX",
+      "transfers": 68382,
+      "amount": 144653377.71999946
+    },
+    {
+      "symbol": "SPARKLT",
+      "transfers": 5017,
+      "amount": 22102666.360000186
+    },
+    {
+      "symbol": "STEM",
+      "transfers": 3763,
+      "amount": 79703.00000000061
+    }
+  ],
+  "lag_seconds": 3,
+  "backfill": {
+    "verified": 36265,
+    "pending": 0,
+    "failed": 0
+  },
+  "earliest": "2025-04-26T17:45:16.000Z",
+  "latest": "2026-10-09T00:21:13.000Z",
+  "top_actions_24h": [
+    {
+      "contract": "eosio",
+      "action": "onblock",
+      "count": 175311
+    },
+    {
+      "contract": "playuplandme",
+      "action": "payforcpu",
+      "count": 116108
+    },
+    {
+      "contract": "upxtokenacct",
+      "action": "transfer",
+      "count": 69209
+    },
+    {
+      "contract": "playuplandme",
+      "action": "n31",
+      "count": 62479
+    },
+    {
+      "contract": "playuplandme",
+      "action": "n41",
+      "count": 21904
+    },
+    {
+      "contract": "uplandnftact",
+      "action": "transfernft",
+      "count": 14325
+    },
+    {
+      "contract": "playuplandme",
+      "action": "n43",
+      "count": 6395
+    },
+    {
+      "contract": "uplandnftact",
+      "action": "logcall",
+      "count": 5998
+    },
+    {
+      "contract": "uplandnftact",
+      "action": "issue",
+      "count": 5446
+    },
+    {
+      "contract": "sparklettkac",
+      "action": "transfer",
+      "count": 5094
+    }
+  ]
+}

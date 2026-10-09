@@ -30,7 +30,8 @@ src/forge_api/
                        oauth (the connector's OAuth endpoints and the consent page's calls),
                        mcp (POST /mcp), proposals (/api/proposals*), notifications
                        (/api/notifications*, the bell), members (POST /api/members/hello, plus
-                       the member and admin dependencies and the body reading all three share)
+                       the member and admin dependencies and the body reading all three share),
+                       ledger (/api/ledger/*, the Upland Ledger gateway)
   services/
     flags.py           flag resolution
     identity.py        verifies the web tier's API assertion; the admin check
@@ -63,6 +64,7 @@ src/forge_api/
                        cleaning the spec, the jobs and their 10 s worker, the admin's view,
                        and what publishing changed
     upland/            the Upland scraper, storage and analytics
+    ledger/            the Upland Ledger gateway: allowlist.py (the routes) and gateway.py (the call)
   tools/live_rails.py  runs one start rail outside the web app (docs/live-tests.md)
   tools/house_eval.py  the house model's eval on tests/fixtures/house-eval/ (real calls, --yes)
   fixtures/tasks.json  8 agent-ready starter tasks (PRD H.3): the Bridge's checked-in tasks,
@@ -75,6 +77,22 @@ in the state database. Files are stored once by sha256 and served from
 `/api/avatars/assets/{sha256}`, cacheable forever; an image's type and size are read from
 its own bytes, and a head must be a self-contained binary glTF 2.0. Writes are admin-only
 (`FORGE_ADMIN_IDS`).
+
+**The Upland Ledger gateway** (`routers/ledger.py`, `services/ledger/`, behind
+`upland_ledger`) is the only way to the Upland Ledger, which has no auth and no public
+route: the web's `/bff/ledger/*` mints an assertion for a signed-in (never practice)
+member and forwards to `/api/ledger/{path}`, which is 404 `ledger-disabled` while the
+flag is off, then 401 without a valid assertion. An allowlist of the ledger's `/v1/*`
+routes (`services/ledger/allowlist.py`: GETs, and `POST analytics/query` with a JSON body
+of at most 16 KiB) is forwarded to `UPLAND_LEDGER_URL` (default `http://127.0.0.1:3000`)
+with the query string as sent (at most 4 KiB, else 414), and nothing of the caller's but
+that; anything else is 404 `not_found` with no call made, and the ledger's `/health` and
+`/metrics` are never reachable. Path parameters must match their pattern (an Antelope name
+`[a-z1-5.]{1,13}`, digits, or 64 hex for a transaction). Upstream's status and JSON body
+come back with `Cache-Control: private, no-store`; 3 s to connect and 25 s in all
+(`504 ledger_timeout`), unreachable is `502 ledger_unavailable`, and an answer over 8 MiB
+or not JSON is `502 ledger_response_too_large` / `ledger_bad_response`. Tests answer as
+the ledger through httpx's `MockTransport` (`tests/test_ledger.py`).
 
 **The house model** (`services/house.py`; `docs/architecture.md`, "The
 house model") drafts the task of every passed proposal with an Anthropic
