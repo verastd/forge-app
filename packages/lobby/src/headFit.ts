@@ -225,9 +225,13 @@ export function alignToEye(
  * grows and shrinks in place rather than sliding off: the offset and any
  * eyes scale with it.
  */
-export function rescale(placement: HeadPlacement, scale: number): HeadPlacement {
+export function rescale(placement: HeadPlacement, scale: number, screenAt?: ScreenAtScale): HeadPlacement {
   const next = clampScale(scale);
   const factor = next / placement.scale;
+  // The screen's size comes from one it had unclamped (when the caller knows one), so passing through a
+  // limit and back never leaves it smaller (or larger) than the face it covers.
+  const sized = (index: 0 | 1): number =>
+    clampScreen(screenAt ? (screenAt.size[index] * next) / screenAt.scale : placement.screen!.size[index] * factor);
   const grow = (p: Readonly<Point3>): Point3 => clampPoint([p[0] * factor, p[1] * factor, p[2] * factor]);
   return {
     ...placement,
@@ -239,11 +243,17 @@ export function rescale(placement: HeadPlacement, scale: number): HeadPlacement 
       ? {
           screen: {
             center: grow(placement.screen.center),
-            size: [clampScreen(placement.screen.size[0] * factor), clampScreen(placement.screen.size[1] * factor)] as [number, number],
+            size: [sized(0), sized(1)] as [number, number],
           },
         }
       : {}),
   };
+}
+
+/** A face screen's size as set (before any clamping) at a head scale: what `rescale` sizes it from. */
+export interface ScreenAtScale {
+  size: Readonly<[number, number]>;
+  scale: number;
 }
 
 /**
@@ -270,12 +280,18 @@ export function moveScreen(placement: HeadPlacement, axis: 0 | 1, to: number): H
   };
 }
 
-/** A placement moved by `delta` metres, its eyes and face screen with it. */
+/**
+ * A placement moved by `delta` metres, its eyes and face screen with it. Held
+ * at the reach, the head moves only as far as it can, and its eyes and screen
+ * by exactly as much, so they never slide off the face.
+ */
 export function nudge(placement: HeadPlacement, delta: Readonly<Point3>): HeadPlacement {
-  const move = (p: Readonly<Point3>): Point3 => clampPoint([p[0] + delta[0], p[1] + delta[1], p[2] + delta[2]]);
+  const offset = clampPoint([placement.offset[0] + delta[0], placement.offset[1] + delta[1], placement.offset[2] + delta[2]]);
+  const moved = [0, 1, 2].map((i) => offset[i]! - placement.offset[i]!) as Point3;
+  const move = (p: Readonly<Point3>): Point3 => clampPoint([p[0] + moved[0], p[1] + moved[1], p[2] + moved[2]]);
   return {
     ...placement,
-    offset: move(placement.offset),
+    offset,
     ...(placement.eyes ? { eyes: [move(placement.eyes[0]), move(placement.eyes[1])] as [Point3, Point3] } : {}),
     ...(placement.screen ? { screen: { ...placement.screen, center: move(placement.screen.center) } } : {}),
   };

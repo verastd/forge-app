@@ -338,6 +338,24 @@ describe('moving a fitted head', () => {
     expect(nudge({ ...fitted, screen: null }, [0.01, 0, 0]).screen).toBeNull();
   });
 
+  it('sizes the screen from one it had unclamped, so a trip to a limit and back changes nothing', () => {
+    const screened: HeadPlacement = { scale: 1, offset: [0, 0, 0], screen: { center: [0, 0.1, 0.1], size: [0.4, 0.2] } };
+    const at = { size: screened.screen!.size, scale: 1 };
+    const big = rescale(screened, 2, at);
+    expect(big.screen?.size).toEqual([HEAD_FIT.screenMax, 0.4]);
+    expect(rescale(big, 1, at).screen?.size).toEqual([0.4, 0.2]);
+    // Without one, it scales what it has (and the limit sticks).
+    expect(rescale(rescale(screened, 2), 1).screen?.size).toEqual([0.3, 0.2]);
+  });
+
+  it('moves the eyes and screen only as far as the head goes, held at the reach', () => {
+    const edge: HeadPlacement = { scale: 1, offset: [0.9, 0, 0], eyes: [[0.4, 0.1, 0.1], [0.5, 0.1, 0.1]], screen: { center: [0.5, 0.1, 0.1], size: [0.2, 0.1] } };
+    const pushed = nudge(edge, [0.3, 0, 0]);
+    expect(pushed.offset[0]).toBe(HEAD_FIT.reach);
+    expect(pushed.screen?.center[0]).toBeCloseTo(0.5 + (HEAD_FIT.reach - 0.9), 6);
+    expect(pushed.eyes?.[0][0]).toBeCloseTo(0.4 + (HEAD_FIT.reach - 0.9), 6);
+  });
+
   it('moves its face screen into place, the eyes going with it', () => {
     const screened: HeadPlacement = { ...fitted, screen: { center: [0, 0.1, 0.12], size: [0.2, 0.15] } };
     const lower = moveScreen(screened, 1, 0.06);

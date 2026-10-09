@@ -36,7 +36,7 @@ import {
   rescale,
   rotateAbout,
 } from '@forge/lobby';
-import type { AvatarColors, HeadPlacement, HeadScreen, Point3, WornFace } from '@forge/lobby';
+import type { AvatarColors, HeadPlacement, HeadScreen, Point3, ScreenAtScale, WornFace } from '@forge/lobby';
 import type { AvatarHead, AvatarHeadFit, AvatarHeadPlacement } from '@forge/shared';
 
 import { createRobotPreview } from '../../../components/lobby/scene/robot/preview';
@@ -152,6 +152,13 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled, w
   const [generation, setGeneration] = useState(0);
   const [reading, setReading] = useState<Reading>({ kind: 'reading' });
   const [placement, setPlacement] = useState<HeadPlacement | null>(null);
+  /**
+   * The face screen's size as last set, and the head scale it was set at: Size sizes the
+   * screen from this, never from a size a limit has clamped, so a drag to an extreme and
+   * back leaves it as it was. Anything but Size that changes the screen sets it again.
+   */
+  const screenAt = useRef<ScreenAtScale | null>(null);
+  const sizing = useRef(false);
   const [picking, setPicking] = useState<Picking>(null);
   // Fitted over another head (or none): a click that was aimed at the old one is dropped.
   const wornId = worn?.id ?? null;
@@ -368,8 +375,19 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled, w
 
   const onSize = (event: ChangeEvent<HTMLInputElement>): void => {
     const percent = Number(event.target.value);
-    setPlacement((current) => (current && base ? rescale(current, (base.scale * percent) / 100) : current));
+    sizing.current = true;
+    setPlacement((current) => (current && base ? rescale(current, (base.scale * percent) / 100, screenAt.current ?? undefined) : current));
   };
+
+  // The screen as set by anything but Size (auto-fit, its own sliders, switching it on, a saved fit): Size works from it.
+  const screenSize = placement?.screen?.size;
+  useEffect(() => {
+    if (sizing.current) {
+      sizing.current = false;
+      return;
+    }
+    screenAt.current = placement?.screen ? { size: placement.screen.size, scale: placement.scale } : null;
+  }, [screenSize?.[0], screenSize?.[1], placement?.screen, placement?.scale]);
 
   const onMove = (index: 0 | 1 | 2) => (event: ChangeEvent<HTMLInputElement>): void => {
     const wanted = Number(event.target.value);
