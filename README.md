@@ -33,7 +33,9 @@ The short version: open tasks are Task Specs — GitHub issues labeled
 machine-readable scope. Comment `/claim` (or run
 `tools/forge/forge claim <issue-number>`) and get assigned before you start
 work; a PR against a task claimed by someone else is closed regardless of
-quality.
+quality. Before you push, `tools/forge/forge check` runs Foreman's protocol
+gate on your branch and tells you what it would close, rule by rule
+([ADR-010](docs/adr/ADR-010-protocol-check.md)).
 
 If you'd rather not leave the browser, claim a task in the in-app Bridge at
 [`/contribute`](apps/web/src/app/contribute) and follow its three steps.

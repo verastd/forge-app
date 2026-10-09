@@ -101,6 +101,20 @@ lines your diff added or modified in `packages/*` and `apps/api`, and a
 missing coverage report for a directory you touched is a hard failure,
 not a pass.
 
+Then run Foreman's protocol gate yourself:
+
+```
+tools/forge/forge check --scope issue.md --title "[#<issue>] <goal>"
+```
+
+`issue.md` is the issue's text (its `forge-scope` block); the check needs
+only git and python3. It applies the same rules Foreman closes a pull
+request with (scope fencing, the scope block, diff size, protected paths,
+acceptance tests, modified tests, dependencies), names the rule and the
+manifest version behind every verdict, and exits non-zero on anything
+Foreman would close. Only the claim and the bot allowlist stay Foreman's
+alone. See [ADR-010](docs/adr/ADR-010-protocol-check.md).
+
 ## Decline etiquette and spec gaps
 
 If the spec is ambiguous, wrong, or you get stuck, don't guess: comment
