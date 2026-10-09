@@ -12,7 +12,7 @@ import { demoSignIn } from './helpers/session';
  * nobody on GitHub (lib/offline.ts simulates it all in the tab).
  */
 
-const BRANCH = 'task/1-polish-the-csv-export-in-the-data-app';
+const BRANCH = 'task/49-every-behaviour-s-declared-states-on-screen';
 
 async function goOffline(page: Page): Promise<string[]> {
   const reached: string[] = [];
@@ -29,11 +29,11 @@ async function goOffline(page: Page): Promise<string[]> {
   return reached;
 }
 
-/** Signs in with the practice account and claims task 1. */
+/** Signs in with the practice account and claims task #49, the T0 task. */
 async function claimTaskOne(page: Page): Promise<void> {
-  await page.goto(`/signin?next=${encodeURIComponent('/contribute/task/1')}`);
+  await page.goto(`/signin?next=${encodeURIComponent('/contribute/task/49')}`);
   await demoSignIn(page);
-  await expect(page).toHaveURL(/\/contribute\/task\/1$/);
+  await expect(page).toHaveURL(/\/contribute\/task\/49$/);
   await page.getByRole('button', { name: 'Claim this' }).click();
   await expect(page.getByText(/yours for 48h/)).toBeVisible();
 }

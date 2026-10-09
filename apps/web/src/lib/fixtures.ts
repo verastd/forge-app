@@ -7,8 +7,9 @@
  *
  * The task list is a field-for-field mirror of
  * `apps/api/src/forge_api/fixtures/tasks.json`. Keep them identical: they are
- * the same eight self-hosting starter tasks from PRD Appendix H.3, and a drift
- * between them would make the offline demo lie about the product.
+ * the Task Specs posted as issues on verastd/forge-app (the reviewed copies
+ * live in `docs/tasks/`), and a drift between them would make the offline
+ * demo lie about the product.
  */
 
 import type { ContributorProfile, Size, TaskCard } from '@forge/shared';
@@ -21,136 +22,88 @@ export interface TaskFixture extends TaskCard {
 /** Mirror of the API fixtures (apps/api/src/forge_api/fixtures/tasks.json). */
 export const TASK_FIXTURES: readonly TaskFixture[] = [
   {
-    id: 1,
-    title: 'Polish the CSV export in the Data app',
-    civilianSummary: 'Let people download the Upland data they are looking at as a spreadsheet file.',
-    size: 'S',
-    rewardClass: 'none',
-    tierFloor: 'T0',
-    status: 'open',
-    url: 'https://github.com/verastd/forge-app/issues/1',
-    labels: ['agent-ready', 'status:open', 'size:S'],
-    acceptanceCriteria: [
-      'GET /api/upland/export returns text/csv whose first line is the 13-column action header',
-      'Export CSV button visible on /apps/data for signed-in users (flag: csv_export)',
-      '10k-row export completes < 3s in CI fixture data',
-    ],
-  },
-  {
-    id: 2,
-    title: 'Build the contributor leaderboard page',
+    id: 48,
+    title: 'Register catch, throw and wave in the behaviour catalog',
     civilianSummary:
-      'Add a page that shows who has helped build the app and how much they have shipped.',
+      'Give the lobby one list of everything a robot can do, so each new trick comes with its own speed limit and its own on-screen feedback.',
     size: 'S',
     rewardClass: 'R2',
     tierFloor: 'T1',
     status: 'open',
-    url: 'https://github.com/verastd/forge-app/issues/2',
-    labels: ['agent-ready', 'status:open', 'size:S', 'bounty:R2'],
+    url: 'https://github.com/verastd/forge-app/issues/48',
+    labels: ['agent-ready', 'status:open', 'size:S', 'tier-floor:T1', 'bounty:R2'],
     acceptanceCriteria: [
-      '/leaderboard renders contributors sorted by merged-and-surviving contributions',
-      'Each row shows login, tier, merged count and survival rate from the ledger API',
-      'Page renders with an empty-state message when the ledger returns no contributors',
+      'Every action kind the lobby sends (wave, ball, throw, catch) is an intent of exactly one BEHAVIORS entry, validateBehaviors passes, and each entry\'s intentsPerSecond equals MAX_ACTIONS_PER_SECOND',
+      'Both presence feeds drop an action with no catalog entry and one over its entry\'s rate via createBehaviorMeter, with a lobby unit test and an e2e spec showing a flooded sender is ignored',
+      'make lint, make test and make test-coverage pass with the behaviours folder at or above 80% changed-line coverage',
     ],
   },
   {
-    id: 3,
-    title: 'Polish the forge CLI output and error messages',
+    id: 49,
+    title: 'Every behaviour\'s declared states, on screen',
     civilianSummary:
-      "Make the project's helper tool explain itself clearly when something goes wrong.",
-    size: 'XS',
-    rewardClass: 'R1',
-    tierFloor: 'T0',
-    status: 'open',
-    url: 'https://github.com/verastd/forge-app/issues/3',
-    labels: ['agent-ready', 'status:open', 'size:XS', 'bounty:R1'],
-    acceptanceCriteria: [
-      '`forge --help` lists every subcommand with a one-line description',
-      'Unknown subcommands exit non-zero with a suggestion instead of a stack trace',
-      'Existing forge shell scripts keep their current exit codes',
-    ],
-  },
-  {
-    id: 4,
-    title: 'Improve AGENTS.md build and scope instructions',
-    civilianSummary:
-      'Sharpen the instructions file that every helper agent reads before it starts work.',
-    size: 'XS',
-    rewardClass: 'R1',
-    // It edits a protected path (AGENTS.md), so only maintainers take it.
-    tierFloor: 'T2',
-    status: 'open',
-    url: 'https://github.com/verastd/forge-app/issues/4',
-    labels: ['agent-ready', 'status:open', 'size:XS', 'bounty:R1'],
-    acceptanceCriteria: [
-      'Every command listed in AGENTS.md runs green from a clean checkout',
-      'The scope rules name the directories that are always out of bounds',
-      'The AGENTS.md lint workflow passes on the branch',
-    ],
-  },
-  {
-    id: 5,
-    title: 'Format the daily triage digest',
-    civilianSummary: 'Turn the daily project summary into something a human can read over coffee.',
+      'When you throw or wave, the lobby always shows what happened to it: sent, done, didn\'t reach, or why not.',
     size: 'S',
-    rewardClass: 'R2',
-    tierFloor: 'T1',
-    status: 'open',
-    url: 'https://github.com/verastd/forge-app/issues/5',
-    labels: ['agent-ready', 'status:open', 'size:S', 'bounty:R2'],
-    acceptanceCriteria: [
-      'The digest groups items by stalled, needs-review and shipped',
-      'Output is deterministic for a fixed input fixture (snapshot test)',
-      "An empty day produces a short 'nothing to report' digest, not an empty file",
-    ],
-  },
-  {
-    id: 6,
-    title: 'Copy pass on the in-app bug wizard',
-    civilianSummary: 'Reword the report-a-problem flow so it never uses developer jargon.',
-    size: 'XS',
-    rewardClass: 'none',
+    rewardClass: 'R1',
     tierFloor: 'T0',
     status: 'open',
-    url: 'https://github.com/verastd/forge-app/issues/6',
-    labels: ['agent-ready', 'status:open', 'size:XS'],
+    url: 'https://github.com/verastd/forge-app/issues/49',
+    labels: ['agent-ready', 'status:open', 'size:S', 'tier-floor:T0', 'bounty:R1'],
     acceptanceCriteria: [
-      "Every wizard step's copy is jargon-free and under 140 characters",
-      'The submitted issue body keeps its existing machine-readable sections',
-      'Copy lives in the externalized strings file, not inline in components',
+      'PlayControls renders each state\'s copy from the catalog entry, shows a spinner while requested, and replaces it within confirmWithinMs',
+      'The lobby root carries data-behavior-state=<kind>:<state> and the people panel\'s live region announces a rejected state\'s reason',
+      'tests/e2e/lobby-behavior-states.spec.ts proves outOfRange, requested then confirmed, and rejected with the catalog\'s copy in the practice build',
     ],
   },
   {
-    id: 7,
-    title: 'Build the feature-flags admin page',
-    civilianSummary: 'Give the team a simple screen to switch app features on and off.',
+    id: 50,
+    title: 'A swarm of scripted members, and the lobby\'s first baselines',
+    civilianSummary:
+      'A way to fill the lobby with pretend people so we can see what breaks before real people do.',
     size: 'M',
     rewardClass: 'R3',
     tierFloor: 'T1',
     status: 'open',
-    url: 'https://github.com/verastd/forge-app/issues/7',
-    labels: ['agent-ready', 'status:open', 'size:M', 'bounty:R3'],
+    url: 'https://github.com/verastd/forge-app/issues/50',
+    labels: ['agent-ready', 'status:open', 'size:M', 'tier-floor:T1', 'bounty:R3'],
     acceptanceCriteria: [
-      '/admin/flags lists every flag with its current value and source of truth',
-      'Toggling a flag writes through the flags service and is reflected on reload',
-      'The page is unreachable for users without the admin role',
+      'tools/lobby-swarm/swarm.mjs joins N scripted members sending real position packets and actions at the real send policy, and exits non-zero on any failed join',
+      'tools/lobby-swarm/measure.mjs reports per minute, as JSON: packets per second, drops per sender, frame time p50 and p95, voice subscription changes and heap, from a development-only window.__forgePresence view',
+      'docs/lobby-baselines.md records runs at 25, 50, 100 and 150 members with the commands used, and ADR-009 links to it',
     ],
   },
   {
-    id: 8,
-    title: 'Extract hardcoded UI strings for translation',
+    id: 51,
+    title: 'The world participant, owning nothing at first',
     civilianSummary:
-      "Pull the app's wording into one place so it can be translated into other languages.",
-    size: 'S',
-    rewardClass: 'R2',
-    tierFloor: 'T0',
+      'Give the lobby a referee: one program that decides who caught the ball when two people grab at once, and can switch off a misbehaving trick for everyone.',
+    size: 'M',
+    rewardClass: 'R3',
+    tierFloor: 'T2',
     status: 'open',
-    url: 'https://github.com/verastd/forge-app/issues/8',
-    labels: ['agent-ready', 'status:open', 'size:S', 'bounty:R2'],
+    url: 'https://github.com/verastd/forge-app/issues/51',
+    labels: ['agent-ready', 'status:open', 'size:M', 'tier-floor:T2', 'bounty:R3'],
     acceptanceCriteria: [
-      'No user-visible string literals remain in apps/web components',
-      'Every extracted key exists in the English strings file with the same text',
-      'A lint rule fails the build when a new hardcoded string is added',
+      'apps/world starts with pnpm --filter @forge/world start, joins LOBBY_ROOM as identity world, publishes nothing until a world-authority entity exists, and exits non-zero in one line without its settings',
+      'It steps the behaviour kernel at 20 Hz under each entry\'s msPerTick budget and exposes GET /healthz and a bearer-guarded POST /behaviors/<id>/pause',
+      'Behind the new lobby_world flag the ball\'s flight moves to the world, and two browsers see the same holder after a contested catch',
+    ],
+  },
+  {
+    id: 52,
+    title: 'Object state per cell, on data tracks, subscribed by distance',
+    civilianSummary:
+      'Make the lobby send you only what is happening near you, so it stays smooth when the room is full.',
+    size: 'M',
+    rewardClass: 'R3',
+    tierFloor: 'T2',
+    status: 'open',
+    url: 'https://github.com/verastd/forge-app/issues/52',
+    labels: ['agent-ready', 'status:open', 'size:M', 'tier-floor:T2', 'bounty:R3'],
+    acceptanceCriteria: [
+      'The world publishes obj frames on data tracks named obj:<cell> via cellOf, one per changed entity per tick, each under 1200 bytes',
+      'The LiveKit feed subscribes to the member\'s cell and its neighbours at 2 Hz with voice\'s hysteresis, and reports the set in the debug view',
+      'At 100 swarm members, packets handled per second on the measuring browser fall by at least half against the broadcast baseline, recorded in docs/lobby-baselines.md',
     ],
   },
 ];

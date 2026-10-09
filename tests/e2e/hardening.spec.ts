@@ -153,7 +153,7 @@ test.describe('the content security policy', () => {
 
   test('every page carries it', async ({ request, baseURL }) => {
     test.skip(baseURL === undefined, 'needs the demo server');
-    for (const path of ['/', '/contribute', '/contribute/task/1', '/connect', '/signin']) {
+    for (const path of ['/', '/contribute', '/contribute/task/48', '/connect', '/signin']) {
       const response = await request.get(path, { maxRedirects: 0 });
       // The demo server has no NEXT_PUBLIC_API_URL and no LiveKit (playwright.config.ts).
       expect(response.headers()['content-security-policy'], path).toBe(

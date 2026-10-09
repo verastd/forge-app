@@ -26,7 +26,7 @@ from .bridge_helpers import (
 )
 
 LOGIN = "octo-contributor"
-BASE = ["--login", LOGIN, "--task", "1"]
+BASE = ["--login", LOGIN, "--task", "49"]
 
 
 def run(
@@ -61,7 +61,7 @@ def test_help_exits_0(capsys: pytest.CaptureFixture[str]) -> None:
 
 
 def test_a_bad_login_or_task_exits_2() -> None:
-    code, out, _ = run(["--rail", "jules", "--login", "bad_login", "--task", "1"])
+    code, out, _ = run(["--rail", "jules", "--login", "bad_login", "--task", "49"])
     assert code == 2 and "isn't a GitHub login" in out
     code, out, _ = run(["--rail", "jules", "--login", LOGIN, "--task", "999"])
     assert code == 2 and "no FORGE task #999" in out
