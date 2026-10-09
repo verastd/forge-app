@@ -4,8 +4,13 @@
  * Draft vs applied filters, with the applied set in the URL. Typing edits
  * the draft; Apply (or Enter) writes the URL, which is what the page's
  * queries read. Reset clears both.
+ *
+ * The URL is written with history.replaceState, which Next 15 syncs into
+ * useSearchParams without a server round trip, so the new query (and its
+ * skeleton) starts in the same frame as the click (PRD 5.9: feedback within
+ * 100 ms, even on Slow 3G). router.replace would wait on the network first.
  */
-import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { usePathname, useSearchParams } from 'next/navigation';
 import { useCallback, useMemo, useState } from 'react';
 
 import { hrefWith } from './filters';
@@ -15,7 +20,6 @@ export type FilterValues<K extends string> = Record<K, string>;
 export function useFilters<K extends string>(keys: readonly K[], extra: Record<string, string | undefined> = {}) {
   const params = useSearchParams();
   const pathname = usePathname() ?? '';
-  const router = useRouter();
 
   const applied = useMemo(() => {
     const out = {} as FilterValues<K>;
@@ -43,9 +47,9 @@ export function useFilters<K extends string>(keys: readonly K[], extra: Record<s
     (values: Partial<Record<string, string>>) => {
       const base = JSON.parse(extraSig) as Record<string, string | undefined>;
       const trimmed = Object.fromEntries(Object.entries(values).map(([k, v]) => [k, v?.trim()]));
-      router.replace(hrefWith(pathname, { ...base, ...trimmed }), { scroll: false });
+      window.history.replaceState(null, '', hrefWith(pathname, { ...base, ...trimmed }));
     },
-    [router, pathname, extraSig],
+    [pathname, extraSig],
   );
 
   const apply = useCallback(() => navigate(draft), [navigate, draft]);
