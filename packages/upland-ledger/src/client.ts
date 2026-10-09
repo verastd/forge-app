@@ -322,10 +322,10 @@ export function createLedgerClient(options: LedgerClientOptions = {}) {
       /** `GET /accounts` — derived account dimension, offset-paginated. */
       list: (params?: P.AccountListParams, opts?: RequestOptions) =>
         get('/accounts', S.AccountPageSchema, params, opts),
-      /** `GET /accounts/{account}` — profile + income. */
+      /** `GET /accounts/{account}` — profile + income. `account` must match `ANTELOPE_ACCOUNT` (else 400). */
       get: (account: string, params?: P.ChainParam, opts?: RequestOptions) =>
         get(`/accounts/${seg(account)}`, S.AccountDetailSchema, params, opts),
-      /** `GET /accounts/{account}/actions` — raw actions involving the account. */
+      /** `GET /accounts/{account}/actions` — raw actions involving the account (`ANTELOPE_ACCOUNT`, else 400). */
       actions: listAccountActions,
       /** Async iterator over every page of `/accounts/{account}/actions`. */
       actionPages: (account: string, params: P.AccountActionsParams = {}, opts: PageOptions = {}) =>

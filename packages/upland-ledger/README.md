@@ -6,7 +6,7 @@ is building Upland data screens. Read this, then `openapi.yaml`.
 
 | File | What it is |
 |---|---|
-| `openapi.yaml` | **Source of truth.** OpenAPI 3.1 for all 36 routes: params, defaults, limits, enums, envelopes, errors, known issues. |
+| `openapi.yaml` | **Source of truth.** OpenAPI 3.1 for all 36 routes: params, defaults, limits, enums, envelopes, errors, gotchas. |
 | `src/schemas.ts` | zod schemas for every response, field-for-field with the spec (snake_case as on the wire). |
 | `src/params.ts` | Typed request params for every operation. |
 | `src/client.ts` | `createLedgerClient()`: one method per operation, validated responses, `LedgerError`, pagination. |
@@ -134,7 +134,7 @@ Paths relative to `/bff/ledger`. Envelope: **C** = cursor `{data,next_cursor,cou
 | GET | `/accounts/{account}/actions` | `accounts.actions/actionPages` | C | Account activity tab (role actor/receiver/notified) |
 | GET | `/analytics/overview` | `analytics.overview` | {} | Home dashboard KPIs |
 | GET | `/analytics/timeseries` | `analytics.timeseries` | {} | Activity / volume line charts, stacked by contract or symbol |
-| GET | `/analytics/keys` | `analytics.keys` | [] | Query-builder field picker (currently empty, see issues) |
+| GET | `/analytics/keys` | `analytics.keys` | [] | Query-builder field picker (currently empty, see Gotchas) |
 | GET | `/analytics/flows` | `analytics.flows` | {} | Sankey / network of token flows, account flow tab |
 | GET | `/analytics/accounts/top` | `analytics.topAccounts` | [] | Leaderboards (most active, biggest senders/receivers) |
 | GET | `/analytics/calendar` | `analytics.calendar` | [] | Calendar heatmap |
@@ -156,39 +156,43 @@ Paths relative to `/bff/ledger`. Envelope: **C** = cursor `{data,next_cursor,cou
 | GET | `/neighborhoods` | `neighborhoods.list` | O | Neighborhood list / map (`include_boundaries`) |
 | GET | `/collections` | `collections.list` | O | Collections and yield boosts |
 | GET | `/treasures` | `treasures.list` | O | Treasure hunt leaderboard |
-| GET | `/rates` | `rates.list` | O* | Raw rate rows (prefer `/market/upx-usd`) |
+| GET | `/rates` | `rates.list` | O | Raw daily rate rows per method (prefer `/market/upx-usd` for charts) |
 | GET | `/search` | `search` | {} | Global search box |
 
-## Gotchas and known upstream issues (2026-10-08)
+## Gotchas (verified 2026-10-09)
 
-Verified against the source and the live ledger; see `openapi.yaml` descriptions.
+Checked against the source and the live ledger; see `openapi.yaml` descriptions.
 
-1. **`after`/`before` return 500** on `/market/upx-usd`, `/market/cities` and
-   `/rates` (a `toString(day) AS day` alias shadows the column in `WHERE`).
-   Until fixed upstream, use `limit` (and `city`/`method`) and filter client-side.
-2. `/market/upx-usd` `limit` is days **per method, oldest first** — `limit=30`
-   gives each method's first 30 days, not the last 30. Fetch the default (1000)
-   and slice the tail.
-3. `/rates` `limit` is rows **per method**; `count` can exceed `limit`,
-   `offset` is ignored, `has_more` is meaningless.
-4. `/accounts` default `sort=events` sorts **as text** (9995 before 999).
-   Sort by `buys`, `sells`, `upx_spent`, … for numeric order.
-5. `/signals` `observed_at`/`expires_at` are `2026-10-05 00:00:00.000` (UTC, no
-   `Z`), not ISO like everything else — append `Z` before `new Date()`.
-6. `/search` `accounts[].likely_bot` is `0|1`; elsewhere it is a boolean.
-7. `/neighborhoods` `boundaries` is a JSON **string** — `JSON.parse` it.
-8. Entity routes ignore unknown query params (a typo silently returns
+1. **One shared heavy-query slot for the whole app.** Every analytics/market
+   request that reaches ClickHouse (a cache miss on `/analytics/*`,
+   `/ingest/windows`, `/market/*`, `/signals`, and every
+   `POST /analytics/query`) goes through the ledger's query gate: 4 in flight
+   in total, **1 per client IP**. The gateway is a single IP, so all users
+   share one in-flight slot and those requests queue behind each other. The
+   ledger has no knob for it (`QueryGate(4, 1)` is hard-coded). So: don't
+   fire a burst of chart queries in parallel, never query per keystroke,
+   debounce builders, and lean on the 15 s response cache (identical GET URLs
+   are free). Entity and raw-chain routes don't go through the gate.
+2. `/market/upx-usd` `limit` is the **newest N days per method**, returned
+   oldest-first per method (ready to chart).
+3. Entity routes ignore unknown query params (a typo silently returns
    everything); raw-chain/analytics/market routes 400 on them.
-9. `/analytics/keys` is `[]` — the `data_keys` table is empty, so JSON-field
+4. `/analytics/keys` is `[]` — the `data_keys` table is empty, so JSON-field
    queries in `POST /analytics/query` are rejected.
-10. `/accounts/{account}` requires a strict Antelope name (`[a-z1-5.]{1,12}`);
-    the gateway allowlist also restricts `{account}`/`{contract}` to
-    `[a-z1-5.]{1,13}` and rejects percent-encoded paths.
-11. Property ids are up to 20 digits: keep them strings. `/properties` only
-    holds properties seen on chain (~398 K of ~4.9 M); `/properties/{id}` falls
-    back to the Upland API row (`chain_known: false`).
-12. Market `/market/cities` medians are `null` on days with no data; numbers
-    elsewhere are never null unless the schema says so.
+5. Account names: `/accounts/{account}`, `/accounts/{account}/actions` and the
+   `buyer`/`seller` filters on `/sales` and `/offers` accept only a real
+   Antelope account (`ANTELOPE_ACCOUNT` / `isAntelopeAccount()` exported here);
+   anything else is a 400 `validation_error`, so validate user input first. The
+   gateway allowlist also limits `{account}`/`{contract}` path segments to
+   `[a-z1-5.]{1,13}` and rejects percent-encoded paths.
+6. Property ids are up to 20 digits: keep them strings. `/properties` only
+   holds properties seen on chain (~398 K of ~4.9 M); `/properties/{id}` falls
+   back to the Upland API row (`chain_known: false`).
+7. `/market/cities` medians are `null` on days with no data;
+   `/neighborhoods` `boundaries` is parsed JSON (nested `[lng, lat]` arrays) or
+   `null`. Numbers elsewhere are never null unless the schema says so.
+8. Derived layers lag the chain (see Freshness): a sale is in `/sales` within
+   15 min but `/properties/{id}` counts it only after the next 6-hourly build.
 
 ## Re-capturing the examples
 

@@ -5,19 +5,19 @@
   },
   "upstream": {
     "connected": true,
-    "checkedAt": "2026-10-08T17:13:56.134Z"
+    "checkedAt": "2026-10-09T00:21:04.723Z"
   },
   "ingestion": {
-    "latestTimestamp": "2026-10-08T17:13:53.500Z",
-    "latestBlock": 91574249,
-    "latestGlobalSequence": 350804370,
-    "lagSeconds": 2,
+    "latestTimestamp": "2026-10-09T00:21:03.000Z",
+    "latestBlock": 91625496,
+    "latestGlobalSequence": 351023578,
+    "lagSeconds": 1,
     "checkpoint": {
       "stream": "live",
-      "lastTimestamp": "2026-10-08T17:13:53.500Z",
-      "lastBlock": 91574249,
-      "lastGlobalSequence": 350804370,
-      "updatedAt": "2026-10-08T17:13:54.637Z"
+      "lastTimestamp": "2026-10-09T00:21:03.000Z",
+      "lastBlock": 91625496,
+      "lastGlobalSequence": 351023578,
+      "updatedAt": "2026-10-09T00:21:03.916Z"
     }
   },
   "history": {

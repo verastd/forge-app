@@ -5,47 +5,47 @@
   "preferred": "weighted_comps",
   "points": [
     {
-      "day": "2025-05-07",
+      "day": "2026-10-06",
       "method": "weighted_comps",
-      "upx_per_usd": 5070.393036817522,
-      "usd_per_upx": 0.00019722336961626528,
-      "p25": 4892.652658759638,
-      "p75": 5248.133414875406,
-      "upx_listings": 40,
-      "fiat_listings": 11,
-      "samples": 2,
-      "cities": 2,
-      "upx_per_usd_smooth": 5070.393036817522
+      "upx_per_usd": 5566.519023644128,
+      "usd_per_upx": 0.00017964548324589196,
+      "p25": 4337.374008767731,
+      "p75": 6342.4148976523975,
+      "upx_listings": 5572,
+      "fiat_listings": 3774,
+      "samples": 76,
+      "cities": 27,
+      "upx_per_usd_smooth": 5566.519023644128
     },
     {
-      "day": "2025-05-08",
+      "day": "2026-10-07",
       "method": "weighted_comps",
-      "upx_per_usd": 5070.393036817522,
-      "usd_per_upx": 0.00019722336961626528,
-      "p25": 4892.652658759638,
-      "p75": 5248.133414875406,
-      "upx_listings": 40,
-      "fiat_listings": 12,
-      "samples": 2,
-      "cities": 2,
-      "upx_per_usd_smooth": 5070.393036817522
+      "upx_per_usd": 5610.998799368486,
+      "usd_per_upx": 0.0001782213890533267,
+      "p25": 4482.213667285096,
+      "p75": 6294.726952463003,
+      "upx_listings": 5300,
+      "fiat_listings": 3661,
+      "samples": 76,
+      "cities": 27,
+      "upx_per_usd_smooth": 5588.758911506307
     },
     {
-      "day": "2025-05-09",
+      "day": "2026-10-08",
       "method": "weighted_comps",
-      "upx_per_usd": 3178.9125533934503,
-      "usd_per_upx": 0.0003145729815475774,
-      "p25": 2191.069958847737,
-      "p75": 4687.886769392618,
-      "upx_listings": 5666,
-      "fiat_listings": 86,
-      "samples": 5,
-      "cities": 3,
-      "upx_per_usd_smooth": 5070.393036817522
+      "upx_per_usd": 5516.705516705517,
+      "usd_per_upx": 0.0001812676056338028,
+      "p25": 4308.921382189239,
+      "p75": 6295.198893275086,
+      "upx_listings": 5049,
+      "fiat_listings": 3498,
+      "samples": 75,
+      "cities": 26,
+      "upx_per_usd_smooth": 5566.519023644128
     }
   ],
   "latest": {
-    "weighted_comps": 3178.9125533934503
+    "weighted_comps": 5516.705516705517
   },
   "spread": null,
   "notes": [

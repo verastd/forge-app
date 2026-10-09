@@ -2,7 +2,7 @@
   "data": [
     {
       "contract": "playuplandme",
-      "action_count": 114389188,
+      "action_count": 114459266,
       "action_types": [
         "a25",
         "a32",
@@ -42,11 +42,11 @@
         "payforcpu"
       ],
       "first_seen_at": "2025-04-28T09:07:32.500Z",
-      "last_seen_at": "2026-10-08T17:13:56.500Z"
+      "last_seen_at": "2026-10-09T00:21:13.000Z"
     },
     {
       "contract": "eosio",
-      "action_count": 102570576,
+      "action_count": 102622607,
       "action_types": [
         "activate",
         "buyram",
@@ -72,17 +72,17 @@
         "voteproducer"
       ],
       "first_seen_at": "2025-04-26T17:45:16.000Z",
-      "last_seen_at": "2026-10-08T17:13:57.000Z"
+      "last_seen_at": "2026-10-09T00:21:13.000Z"
     },
     {
       "contract": "upxtokenacct",
-      "action_count": 33633092,
+      "action_count": 33656123,
       "action_types": [
         "datamove",
         "transfer"
       ],
       "first_seen_at": "2025-04-28T09:19:28.000Z",
-      "last_seen_at": "2026-10-08T17:13:56.500Z"
+      "last_seen_at": "2026-10-09T00:21:13.000Z"
     }
   ],
   "count": 3,

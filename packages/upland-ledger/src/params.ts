@@ -10,6 +10,20 @@
  */
 import type { ACCOUNT_ROLES, SIGNAL_TYPES } from './schemas.js';
 
+/**
+ * A real Antelope account name — the ledger's single account validator
+ * (`ANTELOPE_ACCOUNT` in its params.ts): up to 12 of `[a-z1-5.]`, or 12 of
+ * those plus a 13th from `[a-j1-5]`. The ledger answers 400 validation_error
+ * for anything else on `/accounts/{account}`, `/accounts/{account}/actions`
+ * and the `buyer`/`seller` filters of `/sales` and `/offers`. Use it to
+ * validate user input before navigating or querying.
+ */
+export const ANTELOPE_ACCOUNT = /^(?:[a-z1-5.]{1,12}|[a-z1-5.]{12}[a-j1-5])$/;
+
+export function isAntelopeAccount(value: string): boolean {
+  return ANTELOPE_ACCOUNT.test(value);
+}
+
 export type Instant = string | Date;
 export type Day = string | Date;
 export type SortDir = 'asc' | 'desc';
@@ -247,21 +261,21 @@ export type RateMethod = (typeof RATE_METHODS)[number];
 
 export interface UpxUsdParams extends ChainParam {
   method?: RateMethod;
-  /** ⚠ currently returns 500 upstream (README "Known upstream issues"). */
+  /** First day (inclusive). */
   after?: Day;
-  /** ⚠ currently returns 500 upstream. */
+  /** Last day (inclusive). */
   before?: Day;
   /** Trailing-median days 1..30, default 7; 1 disables smoothing. */
   smooth?: number;
-  /** Days PER METHOD, oldest first, 1..2000, default 1000. */
+  /** The newest N days PER METHOD (returned oldest-first), 1..2000, default 1000. */
   limit?: number;
 }
 
 export interface CitiesParams extends ChainParam {
   city?: string;
-  /** ⚠ currently returns 500 upstream. */
+  /** First day (inclusive). */
   after?: Day;
-  /** ⚠ currently returns 500 upstream. */
+  /** Last day (inclusive). */
   before?: Day;
   /** 1..5000, default 2000. */
   limit?: number;
@@ -368,7 +382,9 @@ export interface ListingParams extends ChainParam, Ordered<'timestamp' | 'ask_up
 export interface SaleParams extends ChainParam, Ordered<'timestamp' | 'price_upx' | 'price_to_mint'> {
   city?: string;
   neighborhood?: string;
+  /** Must match {@link ANTELOPE_ACCOUNT}, else 400. */
   buyer?: string;
+  /** Must match {@link ANTELOPE_ACCOUNT}, else 400. */
   seller?: string;
   property_id?: string;
   min_price?: number;
@@ -382,7 +398,9 @@ export interface OfferParams
   extends ChainParam,
     Ordered<'timestamp' | 'price_upx' | 'price_to_mint' | 'mint_price_upx'> {
   city?: string;
+  /** Must match {@link ANTELOPE_ACCOUNT}, else 400. */
   buyer?: string;
+  /** Must match {@link ANTELOPE_ACCOUNT}, else 400. */
   seller?: string;
   buyer_username?: string;
   property_id?: string;
@@ -419,14 +437,12 @@ export interface TreasureParams extends ChainParam, Ordered<'spawn_at' | 'reward
   before?: Instant;
 }
 
-export interface RateParams extends ChainParam {
+/** Rows ordered day DESC, then method; ordinary offset paging. */
+export interface RateParams extends ChainParam, OffsetParams {
   method?: string;
-  /** ⚠ currently returns 500 upstream. */
+  /** Bounds the day (inclusive). */
   after?: Instant;
-  /** ⚠ currently returns 500 upstream. */
   before?: Instant;
-  /** Rows PER METHOD, newest first, 1..1000, default 100. No offset. */
-  limit?: number;
 }
 
 export interface SearchParams extends ChainParam {

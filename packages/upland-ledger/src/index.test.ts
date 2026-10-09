@@ -21,4 +21,13 @@ describe('package entry point', () => {
     expect(pkg.SIGNAL_TYPES).toContain('regime_shift');
     expect(pkg.ACCOUNT_ROLES).toEqual(['actor', 'receiver', 'notified']);
   });
+
+  it('ANTELOPE_ACCOUNT matches the ledger account validator', () => {
+    for (const ok of ['a', 'smfvx4j4dqsb', 'eosio.token', 'abcdefghijkl', 'abcdefghijkla', 'abcdefghijkl5', '............']) {
+      expect(pkg.isAntelopeAccount(ok), ok).toBe(true);
+    }
+    for (const bad of ['', 'ABC', 'abc6', 'abcdefghijklm', 'abcdefghijklz', 'abcdefghijkl12', 'a-b', 'eosio token']) {
+      expect(pkg.isAntelopeAccount(bad), bad).toBe(false);
+    }
+  });
 });

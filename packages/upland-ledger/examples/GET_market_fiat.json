@@ -1,29 +1,22 @@
 {
   "window": {
-    "after": "2026-10-01T17:13:50.979Z",
-    "before": "2026-10-08T17:13:50.979Z",
+    "after": "2026-10-02T00:21:18.348Z",
+    "before": "2026-10-09T00:21:18.348Z",
     "days": 7
   },
   "totals": {
-    "listings": 1843,
-    "cleared": 89,
-    "asked_usd": 106598.01,
-    "cleared_usd": 985.0899999999998,
-    "clear_rate": 0.04829083016820401
+    "listings": 1819,
+    "cleared": 87,
+    "asked_usd": 109219.27,
+    "cleared_usd": 989.61,
+    "clear_rate": 0.04782847718526663
   },
   "daily": [
     {
-      "day": "2026-10-01",
-      "listings": 77,
-      "cleared": 6,
-      "asked_usd": 1493.97,
-      "cleared_usd": 21.72
-    },
-    {
       "day": "2026-10-02",
-      "listings": 287,
+      "listings": 286,
       "cleared": 22,
-      "asked_usd": 6250.43,
+      "asked_usd": 6230.43,
       "cleared_usd": 335.59
     },
     {
@@ -35,17 +28,17 @@
     },
     {
       "day": "2026-10-04",
-      "listings": 253,
+      "listings": 254,
       "cleared": 11,
-      "asked_usd": 14626.36,
+      "asked_usd": 14629.52,
       "cleared_usd": 94.09
     },
     {
       "day": "2026-10-05",
-      "listings": 270,
-      "cleared": 12,
-      "asked_usd": 4427.81,
-      "cleared_usd": 94.87
+      "listings": 273,
+      "cleared": 14,
+      "asked_usd": 4445.35,
+      "cleared_usd": 107.41
     },
     {
       "day": "2026-10-06",
@@ -63,108 +56,115 @@
     },
     {
       "day": "2026-10-08",
-      "listings": 162,
-      "cleared": 3,
-      "asked_usd": 3516.11,
-      "cleared_usd": 43
+      "listings": 209,
+      "cleared": 5,
+      "asked_usd": 7606.66,
+      "cleared_usd": 56.7
+    },
+    {
+      "day": "2026-10-09",
+      "listings": 3,
+      "cleared": 0,
+      "asked_usd": 23.98,
+      "cleared_usd": 0
     }
   ],
   "by_city": [
     {
       "city": "Buenos Aires",
-      "listings": 76,
+      "listings": 69,
       "cleared": 2,
       "cleared_usd": 255.19,
-      "median_usd": 5.38,
-      "clear_rate": 0.0263
+      "median_usd": 6,
+      "clear_rate": 0.029
     },
     {
       "city": "Miami",
-      "listings": 37,
+      "listings": 41,
       "cleared": 5,
       "cleared_usd": 192,
-      "median_usd": 8,
-      "clear_rate": 0.1351
+      "median_usd": 7.99,
+      "clear_rate": 0.122
     },
     {
       "city": "Amsterdam",
-      "listings": 264,
+      "listings": 258,
       "cleared": 11,
-      "cleared_usd": 89.04,
-      "median_usd": 10.57,
-      "clear_rate": 0.0417
+      "cleared_usd": 85.54,
+      "median_usd": 10.9,
+      "clear_rate": 0.0426
     },
     {
       "city": "Miami Beach",
-      "listings": 14,
+      "listings": 17,
       "cleared": 3,
       "cleared_usd": 68.4,
-      "median_usd": 23.74,
-      "clear_rate": 0.2143
+      "median_usd": 25,
+      "clear_rate": 0.1765
     },
     {
       "city": "London",
-      "listings": 49,
-      "cleared": 7,
-      "cleared_usd": 49.01,
-      "median_usd": 6.9,
-      "clear_rate": 0.1429
+      "listings": 48,
+      "cleared": 8,
+      "cleared_usd": 58.55,
+      "median_usd": 7.95,
+      "clear_rate": 0.1667
     },
     {
       "city": "Hong Kong",
-      "listings": 66,
+      "listings": 68,
       "cleared": 3,
       "cleared_usd": 41.65,
-      "median_usd": 26.4,
-      "clear_rate": 0.0455
-    },
-    {
-      "city": "Washington",
-      "listings": 81,
-      "cleared": 2,
-      "cleared_usd": 33.84,
-      "median_usd": 26.99,
-      "clear_rate": 0.0247
-    },
-    {
-      "city": "Seattle",
-      "listings": 122,
-      "cleared": 7,
-      "cleared_usd": 31.53,
-      "median_usd": 20,
-      "clear_rate": 0.0574
-    },
-    {
-      "city": "Los Angeles",
-      "listings": 176,
-      "cleared": 6,
-      "cleared_usd": 27.65,
-      "median_usd": 5.7,
-      "clear_rate": 0.0341
+      "median_usd": 27,
+      "clear_rate": 0.0441
     },
     {
       "city": "Queens",
       "listings": 56,
-      "cleared": 6,
-      "cleared_usd": 26,
+      "cleared": 7,
+      "cleared_usd": 35.7,
       "median_usd": 4.95,
-      "clear_rate": 0.1071
+      "clear_rate": 0.125
+    },
+    {
+      "city": "Washington",
+      "listings": 79,
+      "cleared": 2,
+      "cleared_usd": 33.84,
+      "median_usd": 27.99,
+      "clear_rate": 0.0253
+    },
+    {
+      "city": "Seattle",
+      "listings": 120,
+      "cleared": 6,
+      "cleared_usd": 28.31,
+      "median_usd": 20.1,
+      "clear_rate": 0.05
+    },
+    {
+      "city": "Los Angeles",
+      "listings": 174,
+      "cleared": 6,
+      "cleared_usd": 27.65,
+      "median_usd": 5.65,
+      "clear_rate": 0.0345
     },
     {
       "city": "Vancouver",
-      "listings": 33,
+      "listings": 32,
       "cleared": 7,
       "cleared_usd": 24.75,
-      "median_usd": 4.23,
-      "clear_rate": 0.2121
+      "median_usd": 4.12,
+      "clear_rate": 0.2188
     },
     {
       "city": "Singapore",
-      "listings": 31,
+      "listings": 29,
       "cleared": 3,
       "cleared_usd": 18.54,
-      "median_usd": 7.69,
-      "clear_rate": 0.0968
+      "median_usd": 7.89,
+      "clear_rate": 0.1034
     },
     {
       "city": "Cape Town",
@@ -183,28 +183,12 @@
       "clear_rate": 0.2308
     },
     {
-      "city": "Nashville",
-      "listings": 27,
-      "cleared": 4,
-      "cleared_usd": 13.59,
-      "median_usd": 4.05,
-      "clear_rate": 0.1481
-    },
-    {
       "city": "Sydney",
-      "listings": 37,
+      "listings": 39,
       "cleared": 1,
       "cleared_usd": 13,
-      "median_usd": 13.65,
-      "clear_rate": 0.027
-    },
-    {
-      "city": "Las Vegas",
-      "listings": 88,
-      "cleared": 3,
-      "cleared_usd": 10.7,
-      "median_usd": 10.8,
-      "clear_rate": 0.0341
+      "median_usd": 14,
+      "clear_rate": 0.0256
     },
     {
       "city": "San Francisco",
@@ -219,7 +203,7 @@
       "listings": 86,
       "cleared": 2,
       "cleared_usd": 8.58,
-      "median_usd": 9.98,
+      "median_usd": 11,
       "clear_rate": 0.0233
     },
     {
@@ -231,6 +215,14 @@
       "clear_rate": 0.2
     },
     {
+      "city": "Las Vegas",
+      "listings": 83,
+      "cleared": 2,
+      "cleared_usd": 7.7,
+      "median_usd": 11.2,
+      "clear_rate": 0.0241
+    },
+    {
       "city": "Tokyo",
       "listings": 10,
       "cleared": 2,
@@ -240,11 +232,11 @@
     },
     {
       "city": "Paris",
-      "listings": 20,
+      "listings": 21,
       "cleared": 1,
       "cleared_usd": 6,
-      "median_usd": 5.75,
-      "clear_rate": 0.05
+      "median_usd": 6,
+      "clear_rate": 0.0476
     },
     {
       "city": "Porto",
@@ -256,11 +248,19 @@
     },
     {
       "city": "Sao Paulo",
-      "listings": 15,
+      "listings": 14,
       "cleared": 1,
       "cleared_usd": 5.61,
       "median_usd": 5,
-      "clear_rate": 0.0667
+      "clear_rate": 0.0714
+    },
+    {
+      "city": "Nashville",
+      "listings": 21,
+      "cleared": 1,
+      "cleared_usd": 4.59,
+      "median_usd": 4.5,
+      "clear_rate": 0.0476
     },
     {
       "city": "Inglewood",
@@ -271,19 +271,27 @@
       "clear_rate": 1
     },
     {
+      "city": "Park City",
+      "listings": 7,
+      "cleared": 1,
+      "cleared_usd": 4,
+      "median_usd": 10,
+      "clear_rate": 0.1429
+    },
+    {
       "city": "Rio de Janeiro",
-      "listings": 19,
+      "listings": 14,
       "cleared": 1,
       "cleared_usd": 3,
       "median_usd": 3,
-      "clear_rate": 0.0526
+      "clear_rate": 0.0714
     },
     {
       "city": "Rome",
-      "listings": 71,
+      "listings": 73,
       "cleared": 0,
       "cleared_usd": 0,
-      "median_usd": 14,
+      "median_usd": 14.49,
       "clear_rate": 0
     },
     {
@@ -295,11 +303,11 @@
       "clear_rate": 0
     },
     {
-      "city": "Chicago",
-      "listings": 36,
+      "city": "Omaha",
+      "listings": 34,
       "cleared": 0,
       "cleared_usd": 0,
-      "median_usd": 5.26,
+      "median_usd": 4.03,
       "clear_rate": 0
     },
     {
@@ -311,19 +319,19 @@
       "clear_rate": 0
     },
     {
-      "city": "Dallas",
-      "listings": 32,
-      "cleared": 0,
-      "cleared_usd": 0,
-      "median_usd": 27,
-      "clear_rate": 0
-    },
-    {
-      "city": "Omaha",
+      "city": "Chicago",
       "listings": 31,
       "cleared": 0,
       "cleared_usd": 0,
-      "median_usd": 4.4,
+      "median_usd": 6.5,
+      "clear_rate": 0
+    },
+    {
+      "city": "Dallas",
+      "listings": 31,
+      "cleared": 0,
+      "cleared_usd": 0,
+      "median_usd": 27.3,
       "clear_rate": 0
     },
     {
@@ -331,7 +339,7 @@
       "listings": 28,
       "cleared": 0,
       "cleared_usd": 0,
-      "median_usd": 3.52,
+      "median_usd": 4.06,
       "clear_rate": 0
     },
     {
@@ -339,7 +347,7 @@
       "listings": 27,
       "cleared": 0,
       "cleared_usd": 0,
-      "median_usd": 4,
+      "median_usd": 3.7,
       "clear_rate": 0
     },
     {
@@ -352,10 +360,10 @@
     },
     {
       "city": "Fresno",
-      "listings": 18,
+      "listings": 16,
       "cleared": 0,
       "cleared_usd": 0,
-      "median_usd": 39,
+      "median_usd": 36.5,
       "clear_rate": 0
     },
     {
@@ -381,43 +389,35 @@
       "cleared_usd": 0,
       "median_usd": 29,
       "clear_rate": 0
-    },
-    {
-      "city": "Bronx",
-      "listings": 6,
-      "cleared": 0,
-      "cleared_usd": 0,
-      "median_usd": 5.65,
-      "clear_rate": 0
     }
   ],
   "upx_equivalent": [
     {
       "category": "Uppie",
-      "sales": 297,
-      "upx_volume": 17617542,
-      "usd_equivalent": 3156.29,
-      "median_upx": 19350
+      "sales": 293,
+      "upx_volume": 17468097,
+      "usd_equivalent": 3129.98,
+      "median_upx": 19500
     },
     {
       "category": "Uncategorised",
-      "sales": 6535,
-      "upx_volume": 15587804,
-      "usd_equivalent": 2798.05,
-      "median_upx": 380
+      "sales": 6605,
+      "upx_volume": 15064713,
+      "usd_equivalent": 2704.97,
+      "median_upx": 400
     },
     {
       "category": "Seeds",
-      "sales": 6586,
-      "upx_volume": 5850502,
-      "usd_equivalent": 1051.32,
-      "median_upx": 680
+      "sales": 6247,
+      "upx_volume": 5747987,
+      "usd_equivalent": 1033.71,
+      "median_upx": 690
     },
     {
       "category": "Vehicle",
-      "sales": 542,
-      "upx_volume": 1687030,
-      "usd_equivalent": 304.46,
+      "sales": 561,
+      "upx_volume": 2424534,
+      "usd_equivalent": 438.2,
       "median_upx": 1
     },
     {

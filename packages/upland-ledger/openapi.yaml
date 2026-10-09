@@ -43,6 +43,15 @@ info:
     `/offers`) every 6 h at :17. Reference data (`/neighborhoods`,
     `/collections`, `/treasures`, Upland API fields) daily 04:43 UTC.
 
+    **Shared heavy-query slot.** Every analytics/market request that reaches
+    ClickHouse (a cache miss on `/analytics/*`, `/ingest/windows`,
+    `/market/*`, `/signals`, and every `POST /analytics/query`) takes the
+    ledger's query gate: 4 in flight in total, 1 per client IP
+    (`QueryGate(4, 1)`, hard-coded, no config knob). The gateway is a single
+    IP, so ALL app users share ONE in-flight slot: those requests queue behind
+    each other. Avoid firing many at once (no per-keystroke queries); the 15 s
+    response cache absorbs identical GETs.
+
     **Numbers.** `global_sequence`/`block_num` are JSON numbers (safe below
     2^53 for this chain). Property ids are strings — keep them strings.
 servers:
@@ -281,11 +290,10 @@ paths:
         `role` picks one involvement kind, never a mix: `actor` (signed it,
         default), `receiver` (receipt receiver) or `notified`. Same filters and
         envelope as `/actions`, plus `account` and `role` echoed back. The path
-        accepts any Antelope-style name up to 64 chars (looser than
-        `/accounts/{account}`).
+        must be a valid Antelope account name (`AntelopeAccount`), else 400.
       x-example: examples/GET_accounts_{account}_actions.json
       parameters:
-        - { name: account, in: path, required: true, schema: { $ref: '#/components/schemas/AntelopeName' } }
+        - { name: account, in: path, required: true, schema: { $ref: '#/components/schemas/AntelopeAccount' } }
         - { name: role, in: query, schema: { type: string, enum: [actor, receiver, notified], default: actor } }
         - { $ref: '#/components/parameters/after' }
         - { $ref: '#/components/parameters/before' }
@@ -500,8 +508,8 @@ paths:
         parameterised ClickHouse statement against `source`, and run with
         guard rails (30 s, result row cap = `limit`). Column names allowed per
         source are enforced by the compiler (400 with the reason). Every source
-        except `properties` and `accounts` needs `range`. NOT cached; takes one
-        of four query slots (one per client IP). Body limit 64 KiB.
+        except `properties` and `accounts` needs `range`. NOT cached; always takes
+        the shared heavy-query slot (one per client IP; the gateway is one IP). Body limit 64 KiB.
       x-example: examples/POST_analytics_query.json
       requestBody:
         required: true
@@ -556,10 +564,10 @@ paths:
       description: |
         docs/MARKET.md. No USD price exists on chain; each method infers one
         from the UPX and FIAT order books. `preferred` is the method to quote.
-        `points` are ordered by method, then day ASCENDING, and `limit` is days
-        PER METHOD — so `limit=N` returns each method's OLDEST N days.
-        `upx_per_usd_smooth` is a trailing median over `smooth` days.
-        KNOWN ISSUE (2026-10-08): `after` or `before` returns 500 upstream.
+        `points` holds the NEWEST `limit` days PER METHOD (inside
+        `after`/`before` when given), returned ordered by method, then day
+        ascending (ready to chart). `upx_per_usd_smooth` is a trailing median
+        over `smooth` days, computed over every filtered day before the cut.
         Cached 15 s.
       x-example: examples/GET_market_upx-usd.json
       parameters:
@@ -583,7 +591,7 @@ paths:
       tags: [market]
       operationId: listCityDays
       summary: Per-city daily market state
-      description: Bare array of `market_city_daily` rows, newest day first, then by sales. Medians are null on days with nothing to take a median of. KNOWN ISSUE (2026-10-08) `after`/`before` return 500 upstream. Cached 15 s.
+      description: Bare array of `market_city_daily` rows, newest day first, then by sales. Medians are null on days with nothing to take a median of. Cached 15 s.
       x-example: examples/GET_market_cities.json
       parameters:
         - { $ref: '#/components/parameters/chain' }
@@ -633,7 +641,7 @@ paths:
       tags: [market]
       operationId: listSignals
       summary: Opportunity signals
-      description: Bare array ranked by score then expected USD edge. Advisory only; `evidence` says what produced each row. NOTE `observed_at`/`expires_at` are ClickHouse text (`2026-10-05 00:00:00.000`, UTC, no `Z`), unlike every other timestamp. Cached 15 s.
+      description: Bare array ranked by score then expected USD edge. Advisory only; `evidence` says what produced each row. Cached 15 s.
       x-example: examples/GET_signals.json
       parameters:
         - { $ref: '#/components/parameters/chain' }
@@ -735,9 +743,8 @@ paths:
       summary: Accounts (derived dimension)
       description: |
         Usernames, trading activity and bot-likeness per chain account.
-        `likely_bot` is an advisory inference. KNOWN ISSUE: `sort=events` (the
-        default) orders `events` as TEXT (9995 before 999) because of a SQL
-        alias; sort by `buys`, `sells` etc. for numeric order.
+        `likely_bot` is an advisory inference. Every sort column orders
+        numerically (or chronologically for first_seen/last_seen).
       x-example: examples/GET_accounts.json
       parameters:
         - { $ref: '#/components/parameters/entityChain' }
@@ -766,10 +773,10 @@ paths:
       tags: [entities]
       operationId: getAccount
       summary: One account profile
-      description: The derived account row plus `income` (yield and visit earnings from events). 404 when the account is not in the dimension. The path must be a real Antelope name (`^[a-z1-5.]{1,12}$`).
+      description: The derived account row plus `income` (yield and visit earnings from events). 404 when the account is not in the dimension. The path must be a valid Antelope account name (`AntelopeAccount`), else 400.
       x-example: examples/GET_accounts_{account}.json
       parameters:
-        - { name: account, in: path, required: true, schema: { type: string, pattern: '^[a-z1-5.]{1,12}$' } }
+        - { name: account, in: path, required: true, schema: { $ref: '#/components/schemas/AntelopeAccount' } }
         - { $ref: '#/components/parameters/entityChain' }
       responses:
         '200':
@@ -823,8 +830,8 @@ paths:
         - { $ref: '#/components/parameters/entityChain' }
         - { name: city, in: query, schema: { type: string, maxLength: 64 } }
         - { name: neighborhood, in: query, schema: { type: string, maxLength: 120 } }
-        - { name: buyer, in: query, schema: { type: string, pattern: '^[a-z1-5.]{1,12}$' } }
-        - { name: seller, in: query, schema: { type: string, pattern: '^[a-z1-5.]{1,12}$' } }
+        - { name: buyer, in: query, schema: { $ref: '#/components/schemas/AntelopeAccount' } }
+        - { name: seller, in: query, schema: { $ref: '#/components/schemas/AntelopeAccount' } }
         - { name: property_id, in: query, schema: { type: string, pattern: '^\d{1,20}$' } }
         - { name: min_price, in: query, schema: { type: number } }
         - { name: max_price, in: query, schema: { type: number } }
@@ -854,8 +861,8 @@ paths:
       parameters:
         - { $ref: '#/components/parameters/entityChain' }
         - { name: city, in: query, schema: { type: string, maxLength: 64 } }
-        - { name: buyer, in: query, schema: { type: string, pattern: '^[a-z1-5.]{1,12}$' } }
-        - { name: seller, in: query, schema: { type: string, pattern: '^[a-z1-5.]{1,12}$' } }
+        - { name: buyer, in: query, schema: { $ref: '#/components/schemas/AntelopeAccount' } }
+        - { name: seller, in: query, schema: { $ref: '#/components/schemas/AntelopeAccount' } }
         - { name: buyer_username, in: query, schema: { type: string, minLength: 1, maxLength: 120 } }
         - { name: property_id, in: query, schema: { type: string, pattern: '^\d{1,20}$' } }
         - { name: min_price_to_mint, in: query, schema: { type: number } }
@@ -880,7 +887,7 @@ paths:
       tags: [entities]
       operationId: listNeighborhoods
       summary: Neighborhoods (Upland reference data)
-      description: Ordered by city_id, name. `boundaries` only with `include_boundaries=true` and is a JSON-encoded STRING (polygon ring array) — `JSON.parse` it.
+      description: 'Ordered by city_id, name. `boundaries` only with `include_boundaries=true`: the polygon as parsed JSON (nested arrays of [lng, lat] numbers), or null when the stored text is not valid JSON.'
       x-example: examples/GET_neighborhoods.json
       parameters:
         - { $ref: '#/components/parameters/entityChain' }
@@ -960,11 +967,11 @@ paths:
       operationId: listRates
       summary: Daily UPX/USD rate rows (raw table)
       description: |
-        `upx_usd_daily` rows, newest day first. `limit` is rows PER METHOD
-        (so `count` can exceed `limit`), `offset` is not accepted and always 0,
-        and `has_more` compares `count` to `limit` — do not paginate on it.
-        Prefer `/market/upx-usd` for charts. KNOWN ISSUE (2026-10-08) `after`
-        or `before` returns 500 upstream.
+        `upx_usd_daily` rows, one per (day, method), ordered day DESC then
+        method, offset-paginated like every entity list: `limit` counts rows,
+        `count <= limit`, `has_more` is true when the page is full and
+        `offset` echoes the request. `after`/`before` bound the day. Prefer
+        `/market/upx-usd` for charts (per-method series, smoothing).
       x-example: examples/GET_rates.json
       parameters:
         - { $ref: '#/components/parameters/entityChain' }
@@ -972,6 +979,7 @@ paths:
         - { $ref: '#/components/parameters/after' }
         - { $ref: '#/components/parameters/before' }
         - { $ref: '#/components/parameters/entityLimit' }
+        - { $ref: '#/components/parameters/offset' }
       responses:
         '200':
           description: Rate rows
@@ -986,7 +994,7 @@ paths:
       tags: [entities]
       operationId: search
       summary: Search across entity kinds
-      description: One bounded query per kind (property, account, neighborhood, collection, city); a key is present only for kinds searched. A bare number searches property ids exactly; otherwise substrings. NOTE `accounts[].likely_bot` is 0/1 here (boolean elsewhere).
+      description: One bounded query per kind (property, account, neighborhood, collection, city); a key is present only for kinds searched. A bare number searches property ids exactly; otherwise substrings.
       x-example: examples/GET_search.json
       parameters:
         - { $ref: '#/components/parameters/entityChain' }
@@ -1027,12 +1035,12 @@ components:
     afterDay:
       name: after
       in: query
-      description: 'Inclusive first day. KNOWN ISSUE: currently 500 upstream.'
+      description: Inclusive first day (UTC).
       schema: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$' }
     beforeDay:
       name: before
       in: query
-      description: 'Inclusive last day. KNOWN ISSUE: currently 500 upstream.'
+      description: Inclusive last day (UTC).
       schema: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$' }
     limit100:
       name: limit
@@ -1109,8 +1117,9 @@ components:
     # ---------------------------------------------------------- primitives
     IsoInstant: { type: string, format: date-time, description: 'ISO-8601 UTC with Z, ms precision.', pattern: '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$' }
     IsoDay: { type: string, format: date, pattern: '^\d{4}-\d{2}-\d{2}$' }
-    ClickHouseDateTime: { type: string, description: 'YYYY-MM-DD HH:MM:SS.mmm, UTC, no zone suffix.', pattern: '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(\.\d+)?$' }
+    NestedNumbers: { type: array, items: { oneOf: [{ type: number }, { $ref: '#/components/schemas/NestedNumbers' }] } }
     InstantParam: { type: string, minLength: 1, description: 'ISO-8601; a missing zone is read as UTC.' }
+    AntelopeAccount: { type: string, pattern: '^(?:[a-z1-5.]{1,12}|[a-z1-5.]{12}[a-j1-5])$', description: 'A real Antelope account name: up to 12 of [a-z1-5.], or 12 plus a 13th from [a-j1-5]. Used by /accounts/{account}, /accounts/{account}/actions and the buyer/seller filters on /sales and /offers; anything else is a 400 validation_error.' }
     AntelopeName: { type: string, minLength: 1, maxLength: 64, pattern: '^[A-Za-z0-9._@:-]+$' }
     TrxId: { type: string, pattern: '^[0-9a-fA-F]{64}$' }
     UInt64String: { type: string, pattern: '^\d+$', description: 'Non-negative integer, ≤ UInt64.' }
@@ -1553,7 +1562,7 @@ components:
       type: object
       required: [observed_at, signal_type, entity_type, entity_id, city, score, expected_edge_upx, expected_edge_usd, horizon_hours, evidence, rule_version, expires_at]
       properties:
-        observed_at: { $ref: '#/components/schemas/ClickHouseDateTime' }
+        observed_at: { $ref: '#/components/schemas/IsoInstant' }
         signal_type: { type: string }
         entity_type: { type: string, description: 'property | city | account' }
         entity_id: { type: string }
@@ -1564,7 +1573,7 @@ components:
         horizon_hours: { type: number }
         evidence: { type: object, additionalProperties: { type: string } }
         rule_version: { type: number }
-        expires_at: { $ref: '#/components/schemas/ClickHouseDateTime' }
+        expires_at: { $ref: '#/components/schemas/IsoInstant' }
 
     # ------------------------------------------------------------ entities
     OffsetPageMeta:
@@ -1739,7 +1748,9 @@ components:
         area_m2: { type: number }
         center_lat: { type: number }
         center_lng: { type: number }
-        boundaries: { type: string, description: 'Only with include_boundaries=true. JSON-encoded polygon rings.' }
+        boundaries:
+          description: 'Only with include_boundaries=true. Parsed polygon: nested arrays of numbers ([lng, lat] pairs); null when unparseable.'
+          oneOf: [{ $ref: '#/components/schemas/NestedNumbers' }, { type: 'null' }]
     NeighborhoodPage:
       allOf:
         - { $ref: '#/components/schemas/OffsetPageMeta' }
@@ -1802,7 +1813,7 @@ components:
       properties:
         query: { type: string }
         properties: { type: array, items: { type: object, required: [property_id, address, city, neighborhood, mint_price_upx, sales], properties: { property_id: { type: string }, address: { type: string }, city: { type: string }, neighborhood: { type: string }, mint_price_upx: { type: number }, sales: { type: number } } } }
-        accounts: { type: array, items: { type: object, required: [account, username, buys, sells, likely_bot], properties: { account: { type: string }, username: { type: string }, buys: { type: number }, sells: { type: number }, likely_bot: { type: number, enum: [0, 1] } } } }
+        accounts: { type: array, items: { type: object, required: [account, username, buys, sells, likely_bot], properties: { account: { type: string }, username: { type: string }, buys: { type: number }, sells: { type: number }, likely_bot: { type: boolean } } } }
         neighborhoods: { type: array, items: { type: object, required: [neighborhood_id, name, city_id, center_lat, center_lng], properties: { neighborhood_id: { type: number }, name: { type: string }, city_id: { type: number }, center_lat: { type: number }, center_lng: { type: number } } } }
         collections: { type: array, items: { type: object, required: [collection_id, name, city_id, yield_boost, one_time_reward, requirements], properties: { collection_id: { type: number }, name: { type: string }, city_id: { type: number }, yield_boost: { type: number }, one_time_reward: { type: number }, requirements: { type: string } } } }
         cities: { type: array, items: { type: object, required: [city_id, name, state_name, country_name], properties: { city_id: { type: number }, name: { type: string }, state_name: { type: string }, country_name: { type: string } } } }

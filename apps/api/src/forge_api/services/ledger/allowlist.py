@@ -17,9 +17,10 @@ Method = Literal["GET", "POST"]
 
 #: Path parameters, by name. Each is matched in full (`fullmatch`).
 PARAMS: Final[dict[str, re.Pattern[str]]] = {
-    # An Antelope account or contract name: up to 13 characters of [a-z1-5.].
-    "account": re.compile(r"[a-z1-5.]{1,13}"),
-    "contract": re.compile(r"[a-z1-5.]{1,13}"),
+    # An Antelope account or contract name, the ledger's own rule: up to 12
+    # characters of [a-z1-5.], or exactly 12 plus a 13th of [a-j1-5].
+    "account": re.compile(r"[a-z1-5.]{1,12}|[a-z1-5.]{12}[a-j1-5]"),
+    "contract": re.compile(r"[a-z1-5.]{1,12}|[a-z1-5.]{12}[a-j1-5]"),
     # UInt64s: digits only, at most 20 of them.
     "globalSequence": re.compile(r"[0-9]{1,20}"),
     "propertyId": re.compile(r"[0-9]{1,20}"),

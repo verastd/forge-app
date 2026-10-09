@@ -71,9 +71,8 @@ post POST_analytics_query '/analytics/query' \
   "{\"source\":\"sales\",\"range\":{\"after\":\"${WEEK}T00:00:00Z\",\"before\":\"${YDAY}T23:59:59Z\"},\"dimensions\":[{\"field\":\"city\"}],\"measures\":[{\"fn\":\"count\",\"alias\":\"sales\"},{\"fn\":\"median\",\"field\":\"price_upx\",\"alias\":\"median_price\"}],\"orderBy\":[{\"measure\":\"sales\",\"dir\":\"desc\"}],\"limit\":3}"
 
 # --- market layer --------------------------------------------------------------
-# NB: after/before on market/upx-usd, market/cities and rates currently 500 upstream (see README "Known upstream issues").
-get GET_market_upx-usd "/market/upx-usd?method=weighted_comps&limit=3&smooth=7"
-get GET_market_cities '/market/cities?limit=3'
+get GET_market_upx-usd "/market/upx-usd?method=weighted_comps&after=$(date -u -d "$TODAY -3 day" +%Y-%m-%d)&before=${YDAY}&smooth=7"
+get GET_market_cities "/market/cities?after=${YDAY}&before=${YDAY}&limit=3"
 get GET_market_fiat '/market/fiat?days=7'
 get GET_signals '/signals?limit=3'
 
@@ -89,10 +88,10 @@ get GET_accounts_{account} "/accounts/$ACCT"
 get GET_accounts_{account}_actions "/accounts/$ACCT/actions?limit=3"
 get GET_listings '/listings?limit=3'
 get GET_offers '/offers?limit=3'
-get GET_neighborhoods '/neighborhoods?limit=3'
+get GET_neighborhoods '/neighborhoods?limit=3&include_boundaries=true'
 get GET_collections '/collections?limit=3'
 get GET_treasures '/treasures?limit=3'
-get GET_rates '/rates?limit=1'
+get GET_rates "/rates?after=${YDAY}T00:00:00Z&limit=3&offset=1"
 get GET_search '/search?q=main&limit=2'
 
 # --- one error ---------------------------------------------------------------

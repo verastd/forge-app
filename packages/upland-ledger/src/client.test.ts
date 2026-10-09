@@ -373,6 +373,19 @@ describe('pages() helpers on the client', () => {
     }
     expect(calls[0]?.url).toBe('/bff/ledger/sales?limit=2&offset=0');
   });
+
+  it('paginates /rates by offset now that it has one', async () => {
+    const row = { day: '2026-10-08', method: 'm', upx_per_usd: 1, usd_per_upx: 1, p25: 1, p75: 1, upx_listings: 0, fiat_listings: 0, samples: 1, cities: 0, method_version: 2 };
+    const { fetch, calls } = stubFetch(
+      json({ data: [row, row], count: 2, limit: 2, offset: 0, has_more: true }),
+      json({ data: [row], count: 1, limit: 2, offset: 2, has_more: false }),
+    );
+    const client = createLedgerClient({ fetch });
+    const rows = [];
+    for await (const p of paginateOffset((q: { limit?: number; offset?: number }) => client.rates.list(q), { limit: 2 })) rows.push(...p.data);
+    expect(rows).toHaveLength(3);
+    expect(calls.map((c) => c.url)).toEqual(['/bff/ledger/rates?limit=2&offset=0', '/bff/ledger/rates?limit=2&offset=2']);
+  });
 });
 
 describe('paginateOffset', () => {

@@ -11,10 +11,6 @@
   ],
   "rows": [
     [
-      "2026-10-01T00:00:00.000Z",
-      480556
-    ],
-    [
       "2026-10-02T00:00:00.000Z",
       491536
     ],
@@ -37,13 +33,17 @@
     [
       "2026-10-07T00:00:00.000Z",
       488359
+    ],
+    [
+      "2026-10-08T00:00:00.000Z",
+      495578
     ]
   ],
   "stats": {
     "rows": 7,
-    "elapsed_ms": 5,
-    "rows_read": 7786,
-    "bytes_read": 93432,
+    "elapsed_ms": 9,
+    "rows_read": 8406,
+    "bytes_read": 100872,
     "truncated": false,
     "table": "actions_hourly",
     "dedup": "exact"

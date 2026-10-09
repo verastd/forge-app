@@ -24,13 +24,12 @@ export const IsoInstant = z
   .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/, 'expected an ISO-8601 UTC instant');
 /** `2026-10-08` */
 export const IsoDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'expected a YYYY-MM-DD day');
-/**
- * `2026-10-05 00:00:00.000` — ClickHouse's own DateTime64 text, UTC, no zone.
- * Only `/signals` emits this (an upstream inconsistency; see README).
- */
-export const ClickHouseDateTime = z
-  .string()
-  .regex(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(\.\d+)?$/, 'expected a ClickHouse DateTime64 string');
+
+/** Arbitrarily nested arrays of numbers — a GeoJSON-style polygon's rings. */
+export type NestedNumbers = Array<number | NestedNumbers>;
+export const NestedNumbersSchema: z.ZodType<NestedNumbers> = z.lazy(() =>
+  z.array(z.union([z.number(), NestedNumbersSchema])),
+);
 
 const num = z.number();
 const str = z.string();
@@ -416,8 +415,7 @@ export type Fiat = z.infer<typeof FiatSchema>;
 export const SIGNAL_TYPES = ['cross_book_arb', 'under_comps', 'regime_shift', 'yield_value', 'sub_mint_arb'] as const;
 
 export const SignalSchema = z.object({
-  /** ClickHouse text, not ISO — see {@link ClickHouseDateTime}. */
-  observed_at: ClickHouseDateTime,
+  observed_at: IsoInstant,
   signal_type: str,
   entity_type: str,
   entity_id: str,
@@ -430,7 +428,7 @@ export const SignalSchema = z.object({
   /** Whatever the rule recorded; values are strings. */
   evidence: z.record(str),
   rule_version: num,
-  expires_at: ClickHouseDateTime,
+  expires_at: IsoInstant,
 });
 export type Signal = z.infer<typeof SignalSchema>;
 export const SignalListSchema = z.array(SignalSchema);
@@ -588,8 +586,8 @@ export const NeighborhoodSchema = z.object({
   area_m2: num,
   center_lat: num,
   center_lng: num,
-  /** Only with `include_boundaries=true`: the polygon ring array as a JSON *string*. */
-  boundaries: str.optional(),
+  /** Only with `include_boundaries=true`: parsed polygon rings ([lng, lat] pairs), null if unparseable. */
+  boundaries: NestedNumbersSchema.nullable().optional(),
 });
 export type Neighborhood = z.infer<typeof NeighborhoodSchema>;
 export const NeighborhoodPageSchema = offsetPage(NeighborhoodSchema);
@@ -636,7 +634,7 @@ export const RateRowSchema = z.object({
   method_version: num,
 });
 export type RateRow = z.infer<typeof RateRowSchema>;
-/** NB: `limit` is per method, so `count` can exceed `limit` and `has_more` is unreliable. */
+/** One row per (day, method), day DESC then method; ordinary offset paging. */
 export const RatePageSchema = offsetPage(RateRowSchema);
 
 export const SearchResultSchema = z.object({
@@ -651,8 +649,7 @@ export const SearchResultSchema = z.object({
         username: str,
         buys: num,
         sells: num,
-        /** 0 | 1 here (a boolean everywhere else). */
-        likely_bot: num,
+        likely_bot: z.boolean(),
       }),
     )
     .optional(),

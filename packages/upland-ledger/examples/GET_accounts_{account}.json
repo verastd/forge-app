@@ -1,26 +1,26 @@
 {
-  "account": "smfvx4j4dqsb",
-  "username": "sparrow99",
+  "account": "ymc55j4fboxi",
+  "username": "kingbo",
   "usernames": [
-    "sparrow99"
+    "kingbo"
   ],
   "username_changes": 1,
-  "first_seen": "2026-03-16T03:56:18.500Z",
-  "last_seen": "2026-07-02T15:36:28.500Z",
-  "active_days": 8,
-  "events": 131,
-  "buys": 16,
-  "sells": 8,
-  "upx_spent": 162714.3,
-  "upx_received": 89775,
-  "median_buy_latency_s": 1764294,
+  "first_seen": "2026-01-01T03:26:16.000Z",
+  "last_seen": "2026-10-09T00:12:28.000Z",
+  "active_days": 5,
+  "events": 40,
+  "buys": 0,
+  "sells": 1,
+  "upx_spent": 0,
+  "upx_received": 33250,
+  "median_buy_latency_s": 0,
   "sub_5s_buys": 0,
   "pct_buys_under_1m": 0,
   "likely_bot": false,
-  "upx_net": -72939.3,
+  "upx_net": 33250,
   "income": {
-    "yield_upx": 1837.6899999999998,
+    "yield_upx": 1500.78,
     "visit_upx": 380,
-    "yield_collections": 20
+    "yield_collections": 4
   }
 }

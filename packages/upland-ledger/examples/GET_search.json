@@ -24,14 +24,14 @@
       "username": "multimaine",
       "buys": 1,
       "sells": 0,
-      "likely_bot": 0
+      "likely_bot": false
     },
     {
       "account": "ut2np2dvmctl",
       "username": "leromain",
       "buys": 0,
       "sells": 6,
-      "likely_bot": 0
+      "likely_bot": false
     }
   ],
   "neighborhoods": [

@@ -2,49 +2,44 @@
   "chain": "upland",
   "symbol": "UPX",
   "range": {
-    "after": "2026-10-07T00:00:00.000Z",
-    "before": "2026-10-07T23:59:59.999Z"
+    "after": "2026-10-08T00:00:00.000Z",
+    "before": "2026-10-08T23:59:59.999Z"
   },
   "nodes": [
     {
       "id": "playuplandme",
-      "in": 3857507.5999999978,
-      "out": 13800704.84000003
+      "in": 5114217,
+      "out": 24022509.06000011
     },
     {
       "id": "communityupx",
-      "in": 9840030.39000003,
+      "in": 19529409.06000011,
       "out": 0
     },
     {
-      "id": "mpksymvpkdg4",
-      "in": 3960674.4499999997,
-      "out": 0
-    },
-    {
-      "id": "x2u5eypv5sxs",
-      "in": 0,
-      "out": 3857507.5999999978
+      "id": "guxt1le55lmy",
+      "in": 4493100,
+      "out": 5114217
     }
   ],
   "links": [
     {
       "source": "playuplandme",
       "target": "communityupx",
-      "transfers": 9397,
-      "amount": 9840030.39000003
+      "transfers": 10067,
+      "amount": 19529409.06000011
+    },
+    {
+      "source": "guxt1le55lmy",
+      "target": "playuplandme",
+      "transfers": 3,
+      "amount": 5114217
     },
     {
       "source": "playuplandme",
-      "target": "mpksymvpkdg4",
-      "transfers": 45,
-      "amount": 3960674.4499999997
-    },
-    {
-      "source": "x2u5eypv5sxs",
-      "target": "playuplandme",
-      "transfers": 20,
-      "amount": 3857507.5999999978
+      "target": "guxt1le55lmy",
+      "transfers": 30,
+      "amount": 4493100
     }
   ]
 }
