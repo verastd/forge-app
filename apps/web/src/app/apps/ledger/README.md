@@ -1,7 +1,10 @@
 # Upland Ledger UI (`/apps/ledger`)
 
-Screens over the Upland Ledger, styled with the Embers design system and
-gated on the `upland_ledger` flag.
+Screens over the Upland Ledger, gated on the `upland_ledger` flag and built
+only from `@forge/ui` (`packages/ui`), the port of the Embers design system
+handoff. The stack follows its COMPONENT_MAP: `@forge/ui` components, TanStack
+Query for server state, ECharts for charts, next-themes for light/dark,
+lucide-react icons and self-hosted Work Sans / Geist Mono.
 
 ## Layout
 
@@ -13,8 +16,8 @@ gated on the `upland_ledger` flag.
 | `market/` | Sales, listings, offers, rates (`?tab=`) |
 | `opportunities/` | Signals |
 | `accounts/[account]/` | Account profile and chain actions |
-| `_components/` | Embers primitives (`primitives.tsx`, `embers.css`), DataState, DataTable, FilterBar, shell, charts |
-| `_lib/` | Client, data hooks (`hooks.ts` over the framework-free `query-core.ts`), formatters, transforms, URL filters |
+| `_ui/` | Ledger glue over `@forge/ui`: shell (AppShell + TopBar + SidebarNav), `Region` (query → DataState), sign-in prompt, links, toasts, filter fields, rate chart |
+| `_lib/` | Client, TanStack Query hooks (`hooks.ts`, heavy slot in `query-core.ts`), formatters, transforms, URL filters |
 | `_lib/forge-adapter.tsx` | **The only file that imports FORGE** (session, flags, account menu) |
 
 ## Rules this tree keeps
@@ -30,7 +33,7 @@ gated on the `upland_ledger` flag.
 
 ## Moving it to its own repo
 
-Copy this directory and `packages/upland-ledger/`, then rewrite
+Copy this directory, `packages/ui/` and `packages/upland-ledger/`, then rewrite
 `_lib/forge-adapter.tsx` against the new app's session, flags and account
-chrome. Dependencies: `next`, `react`, `recharts`, `@forge/upland-ledger`;
-`vitest` for the tests (`*.test.ts`, fixtures from the package's `examples/`).
+chrome. Dependencies: `next`, `react`, `@tanstack/react-query`, `@forge/ui`,
+`@forge/upland-ledger`; `vitest` for the tests (`*.test.ts`, fixtures from the package's `examples/`).

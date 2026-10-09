@@ -1,8 +1,9 @@
 /**
- * Number, money, time and id formatting for the ledger UI. Pure functions,
- * locale fixed to en-US so screens, tests and screenshots agree. Times on
- * the wire are UTC and are shown in UTC (the ledger's day boundaries are
- * UTC, so a local-time view would put sales on the wrong day).
+ * Number, money, time and id formatting for the ledger UI, following
+ * DESIGN_SYSTEM.md "Content fundamentals": tabular numbers with thousands
+ * separators, 0 decimals for UPX, 1 for percentages, 2 for rates; times in
+ * UTC with the zone shown ("14:02:11 UTC"); deltas carry a sign. Pure
+ * functions, locale fixed to en-US so screens, tests and screenshots agree.
  */
 
 const LOCALE = 'en-US';
@@ -21,17 +22,12 @@ export function formatCompact(n: number | null | undefined): string {
   return n === null || n === undefined || !Number.isFinite(n) ? NONE : compactFmt.format(n);
 }
 
-/** UPX amounts: whole UPX, or two decimals when under 100 and fractional. */
+/** UPX amounts: always 0 decimals (DESIGN_SYSTEM.md), compact on request for KPI tiles. */
 export function formatUpx(n: number | null | undefined, opts: { compact?: boolean; unit?: boolean } = {}): string {
   if (n === null || n === undefined || !Number.isFinite(n)) return NONE;
   const unit = opts.unit === false ? '' : ' UPX';
   if (opts.compact && Math.abs(n) >= 10_000) return `${compactFmt.format(n)}${unit}`;
-  const fractional = Math.abs(n) < 100 && !Number.isInteger(n);
-  const body = new Intl.NumberFormat(LOCALE, {
-    minimumFractionDigits: fractional ? 2 : 0,
-    maximumFractionDigits: fractional ? 2 : 0,
-  }).format(n);
-  return `${body}${unit}`;
+  return `${intFmt.format(n)}${unit}`;
 }
 
 /** USD with cents; tiny values (a single UPX in USD) keep 2 significant digits. */
@@ -43,9 +39,16 @@ export function formatUsd(n: number | null | undefined): string {
   return new Intl.NumberFormat(LOCALE, { style: 'currency', currency: 'USD' }).format(n);
 }
 
-/** A rate like 5,566 UPX per $1. */
+const rateFmt = new Intl.NumberFormat(LOCALE, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+/** A rate, 2 decimals (DESIGN_SYSTEM.md): 5,566.52. */
+export function formatRate(n: number | null | undefined): string {
+  return n === null || n === undefined || !Number.isFinite(n) ? NONE : rateFmt.format(n);
+}
+
+/** UPX per US dollar: "5,566.52 UPX / $1". */
 export function formatUpxPerUsd(n: number | null | undefined): string {
-  return n === null || n === undefined || !Number.isFinite(n) ? NONE : `${intFmt.format(n)} UPX / $1`;
+  return n === null || n === undefined || !Number.isFinite(n) ? NONE : `${rateFmt.format(n)} UPX / $1`;
 }
 
 /** A ratio such as price ÷ mint: 1.13×. Zero means "no mint price", so it reads as unknown. */
@@ -63,8 +66,8 @@ export function formatSignedPercent(fraction: number | null | undefined, digits 
   return `${pct > 0 ? '+' : pct < 0 ? '−' : ''}${body}%`;
 }
 
-/** A fraction 0..1 as a plain percent. */
-export function formatPercent(fraction: number | null | undefined, digits = 0): string {
+/** A fraction 0..1 as a plain percent, 1 decimal (DESIGN_SYSTEM.md). */
+export function formatPercent(fraction: number | null | undefined, digits = 1): string {
   if (fraction === null || fraction === undefined || !Number.isFinite(fraction)) return NONE;
   return `${new Intl.NumberFormat(LOCALE, { maximumFractionDigits: digits, minimumFractionDigits: digits }).format(fraction * 100)}%`;
 }
@@ -80,11 +83,24 @@ function parse(iso: string | null | undefined): Date | null {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
-/** "Oct 9, 2026 00:12 UTC" */
+/** "Oct 9, 2026 00:12:28 UTC" */
 export function formatInstant(iso: string | null | undefined): string {
   const d = parse(iso);
   if (d === null) return NONE;
-  return `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())} UTC`;
+  return `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()} ${formatClockUtc(d)}`;
+}
+
+/** "00:12:28" in UTC, no zone — for LiveIndicator, which adds "UTC" itself. */
+export function formatClock(at: Date | string | null | undefined): string {
+  const d = at instanceof Date ? at : parse(at);
+  if (d === null) return NONE;
+  return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
+}
+
+/** "00:12:28 UTC" — the time of day alone, with its zone. */
+export function formatClockUtc(at: Date | string | null | undefined): string {
+  const t = formatClock(at);
+  return t === NONE ? NONE : `${t} UTC`;
 }
 
 /** "Oct 9, 2026" from an instant or a YYYY-MM-DD day (read as UTC). */

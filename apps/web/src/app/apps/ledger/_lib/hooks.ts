@@ -1,26 +1,37 @@
 'use client';
 
 /**
- * React data hooks over the ledger client. Every read goes through
- * `useLedgerQuery`, which:
- * - aborts its request when the component unmounts or the key changes;
- * - serves a 15 s browser cache (the ledger's own cache window);
+ * React data hooks over the ledger client, on TanStack Query (COMPONENT_MAP
+ * §3: "Server state lives in TanStack Query. Components receive typed view
+ * models"). Every read goes through `useLedgerQuery`, which:
+ * - aborts its request when the component unmounts or the key changes
+ *   (Query passes its AbortSignal to the client);
+ * - keeps answers fresh for 15 s, the ledger's own response-cache window;
  * - queues `heavy` reads (analytics, market, signals) behind one in-flight
  *   slot for the whole tab, because the ledger gives the whole app only one;
- * - keeps what's on screen while a refresh or the next page loads, and
- *   reports `fetching` so the UI can say so;
- * - never substitutes data: a failure is a status, with the LedgerError.
+ * - never retries on its own (Retry is always a visible word) and never
+ *   substitutes data: a failure is a status, with the LedgerError.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { keepPreviousData, useInfiniteQuery, useQuery } from '@tanstack/react-query';
+import { useCallback, useEffect, useState } from 'react';
 import type { RefObject } from 'react';
-import type { LedgerClient } from '@forge/upland-ledger';
+import type { LedgerClient, LedgerError } from '@forge/upland-ledger';
 
 import { ledgerClient } from './client';
-import { HeavySlot, ResponseCache, isAbort, toLedgerError, viewState } from './query-core';
+import { HeavySlot, toLedgerError, viewState } from './query-core';
 import type { QuerySnapshot, ViewState } from './query-core';
 
-const cache = new ResponseCache();
 const heavySlot = new HeavySlot(1);
+
+/** Defaults for the ledger UI's QueryClient (see `LedgerQueryProvider`). */
+export const LEDGER_QUERY_DEFAULTS = {
+  queries: {
+    staleTime: 15_000,
+    gcTime: 5 * 60_000,
+    retry: false,
+    refetchOnWindowFocus: false,
+  },
+} as const;
 
 export type Fetcher<T> = (client: LedgerClient, signal: AbortSignal) => Promise<T>;
 
@@ -37,86 +48,39 @@ export interface QueryOptions<T> {
 
 export interface QueryResult<T> extends QuerySnapshot<T> {
   view: ViewState;
-  /** Re-reads from the ledger, skipping the cache. Resolves when the read settles. */
+  /** Re-reads from the ledger. Resolves when the read settles (never rejects). */
   refetch: () => Promise<void>;
 }
 
-const IDLE = { status: 'idle', data: undefined, error: undefined, fetching: false, updatedAt: undefined } as const;
+function runRead<T>(fetcher: Fetcher<T>, heavy: boolean, signal: AbortSignal): Promise<T> {
+  const client = ledgerClient();
+  const read = (): Promise<T> => fetcher(client, signal);
+  return (heavy ? heavySlot.run(read, signal) : read()).catch((err: unknown) => {
+    throw toLedgerError(err);
+  });
+}
 
 export function useLedgerQuery<T>(key: string | null, fetcher: Fetcher<T>, options: QueryOptions<T> = {}): QueryResult<T> {
   const { heavy = false, enabled = true, keepPrevious = false, isEmpty } = options;
-  const active = enabled && key !== null;
-
-  const [snap, setSnap] = useState<QuerySnapshot<T>>(() => {
-    const hit = key === null ? undefined : cache.get<T>(key);
-    return hit
-      ? { status: 'success', data: hit.value, error: undefined, fetching: false, updatedAt: hit.at }
-      : { ...IDLE, status: active ? 'loading' : 'idle', fetching: active };
+  const q = useQuery<T, LedgerError>({
+    queryKey: ['ledger', key],
+    queryFn: ({ signal }) => runRead(fetcher, heavy, signal),
+    enabled: enabled && key !== null,
+    placeholderData: keepPrevious ? keepPreviousData : undefined,
   });
+  const { refetch: queryRefetch } = q;
+  const refetch = useCallback(async (): Promise<void> => {
+    await queryRefetch();
+  }, [queryRefetch]);
 
-  const fetcherRef = useRef(fetcher);
-  fetcherRef.current = fetcher;
-  const controllerRef = useRef<AbortController | null>(null);
-  const requestRef = useRef(0);
-
-  const run = useCallback(
-    (force: boolean): Promise<void> => {
-      if (key === null) return Promise.resolve();
-      controllerRef.current?.abort();
-      const request = ++requestRef.current;
-
-      const hit = force ? undefined : cache.get<T>(key);
-      if (hit) {
-        setSnap({ status: 'success', data: hit.value, error: undefined, fetching: false, updatedAt: hit.at });
-        return Promise.resolve();
-      }
-
-      const controller = new AbortController();
-      controllerRef.current = controller;
-      setSnap((prev) => {
-        const keep = (keepPrevious || force) && prev.data !== undefined;
-        return {
-          status: keep ? 'success' : 'loading',
-          data: keep ? prev.data : undefined,
-          error: undefined,
-          fetching: true,
-          updatedAt: keep ? prev.updatedAt : undefined,
-        };
-      });
-
-      const client = ledgerClient();
-      const read = (): Promise<T> => fetcherRef.current(client, controller.signal);
-      const pending = heavy ? heavySlot.run(read, controller.signal) : read();
-
-      return pending.then(
-        (data) => {
-          if (request !== requestRef.current) return;
-          const at = cache.set(key, data);
-          setSnap({ status: 'success', data, error: undefined, fetching: false, updatedAt: at });
-        },
-        (err: unknown) => {
-          if (request !== requestRef.current || isAbort(err)) return;
-          setSnap((prev) => ({ ...prev, status: 'error', error: toLedgerError(err), fetching: false }));
-        },
-      );
-    },
-    [key, heavy, keepPrevious],
-  );
-
-  useEffect(() => {
-    if (!active) {
-      setSnap((prev) => (prev.fetching ? { ...prev, fetching: false } : prev));
-      return undefined;
-    }
-    void run(false);
-    return () => {
-      controllerRef.current?.abort();
-    };
-  }, [active, run]);
-
-  const refetch = useCallback(() => run(true), [run]);
-  const view = viewState(snap, isEmpty);
-  return { ...snap, view, refetch };
+  const snap: QuerySnapshot<T> = {
+    status: q.isError ? 'error' : q.data !== undefined ? 'success' : enabled && key !== null ? 'loading' : 'idle',
+    data: q.data,
+    error: q.isError ? q.error : undefined,
+    fetching: q.isFetching,
+    updatedAt: q.dataUpdatedAt > 0 ? q.dataUpdatedAt : undefined,
+  };
+  return { ...snap, view: viewState(snap, isEmpty), refetch };
 }
 
 /* --- offset pages ---------------------------------------------------------- */
@@ -161,11 +125,11 @@ export function useOffsetPages<T>(
   if (state.base !== baseKey) setState({ base: baseKey, offset: 0, paging: null });
 
   const key = baseKey === null ? null : `${baseKey}#${pageSize}@${offset}`;
-  const query = useLedgerQuery<OffsetPage<T>>(
-    key,
-    (client, signal) => fetchPage({ limit: pageSize, offset }, client, signal),
-    { keepPrevious: true, enabled: options.enabled, heavy: options.heavy },
-  );
+  const query = useLedgerQuery<OffsetPage<T>>(key, (client, signal) => fetchPage({ limit: pageSize, offset }, client, signal), {
+    keepPrevious: true,
+    enabled: options.enabled,
+    heavy: options.heavy,
+  });
 
   const showingOffset = query.data?.offset ?? offset;
   const paging = query.fetching ? state.paging : null;
@@ -200,60 +164,107 @@ export interface CursorFeedResult<T> extends QueryResult<{ data: T[]; next_curso
   items: T[];
   hasMore: boolean;
   loadingMore: boolean;
-  loadMoreError: ReturnType<typeof toLedgerError> | undefined;
+  loadMoreError: LedgerError | undefined;
   loadMore: () => Promise<void>;
 }
 
 /**
- * Cursor feeds (`next_cursor`): the first page through `useLedgerQuery`,
- * then "Load more" appends. A failed "Load more" keeps what's loaded and
- * reports its own error, so the list never disappears under it.
+ * Cursor feeds (`next_cursor`) on useInfiniteQuery: "Load more" appends. A
+ * failed "Load more" keeps what's loaded and reports its own error, so the
+ * list never disappears under it.
  */
 export function useCursorFeed<T>(
   key: string | null,
   fetchPage: (cursor: string | undefined, client: LedgerClient, signal: AbortSignal) => Promise<{ data: T[]; next_cursor: string | null }>,
 ): CursorFeedResult<T> {
-  const first = useLedgerQuery(key, (client, signal) => fetchPage(undefined, client, signal));
-  const [more, setMore] = useState<{ key: string | null; items: T[]; cursor: string | null | undefined }>({
-    key,
-    items: [],
-    cursor: undefined,
+  const q = useInfiniteQuery<{ data: T[]; next_cursor: string | null }, LedgerError>({
+    queryKey: ['ledger', 'feed', key],
+    queryFn: ({ pageParam, signal }) => runRead((client, s) => fetchPage(pageParam as string | undefined, client, s), false, signal),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => last.next_cursor ?? undefined,
+    enabled: key !== null,
   });
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [loadMoreError, setLoadMoreError] = useState<ReturnType<typeof toLedgerError> | undefined>(undefined);
-  const controllerRef = useRef<AbortController | null>(null);
-
-  const extra = more.key === key && first.data !== undefined ? more : { key, items: [] as T[], cursor: undefined };
-  const cursor = extra.cursor === undefined ? first.data?.next_cursor ?? null : extra.cursor;
-
-  useEffect(() => {
-    // A new key (or a refresh of page one) starts the feed over.
-    controllerRef.current?.abort();
-    setMore({ key, items: [], cursor: undefined });
-    setLoadMoreError(undefined);
-    setLoadingMore(false);
-  }, [key, first.updatedAt]);
-
-  useEffect(() => () => controllerRef.current?.abort(), []);
-
+  const { refetch: queryRefetch, fetchNextPage } = q;
+  const refetch = useCallback(async (): Promise<void> => {
+    await queryRefetch();
+  }, [queryRefetch]);
   const loadMore = useCallback(async (): Promise<void> => {
-    if (cursor === null || loadingMore) return;
-    const controller = new AbortController();
-    controllerRef.current = controller;
-    setLoadingMore(true);
-    setLoadMoreError(undefined);
-    try {
-      const page = await fetchPage(cursor, ledgerClient(), controller.signal);
-      setMore((prev) => ({ key, items: [...(prev.key === key ? prev.items : []), ...page.data], cursor: page.next_cursor }));
-    } catch (err) {
-      if (!isAbort(err)) setLoadMoreError(toLedgerError(err));
-    } finally {
-      if (!controller.signal.aborted) setLoadingMore(false);
-    }
-  }, [cursor, fetchPage, key, loadingMore]);
+    await fetchNextPage();
+  }, [fetchNextPage]);
 
-  const items = useMemo(() => [...(first.data?.data ?? []), ...extra.items], [first.data, extra.items]);
-  return { ...first, items, hasMore: cursor !== null && first.data !== undefined, loadingMore, loadMoreError, loadMore };
+  const first = q.data?.pages[0];
+  const firstFailed = q.isError && q.data === undefined;
+  const snap: QuerySnapshot<{ data: T[]; next_cursor: string | null }> = {
+    status: firstFailed ? 'error' : first !== undefined ? 'success' : key !== null ? 'loading' : 'idle',
+    data: first,
+    error: firstFailed ? q.error : undefined,
+    fetching: q.isFetching && !q.isFetchingNextPage,
+    updatedAt: q.dataUpdatedAt > 0 ? q.dataUpdatedAt : undefined,
+  };
+  return {
+    ...snap,
+    view: viewState(snap),
+    refetch,
+    items: q.data?.pages.flatMap((p) => p.data) ?? [],
+    hasMore: q.hasNextPage,
+    loadingMore: q.isFetchingNextPage,
+    loadMoreError: q.isFetchNextPageError ? q.error : undefined,
+    loadMore,
+  };
+}
+
+/* --- offset feeds (append) ----------------------------------------------------- */
+
+export interface OffsetFeedResult<T> extends QueryResult<OffsetPage<T>> {
+  items: T[];
+  hasMore: boolean;
+  loadingMore: boolean;
+  loadMoreError: LedgerError | undefined;
+  loadMore: () => Promise<void>;
+}
+
+/**
+ * An offset route read as an append-only feed ("Load older"), for timelines.
+ * Same failure rule as cursor feeds: a failed page keeps what's loaded.
+ */
+export function useOffsetFeed<T>(
+  key: string | null,
+  fetchPage: (page: { limit: number; offset: number }, client: LedgerClient, signal: AbortSignal) => Promise<OffsetPage<T>>,
+  pageSize = 20,
+): OffsetFeedResult<T> {
+  const q = useInfiniteQuery<OffsetPage<T>, LedgerError>({
+    queryKey: ['ledger', 'offset-feed', key, pageSize],
+    queryFn: ({ pageParam, signal }) => runRead((client, s) => fetchPage({ limit: pageSize, offset: pageParam as number }, client, s), false, signal),
+    initialPageParam: 0,
+    getNextPageParam: (last) => (last.has_more ? last.offset + last.data.length : undefined),
+    enabled: key !== null,
+  });
+  const { refetch: queryRefetch, fetchNextPage } = q;
+  const refetch = useCallback(async (): Promise<void> => {
+    await queryRefetch();
+  }, [queryRefetch]);
+  const loadMore = useCallback(async (): Promise<void> => {
+    await fetchNextPage();
+  }, [fetchNextPage]);
+  const first = q.data?.pages[0];
+  const firstFailed = q.isError && q.data === undefined;
+  const snap: QuerySnapshot<OffsetPage<T>> = {
+    status: firstFailed ? 'error' : first !== undefined ? 'success' : key !== null ? 'loading' : 'idle',
+    data: first,
+    error: firstFailed ? q.error : undefined,
+    fetching: q.isFetching && !q.isFetchingNextPage,
+    updatedAt: q.dataUpdatedAt > 0 ? q.dataUpdatedAt : undefined,
+  };
+  return {
+    ...snap,
+    view: viewState(snap),
+    refetch,
+    items: q.data?.pages.flatMap((p) => p.data) ?? [],
+    hasMore: q.hasNextPage,
+    loadingMore: q.isFetchingNextPage,
+    loadMoreError: q.isFetchNextPageError ? q.error : undefined,
+    loadMore,
+  };
 }
 
 /* --- small helpers ------------------------------------------------------------ */

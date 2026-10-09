@@ -1,0 +1,83 @@
+/*
+ * DataTable responsive rule (handoff README "Responsive"): below 640px table
+ * rows become cards. Each <td> carries data-label={column.label}, shown as the
+ * card's field label. The header collapses to a wrapping bar that keeps the
+ * select-all box, sortable headers and hinted headers; plain labels are hidden.
+ * !important is needed only where the component sets the property inline.
+ */
+@media (max-width: 639.98px) {
+  .em-datatable,
+  .em-datatable thead,
+  .em-datatable tbody {
+    display: block;
+    width: 100%;
+  }
+
+  .em-datatable thead {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--surface-card);
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .em-datatable thead tr {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    column-gap: 4px;
+  }
+
+  .em-datatable thead th {
+    display: flex;
+    align-items: center;
+    position: static !important;
+    width: auto !important;
+    border-bottom: 0 !important;
+  }
+
+  .em-datatable thead th:not(:has(button, [tabindex])) {
+    display: none;
+  }
+
+  .em-datatable tbody {
+    display: grid;
+    gap: 8px;
+    padding: 8px;
+    box-sizing: border-box;
+  }
+
+  .em-datatable tbody tr {
+    display: grid;
+    padding: 4px 0;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+  }
+
+  .em-datatable tbody td {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 32px;
+    height: auto !important;
+    border-bottom: 0 !important;
+    text-align: right !important;
+    white-space: normal !important;
+  }
+
+  .em-datatable tbody td:not([data-label]) {
+    justify-content: flex-start;
+  }
+
+  .em-datatable tbody td[data-label]::before {
+    content: attr(data-label);
+    flex: none;
+    font: var(--type-eyebrow);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: var(--tracking-wide);
+    color: var(--text-muted);
+    text-align: left;
+  }
+}

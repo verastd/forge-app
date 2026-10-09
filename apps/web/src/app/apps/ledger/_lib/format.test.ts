@@ -4,6 +4,8 @@ import { SaleSchema, offsetPage } from '@forge/upland-ledger';
 import { fixture } from './fixtures.test-helper';
 import {
   NONE,
+  formatClock,
+  formatClockUtc,
   formatCompact,
   formatDay,
   formatDuration,
@@ -11,6 +13,7 @@ import {
   formatInt,
   formatMultiple,
   formatPercent,
+  formatRate,
   formatRelative,
   formatShortDay,
   formatSignedPercent,
@@ -44,7 +47,7 @@ describe('numbers', () => {
     const [first] = sales.data;
     expect(formatUpx(first!.price_upx)).toBe('29,999 UPX');
     expect(formatUpx(first!.buyer_paid_upx)).toBe('31,499 UPX');
-    expect(formatUpx(12.5)).toBe('12.50 UPX');
+    expect(formatUpx(12.5)).toBe('13 UPX');
     expect(formatUpx(930858, { compact: true })).toBe('930.9K UPX');
     expect(formatUpx(500, { unit: false })).toBe('500');
   });
@@ -53,7 +56,10 @@ describe('numbers', () => {
     expect(formatUsd(7.99)).toBe('$7.99');
     expect(formatUsd(0.00017964548324589196)).toBe('$0.00018');
     expect(formatUsd(0)).toBe('$0.00');
-    expect(formatUpxPerUsd(5566.519)).toBe('5,567 UPX / $1');
+    expect(formatUpxPerUsd(5566.519)).toBe('5,566.52 UPX / $1');
+    expect(formatRate(4722.441503971466)).toBe('4,722.44');
+    expect(formatRate(null)).toBe(NONE);
+    expect(formatUpxPerUsd(undefined)).toBe(NONE);
   });
 
   it('treats a zero ratio as unknown (no mint price), and scales digits', () => {
@@ -67,14 +73,19 @@ describe('numbers', () => {
     expect(formatSignedPercent(-0.9744192)).toBe('−97.4%');
     expect(formatSignedPercent(0.06976744186046502)).toBe('+7.0%');
     expect(formatSignedPercent(0)).toBe('0.0%');
-    expect(formatPercent(1)).toBe('100%');
+    expect(formatPercent(1)).toBe('100.0%');
+    expect(formatPercent(0.5, 0)).toBe('50%');
     expect(formatPercent(null)).toBe(NONE);
   });
 });
 
 describe('time (always UTC)', () => {
   it('formats instants and days', () => {
-    expect(formatInstant('2026-10-09T00:12:28.000Z')).toBe('Oct 9, 2026 00:12 UTC');
+    expect(formatInstant('2026-10-09T00:12:28.000Z')).toBe('Oct 9, 2026 00:12:28 UTC');
+    expect(formatClockUtc('2026-10-09T14:02:11.000Z')).toBe('14:02:11 UTC');
+    expect(formatClockUtc(new Date(Date.UTC(2026, 0, 1, 1, 2, 3)))).toBe('01:02:03 UTC');
+    expect(formatClockUtc(null)).toBe(NONE);
+    expect(formatClock('2026-10-09T14:02:11.000Z')).toBe('14:02:11');
     expect(formatInstant(null)).toBe(NONE);
     expect(formatInstant('not a date')).toBe(NONE);
     expect(formatDay('2026-10-08')).toBe('Oct 8, 2026');

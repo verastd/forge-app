@@ -1,0 +1,34 @@
+/*
+ * AppShell responsive rules (handoff README "Below 1024px the sidebar becomes a
+ * native <dialog> drawer with 44px targets"). Everything else is inline in
+ * AppShell.tsx; only media queries live here because inline styles cannot
+ * express them. !important is needed only where an inline style must yield.
+ */
+@media (max-width: 1023.98px) {
+  .em-shell__sidebar {
+    display: none !important;
+  }
+  .em-shell__body {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
+
+/* The drawer covers the viewport itself (overlay + panel), so the UA backdrop stays clear. */
+.em-shell__drawer::backdrop {
+  background: transparent;
+}
+
+/* 44px touch targets for SidebarNav inside the drawer. */
+.em-shell__drawer .em-nav__group,
+.em-shell__drawer .em-nav__link {
+  min-height: 44px !important;
+}
+.em-shell__drawer .em-nav__fav {
+  right: 0 !important;
+  min-width: 44px;
+  min-height: 44px;
+  justify-content: center;
+}
+.em-shell__drawer .em-nav__item--fav .em-nav__link {
+  padding-right: 44px !important;
+}

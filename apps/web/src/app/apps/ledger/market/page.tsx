@@ -2,53 +2,51 @@
 
 /**
  * Market: recent sales, active listings, accepted offers and UPX/USD rates,
- * one tab at a time (only the open tab reads anything). Filters live in the
- * URL and carry across tabs where the route supports them:
- *   Sales     /sales      city, neighborhood, buyer, seller, price, sort
- *   Listings  /listings   city, neighborhood, book, open only, sort
- *   Offers    /offers     city, buyer, seller, sort        (no neighborhood filter)
- *   Rates     /market/upx-usd (heavy slot) + /rates         method
- * No route can filter by collection yet; the field says so instead of hiding.
+ * one at a time behind a Segment (only the open view reads anything). Each
+ * view is the kit's filter → panel → table composition. Filters live in the
+ * URL and carry across views where the route supports them:
+ *   Sales     /sales     city, neighborhood, buyer, seller, price, sort
+ *   Listings  /listings  city, neighborhood, book, open only, sort
+ *   Offers    /offers    city, buyer, seller, sort        (no neighborhood filter)
+ *   Rates     /market/upx-usd (heavy slot) + /rates       method
+ * No route can filter by collection yet; that field is shown disabled with
+ * its reason (DESIGN_SYSTEM.md: disabled controls always carry a reason).
  */
-
-import { useSearchParams } from 'next/navigation';
-import { Suspense, useMemo } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Badge, Block, Card, DataTable, FilterBar, FilterField, NumberField, PageHeader, Pager, Segment, Select, Skeleton, TextField, Toggle } from '@forge/ui';
+import type { Column } from '@forge/ui';
 import type { Listing, ListingParams, Offer, OfferParams, RateRow, Sale, SaleParams, UpxUsd } from '@forge/upland-ledger';
 import { RATE_METHODS } from '@forge/upland-ledger';
+import { Suspense, useMemo } from 'react';
 
-import { DataState } from '../_components/DataState';
-import { DataTable, ListPager, TableSkeleton } from '../_components/DataTable';
-import { FilterBar, NumberField, SelectField, SortFields, TextField, ToggleField, UnavailableField } from '../_components/FilterBar';
-import { LayerNote } from '../_components/Freshness';
-import { AccountLink, PropertyLink, TrxId, routes } from '../_components/links';
-import { RateChart } from '../_components/charts';
-import { Badge, Skeleton, SkeletonRows, Tabs } from '../_components/primitives';
-import { accountDraftError, countApplied, hrefWith, numberDraftError, readAccount, readEnum, readNumber, readText } from '../_lib/filters';
+import { accountDraftError, countApplied, hrefWith, readAccount, readEnum, readNumber, readText } from '../_lib/filters';
 import type { ParamSource } from '../_lib/filters';
-import { formatDay, formatInstant, formatInt, formatMultiple, formatUpx, formatUsd, NONE } from '../_lib/format';
+import { formatDay, formatInstant, formatInt, formatMultiple, formatRate, formatUpx, formatUsd, NONE } from '../_lib/format';
 import { useLedgerQuery, useOffsetPages } from '../_lib/hooks';
-import { rateSeries, rateSummary } from '../_lib/market';
+import type { OffsetPagesResult } from '../_lib/hooks';
+import { rateSeries } from '../_lib/market';
 import { queryKey } from '../_lib/query-core';
 import { useFilters } from '../_lib/useFilters';
+import { RateFigure } from '../_ui/RateFigure';
+import { Region } from '../_ui/Region';
+import { SearchFilterField } from '../_ui/fields';
+import { draftNumber, filterBarState, numberDraft } from '../_ui/filterbar';
+import { AccountLink, PropertyLink, TrxId, routes } from '../_ui/links';
 
-const TABS = ['sales', 'listings', 'offers', 'rates'] as const;
-type Tab = (typeof TABS)[number];
-const TAB_LABELS: Record<Tab, string> = { sales: 'Sales', listings: 'Listings', offers: 'Offers', rates: 'Rates' };
+const VIEWS = ['sales', 'listings', 'offers', 'rates'] as const;
+type View = (typeof VIEWS)[number];
+const VIEW_LABELS: Record<View, string> = { sales: 'Sales', listings: 'Listings', offers: 'Offers', rates: 'Rates' };
 const PAGE_SIZE = 25;
-const NO_COLLECTION = 'the ledger can’t filter sales, listings or offers by collection yet.';
-const NO_NEIGHBORHOOD_OFFERS = 'the offers route has no neighborhood filter.';
-
-const SKELETON_COLUMNS = [
-  { key: 'a', label: 'When' },
-  { key: 'b', label: 'Property' },
-  { key: 'c', label: 'City' },
-  { key: 'd', label: 'Price' },
-  { key: 'e', label: 'Account' },
-];
+const NO_COLLECTION = 'The ledger can’t filter sales, listings or offers by collection yet.';
+const NO_OFFER_NEIGHBORHOOD = 'The offers route has no neighborhood filter.';
+const DIR_OPTIONS = [
+  { value: 'asc', label: '↑', ariaLabel: 'Ascending' },
+  { value: 'desc', label: '↓', ariaLabel: 'Descending' },
+] as const;
 
 export default function MarketPage() {
   return (
-    <Suspense fallback={<SkeletonRows />}>
+    <Suspense fallback={<Skeleton height={240} />}>
       <Market />
     </Suspense>
   );
@@ -56,26 +54,40 @@ export default function MarketPage() {
 
 function Market() {
   const params = useSearchParams() ?? new URLSearchParams();
-  const tab: Tab = readEnum(params, 'tab', TABS) ?? 'sales';
+  const router = useRouter();
+  const view: View = readEnum(params, 'tab', VIEWS) ?? 'sales';
   const keep = { city: readText(params, 'city', 64), neighborhood: readText(params, 'neighborhood') };
-
   return (
     <>
-      <div className="em-page-head">
-        <div>
-          <h1 className="em-h1">Market</h1>
-          <p className="em-lede">What changed hands, what’s for sale, and what UPX is worth in dollars.</p>
-        </div>
-      </div>
-      <Tabs
-        label="Market views"
-        tabs={TABS.map((t) => ({ href: hrefWith(routes.market, { tab: t === 'sales' ? undefined : t, ...keep }), label: TAB_LABELS[t], current: t === tab }))}
+      <PageHeader
+        title="Market"
+        lede="What changed hands, what’s for sale, and what UPX is worth in dollars."
+        aside={
+          <Segment<View>
+            label="Market view"
+            value={view}
+            onChange={(v) => router.replace(hrefWith(routes.market, { tab: v === 'sales' ? undefined : v, ...keep }), { scroll: false })}
+            options={VIEWS.map((v) => ({ value: v, label: VIEW_LABELS[v] }))}
+          />
+        }
       />
-      {tab === 'sales' && <SalesTab params={params} />}
-      {tab === 'listings' && <ListingsTab params={params} />}
-      {tab === 'offers' && <OffersTab params={params} />}
-      {tab === 'rates' && <RatesTab params={params} />}
+      {view === 'sales' && <SalesView params={params} />}
+      {view === 'listings' && <ListingsView params={params} />}
+      {view === 'offers' && <OffersView params={params} />}
+      {view === 'rates' && <RatesView params={params} />}
     </>
+  );
+}
+
+function ListPager<T>({ list }: { list: OffsetPagesResult<T> }) {
+  return <Pager page={list.page} hasMore={list.hasMore} busy={list.paging} onPage={(n) => (n > list.page ? list.next() : list.previous())} />;
+}
+
+function CollectionField() {
+  return (
+    <FilterField label="Collection">
+      <Select size="dense" width={150} label="Collection" placeholder="Any collection" options={[]} disabledReason={NO_COLLECTION} />
+    </FilterField>
   );
 }
 
@@ -83,9 +95,21 @@ function Market() {
 
 const SALE_KEYS = ['city', 'neighborhood', 'buyer', 'seller', 'min_price', 'max_price', 'sort', 'order'] as const;
 const SALE_SORTS = ['timestamp', 'price_upx', 'price_to_mint'] as const;
+type SaleSort = (typeof SALE_SORTS)[number];
 
-function SalesTab({ params }: { params: ParamSource }) {
-  const filters = useFilters(SALE_KEYS, { tab: undefined });
+const SALE_COLUMNS: Column<Sale>[] = [
+  { key: 'timestamp', label: 'When', muted: true, sortable: true, render: (s) => formatInstant(s.timestamp) },
+  { key: 'property', label: 'Property', render: (s) => <PropertyLink id={s.property_id} label={s.address} /> },
+  { key: 'city', label: 'City', muted: true, render: (s) => s.city || NONE },
+  { key: 'price_upx', label: 'Price', num: true, sortable: true, render: (s) => formatUpx(s.price_upx) },
+  { key: 'price_to_mint', label: 'Price ÷ mint', num: true, sortable: true, hint: 'Sale price over the property’s mint price; — when no mint price is known', render: (s) => formatMultiple(s.price_to_mint) },
+  { key: 'buyer', label: 'Buyer', render: (s) => <AccountLink account={s.buyer} /> },
+  { key: 'seller', label: 'Seller', render: (s) => <AccountLink account={s.seller} /> },
+  { key: 'trx', label: 'Transaction', render: (s) => <TrxId id={s.trx_id} /> },
+];
+
+function SalesView({ params }: { params: ParamSource }) {
+  const filters = useFilters(SALE_KEYS);
   const request = useMemo<SaleParams>(
     () => ({
       city: readText(params, 'city', 64),
@@ -99,76 +123,77 @@ function SalesTab({ params }: { params: ParamSource }) {
     }),
     [params],
   );
-  const list = useOffsetPages<Sale>(queryKey('/sales', request), (page, c, signal) => c.sales.list({ ...request, ...page }, { signal }), {
-    pageSize: PAGE_SIZE,
-  });
+  const list = useOffsetPages<Sale>(queryKey('/sales', request), (page, c, signal) => c.sales.list({ ...request, ...page }, { signal }), { pageSize: PAGE_SIZE });
   const d = filters.draft;
-  const errors = {
-    buyer: accountDraftError(d.buyer),
-    seller: accountDraftError(d.seller),
-    min_price: numberDraftError(d.min_price),
-    max_price: numberDraftError(d.max_price),
-  };
+  const buyerError = accountDraftError(d.buyer);
+  const sellerError = accountDraftError(d.seller);
+  const applied = countApplied(request as Record<string, unknown>, ['city', 'neighborhood', 'buyer', 'seller', 'min_price', 'max_price']);
   return (
-    <section className="em-section" aria-labelledby="sales-h">
-      <div className="em-section-head">
-        <h2 id="sales-h" className="em-h3">
-          Recent sales
-        </h2>
-        <LayerNote layer="decoded" updatedAt={list.updatedAt} />
-      </div>
+    <>
       <FilterBar
-        label="Filter sales"
-        dirty={filters.dirty}
-        applying={list.fetching && list.paging === null}
-        invalid={Object.values(errors).find((e) => e !== null) ?? null}
-        appliedCount={countApplied(request as Record<string, unknown>, ['city', 'neighborhood', 'buyer', 'seller', 'min_price', 'max_price'])}
-        onApply={filters.apply}
+        state={filterBarState(filters.dirty, list.fetching && list.paging === null, applied)}
+        appliedCount={applied}
+        onApply={async () => {
+          if (buyerError || sellerError) throw new Error('Fix the account names first');
+          filters.apply();
+        }}
         onReset={filters.reset}
-        notes={[`Collection: ${NO_COLLECTION}`]}
       >
-        <TextField label="City" value={d.city} onChange={(v) => filters.set('city', v)} placeholder="e.g. Rome" maxLength={64} />
-        <TextField label="Neighborhood" value={d.neighborhood} onChange={(v) => filters.set('neighborhood', v)} />
-        <UnavailableField label="Collection" reason={NO_COLLECTION} />
-        <TextField label="Buyer account" value={d.buyer} onChange={(v) => filters.set('buyer', v)} error={errors.buyer} maxLength={13} />
-        <TextField label="Seller account" value={d.seller} onChange={(v) => filters.set('seller', v)} error={errors.seller} maxLength={13} />
-        <NumberField label="Min price" prefix="UPX" value={d.min_price} onChange={(v) => filters.set('min_price', v)} step={1000} />
-        <NumberField label="Max price" prefix="UPX" value={d.max_price} onChange={(v) => filters.set('max_price', v)} step={1000} />
-        <SortFields
-          value={SALE_SORTS.find((s) => s === d.sort) ?? 'timestamp'}
-          onChange={(v) => filters.set('sort', v)}
-          options={[
-            { value: 'timestamp', label: 'Time' },
-            { value: 'price_upx', label: 'Price' },
-            { value: 'price_to_mint', label: 'Price ÷ mint' },
-          ]}
-          dir={d.order === 'asc' ? 'asc' : 'desc'}
-          onDir={(v) => filters.set('order', v)}
-        />
-      </FilterBar>
-      <DataState query={list} label="sales" skeleton={<TableSkeleton columns={SKELETON_COLUMNS} rows={10} />} empty="No sales match these filters." emptyAction={{ label: 'Reset filters', onClick: filters.reset }}>
-        {() => (
-          <DataTable
-            caption="Sales"
-            sort={{ key: request.sort ?? 'timestamp', dir: request.order ?? 'desc' }}
-            onSort={(next) => filters.applyNow({ sort: next.key, order: next.dir })}
-            rows={list.rows}
-            rowKey={(s) => `${s.trx_id}:${s.property_id}`}
-            columns={[
-              { key: 'when', label: 'When', muted: true, sortKey: 'timestamp', render: (s) => formatInstant(s.timestamp) },
-              { key: 'property', label: 'Property', wrap: true, render: (s) => <PropertyLink id={s.property_id} label={s.address} /> },
-              { key: 'city', label: 'City', muted: true, render: (s) => s.city || NONE },
-              { key: 'price', label: 'Price', num: true, sortKey: 'price_upx', render: (s) => formatUpx(s.price_upx) },
-              { key: 'ratio', label: 'Price ÷ mint', num: true, sortKey: 'price_to_mint', render: (s) => formatMultiple(s.price_to_mint) },
-              { key: 'buyer', label: 'Buyer', render: (s) => <AccountLink account={s.buyer} /> },
-              { key: 'seller', label: 'Seller', render: (s) => <AccountLink account={s.seller} /> },
-              { key: 'trx', label: 'Transaction', render: (s) => <TrxId id={s.trx_id} /> },
+        <FilterField label="City">
+          <SearchFilterField kind="city" label="City" value={d.city} onChange={(v) => filters.set('city', v)} width={180} />
+        </FilterField>
+        <FilterField label="Neighborhood">
+          <SearchFilterField kind="neighborhood" label="Neighborhood" value={d.neighborhood} onChange={(v) => filters.set('neighborhood', v)} width={200} />
+        </FilterField>
+        <CollectionField />
+        <TextField label="Buyer account" value={d.buyer} onChange={(v) => filters.set('buyer', v)} error={buyerError} mono maxLength={13} width={150} />
+        <TextField label="Seller account" value={d.seller} onChange={(v) => filters.set('seller', v)} error={sellerError} mono maxLength={13} width={150} />
+        <FilterField label="Sort">
+          <Select<SaleSort>
+            size="dense"
+            width={140}
+            label="Sort"
+            value={SALE_SORTS.find((s) => s === d.sort) ?? 'timestamp'}
+            onChange={(v) => filters.set('sort', v)}
+            options={[
+              { value: 'timestamp', label: 'Time' },
+              { value: 'price_upx', label: 'Price' },
+              { value: 'price_to_mint', label: 'Price ÷ mint' },
             ]}
-            footer={<ListPager list={list} />}
           />
-        )}
-      </DataState>
-    </section>
+        </FilterField>
+        <FilterField label="Dir">
+          <Segment size="dense" label="Sort direction" value={d.order === 'asc' ? 'asc' : 'desc'} onChange={(v) => filters.set('order', v)} options={DIR_OPTIONS} />
+        </FilterField>
+      </FilterBar>
+
+      <Block id="sale-bounds" title="Min / Max" note="Empty means no bound">
+        <Card style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 12 }}>
+          <NumberField label="Min price" prefix="UPX" min={0} step={1000} width="100%" value={draftNumber(d.min_price)} onCommit={(v) => filters.set('min_price', numberDraft(v))} />
+          <NumberField label="Max price" prefix="UPX" min={0} step={1000} width="100%" value={draftNumber(d.max_price)} onCommit={(v) => filters.set('max_price', numberDraft(v))} />
+        </Card>
+      </Block>
+
+      <Block id="sales" title="Recent sales" note="Decoded events · every 15 min">
+        <Region
+          query={list}
+          skeleton={<DataTable<Sale> columns={SALE_COLUMNS} rows={[]} loading skeletonRows={10} />}
+          emptyMessage="No sales match these filters."
+          emptyAction={applied > 0 ? { label: 'Reset filters', onClick: filters.reset } : undefined}
+        >
+          {() => (
+            <DataTable<Sale>
+              columns={SALE_COLUMNS}
+              rows={list.rows}
+              rowKey={(s) => `${s.trx_id}:${s.property_id}`}
+              sort={{ key: request.sort ?? 'timestamp', dir: request.order ?? 'desc' }}
+              onSort={(s) => filters.applyNow({ sort: s.key, order: s.dir })}
+              footer={<ListPager list={list} />}
+            />
+          )}
+        </Region>
+      </Block>
+    </>
   );
 }
 
@@ -176,8 +201,20 @@ function SalesTab({ params }: { params: ParamSource }) {
 
 const LISTING_KEYS = ['city', 'neighborhood', 'book', 'open', 'sort', 'order'] as const;
 const LISTING_SORTS = ['timestamp', 'ask_upx', 'ask_fiat', 'ask_to_mint'] as const;
+type ListingSort = (typeof LISTING_SORTS)[number];
+type Book = 'any' | 'upx' | 'fiat';
 
-function ListingsTab({ params }: { params: ParamSource }) {
+const LISTING_COLUMNS: Column<Listing>[] = [
+  { key: 'timestamp', label: 'Listed', muted: true, sortable: true, render: (l) => formatInstant(l.timestamp) },
+  { key: 'property', label: 'Property', render: (l) => <PropertyLink id={l.property_id} label={l.address} /> },
+  { key: 'city', label: 'City', muted: true, render: (l) => l.city || NONE },
+  { key: 'ask', label: 'Ask', num: true, render: (l) => (l.ask_upx > 0 ? formatUpx(l.ask_upx) : l.ask_fiat > 0 ? formatUsd(l.ask_fiat) : NONE) },
+  { key: 'book', label: 'Book', render: (l) => <Badge>{l.ask_upx > 0 ? 'UPX' : 'USD'}</Badge> },
+  { key: 'ask_to_mint', label: 'Ask ÷ mint', num: true, sortable: true, render: (l) => formatMultiple(l.ask_to_mint) },
+  { key: 'seller', label: 'Seller', render: (l) => <AccountLink account={l.seller} /> },
+];
+
+function ListingsView({ params }: { params: ParamSource }) {
   const filters = useFilters(LISTING_KEYS, { tab: 'listings' });
   const request = useMemo<ListingParams>(() => {
     const sort = readEnum(params, 'sort', LISTING_SORTS) ?? 'timestamp';
@@ -191,81 +228,80 @@ function ListingsTab({ params }: { params: ParamSource }) {
       order: readEnum(params, 'order', ['asc', 'desc'] as const) ?? (sort === 'timestamp' ? 'desc' : 'asc'),
     };
   }, [params]);
-  const list = useOffsetPages<Listing>(queryKey('/listings', request), (page, c, signal) => c.listings.list({ ...request, ...page }, { signal }), {
-    pageSize: PAGE_SIZE,
-  });
+  const list = useOffsetPages<Listing>(queryKey('/listings', request), (page, c, signal) => c.listings.list({ ...request, ...page }, { signal }), { pageSize: PAGE_SIZE });
   const d = filters.draft;
+  const applied = countApplied({ ...request, open: request.open ? undefined : 'all' } as Record<string, unknown>, ['city', 'neighborhood', 'book', 'open']);
+  const draftSort = LISTING_SORTS.find((s) => s === d.sort) ?? 'timestamp';
   return (
-    <section className="em-section" aria-labelledby="listings-h">
-      <div className="em-section-head">
-        <h2 id="listings-h" className="em-h3">
-          {request.open ? 'Active listings' : 'All listings'}
-        </h2>
-        <LayerNote layer="decoded" updatedAt={list.updatedAt} />
-      </div>
-      <FilterBar
-        label="Filter listings"
-        dirty={filters.dirty}
-        applying={list.fetching && list.paging === null}
-        appliedCount={countApplied({ ...request, open: request.open ? undefined : 'all' } as Record<string, unknown>, ['city', 'neighborhood', 'book', 'open'])}
-        onApply={filters.apply}
-        onReset={filters.reset}
-        notes={[`Collection: ${NO_COLLECTION}`]}
-      >
-        <TextField label="City" value={d.city} onChange={(v) => filters.set('city', v)} placeholder="e.g. Miami" maxLength={64} />
-        <TextField label="Neighborhood" value={d.neighborhood} onChange={(v) => filters.set('neighborhood', v)} />
-        <UnavailableField label="Collection" reason={NO_COLLECTION} />
-        <SelectField
-          label="Priced in"
-          value={d.book === 'upx' || d.book === 'fiat' ? d.book : 'any'}
-          onChange={(v) => filters.set('book', v === 'any' ? '' : v)}
-          options={[
-            { value: 'any', label: 'UPX or USD' },
-            { value: 'upx', label: 'UPX' },
-            { value: 'fiat', label: 'USD' },
-          ]}
-        />
-        <SortFields
-          value={LISTING_SORTS.find((s) => s === d.sort) ?? 'timestamp'}
-          onChange={(v) => filters.set('sort', v)}
-          options={[
-            { value: 'timestamp', label: 'Listed' },
-            { value: 'ask_upx', label: 'UPX ask' },
-            { value: 'ask_fiat', label: 'USD ask' },
-            { value: 'ask_to_mint', label: 'Ask ÷ mint' },
-          ]}
-          dir={d.order === 'asc' || d.order === 'desc' ? d.order : (d.sort || 'timestamp') === 'timestamp' ? 'desc' : 'asc'}
-          onDir={(v) => filters.set('order', v)}
-        />
-        <ToggleField label="Still open only" checked={d.open !== '0'} onChange={(on) => filters.set('open', on ? '' : '0')} />
-      </FilterBar>
-      <DataState query={list} label="listings" skeleton={<TableSkeleton columns={SKELETON_COLUMNS} rows={10} />} empty="No listings match these filters." emptyAction={{ label: 'Reset filters', onClick: filters.reset }}>
-        {() => (
-          <DataTable
-            caption="Listings"
-            sort={{ key: request.sort ?? 'timestamp', dir: request.order ?? 'desc' }}
-            onSort={(next) => filters.applyNow({ sort: next.key, order: next.dir })}
-            rows={list.rows}
-            rowKey={(l, i) => `${l.property_id}:${l.timestamp ?? ''}:${i}`}
-            columns={[
-              { key: 'when', label: 'Listed', muted: true, sortKey: 'timestamp', render: (l) => formatInstant(l.timestamp) },
-              { key: 'property', label: 'Property', wrap: true, render: (l) => <PropertyLink id={l.property_id} label={l.address} /> },
-              { key: 'city', label: 'City', muted: true, render: (l) => l.city || NONE },
-              {
-                key: 'ask',
-                label: 'Ask',
-                num: true,
-                render: (l) => (l.ask_upx > 0 ? formatUpx(l.ask_upx) : l.ask_fiat > 0 ? formatUsd(l.ask_fiat) : NONE),
-              },
-              { key: 'book', label: 'Book', render: (l) => <Badge>{l.ask_upx > 0 ? 'UPX' : 'USD'}</Badge> },
-              { key: 'ratio', label: 'Ask ÷ mint', num: true, sortKey: 'ask_to_mint', render: (l) => formatMultiple(l.ask_to_mint) },
-              { key: 'seller', label: 'Seller', render: (l) => <AccountLink account={l.seller} /> },
+    <>
+      <FilterBar state={filterBarState(filters.dirty, list.fetching && list.paging === null, applied)} appliedCount={applied} onApply={async () => filters.apply()} onReset={filters.reset}>
+        <FilterField label="City">
+          <SearchFilterField kind="city" label="City" value={d.city} onChange={(v) => filters.set('city', v)} width={180} />
+        </FilterField>
+        <FilterField label="Neighborhood">
+          <SearchFilterField kind="neighborhood" label="Neighborhood" value={d.neighborhood} onChange={(v) => filters.set('neighborhood', v)} width={200} />
+        </FilterField>
+        <CollectionField />
+        <FilterField label="Priced in">
+          <Segment<Book>
+            size="dense"
+            label="Priced in"
+            value={d.book === 'upx' || d.book === 'fiat' ? d.book : 'any'}
+            onChange={(v) => filters.set('book', v === 'any' ? '' : v)}
+            options={[
+              { value: 'any', label: 'Any' },
+              { value: 'upx', label: 'UPX' },
+              { value: 'fiat', label: 'USD' },
             ]}
-            footer={<ListPager list={list} />}
           />
-        )}
-      </DataState>
-    </section>
+        </FilterField>
+        <FilterField label="Sort">
+          <Select<ListingSort>
+            size="dense"
+            width={140}
+            label="Sort"
+            value={draftSort}
+            onChange={(v) => filters.set('sort', v)}
+            options={[
+              { value: 'timestamp', label: 'Listed' },
+              { value: 'ask_upx', label: 'UPX ask' },
+              { value: 'ask_fiat', label: 'USD ask' },
+              { value: 'ask_to_mint', label: 'Ask ÷ mint' },
+            ]}
+          />
+        </FilterField>
+        <FilterField label="Dir">
+          <Segment
+            size="dense"
+            label="Sort direction"
+            value={d.order === 'asc' || d.order === 'desc' ? d.order : draftSort === 'timestamp' ? 'desc' : 'asc'}
+            onChange={(v) => filters.set('order', v)}
+            options={DIR_OPTIONS}
+          />
+        </FilterField>
+        <Toggle label="Still open only" checked={d.open !== '0'} onChange={(on) => filters.set('open', on ? '' : '0')} style={{ alignSelf: 'center', marginTop: 12 }} />
+      </FilterBar>
+
+      <Block id="listings" title={request.open ? 'Active listings' : 'All listings'} note="Decoded events · every 15 min">
+        <Region
+          query={list}
+          skeleton={<DataTable<Listing> columns={LISTING_COLUMNS} rows={[]} loading skeletonRows={10} />}
+          emptyMessage="No listings match these filters."
+          emptyAction={applied > 0 ? { label: 'Reset filters', onClick: filters.reset } : undefined}
+        >
+          {() => (
+            <DataTable<Listing>
+              columns={LISTING_COLUMNS}
+              rows={list.rows}
+              rowKey={(l) => `${l.property_id}:${l.timestamp ?? ''}:${l.seller}`}
+              sort={{ key: request.sort ?? 'timestamp', dir: request.order ?? 'desc' }}
+              onSort={(s) => filters.applyNow({ sort: s.key, order: s.dir })}
+              footer={<ListPager list={list} />}
+            />
+          )}
+        </Region>
+      </Block>
+    </>
   );
 }
 
@@ -273,8 +309,19 @@ function ListingsTab({ params }: { params: ParamSource }) {
 
 const OFFER_KEYS = ['city', 'buyer', 'seller', 'sort', 'order'] as const;
 const OFFER_SORTS = ['timestamp', 'price_upx', 'price_to_mint'] as const;
+type OfferSort = (typeof OFFER_SORTS)[number];
 
-function OffersTab({ params }: { params: ParamSource }) {
+const OFFER_COLUMNS: Column<Offer>[] = [
+  { key: 'timestamp', label: 'When', muted: true, sortable: true, render: (o) => formatInstant(o.timestamp) },
+  { key: 'property', label: 'Property', render: (o) => <PropertyLink id={o.property_id} label={o.address} /> },
+  { key: 'city', label: 'City', muted: true, render: (o) => o.city || NONE },
+  { key: 'price_upx', label: 'Price', num: true, sortable: true, render: (o) => formatUpx(o.price_upx) },
+  { key: 'price_to_mint', label: 'Price ÷ mint', num: true, sortable: true, render: (o) => formatMultiple(o.price_to_mint) },
+  { key: 'buyer', label: 'Buyer', render: (o) => <AccountLink account={o.buyer} username={o.buyer_username} /> },
+  { key: 'seller', label: 'Seller', hint: 'The seller is the one who accepted the offer', render: (o) => <AccountLink account={o.seller} /> },
+];
+
+function OffersView({ params }: { params: ParamSource }) {
   const filters = useFilters(OFFER_KEYS, { tab: 'offers', neighborhood: undefined });
   const request = useMemo<OfferParams>(
     () => ({
@@ -286,72 +333,68 @@ function OffersTab({ params }: { params: ParamSource }) {
     }),
     [params],
   );
-  const list = useOffsetPages<Offer>(queryKey('/offers', request), (page, c, signal) => c.offers.list({ ...request, ...page }, { signal }), {
-    pageSize: PAGE_SIZE,
-  });
+  const list = useOffsetPages<Offer>(queryKey('/offers', request), (page, c, signal) => c.offers.list({ ...request, ...page }, { signal }), { pageSize: PAGE_SIZE });
   const d = filters.draft;
-  const errors = { buyer: accountDraftError(d.buyer), seller: accountDraftError(d.seller) };
+  const buyerError = accountDraftError(d.buyer);
+  const sellerError = accountDraftError(d.seller);
+  const applied = countApplied(request as Record<string, unknown>, ['city', 'buyer', 'seller']);
   return (
-    <section className="em-section" aria-labelledby="offers-h">
-      <div className="em-section-head">
-        <h2 id="offers-h" className="em-h3">
-          Accepted offers
-        </h2>
-        <LayerNote layer="market" updatedAt={list.updatedAt} />
-      </div>
-      <p className="em-caption">
-        Off-book sales, where a seller accepted a buyer’s offer. They never appear under Sales, and their prices often have little to do with the
-        order book.
-      </p>
+    <>
       <FilterBar
-        label="Filter offers"
-        dirty={filters.dirty}
-        applying={list.fetching && list.paging === null}
-        invalid={Object.values(errors).find((e) => e !== null) ?? null}
-        appliedCount={countApplied(request as Record<string, unknown>, ['city', 'buyer', 'seller'])}
-        onApply={filters.apply}
+        state={filterBarState(filters.dirty, list.fetching && list.paging === null, applied)}
+        appliedCount={applied}
+        onApply={async () => {
+          if (buyerError || sellerError) throw new Error('Fix the account names first');
+          filters.apply();
+        }}
         onReset={filters.reset}
-        notes={[`Neighborhood: ${NO_NEIGHBORHOOD_OFFERS}`, `Collection: ${NO_COLLECTION}`]}
       >
-        <TextField label="City" value={d.city} onChange={(v) => filters.set('city', v)} placeholder="e.g. Singapore" maxLength={64} />
-        <UnavailableField label="Neighborhood" reason={NO_NEIGHBORHOOD_OFFERS} />
-        <UnavailableField label="Collection" reason={NO_COLLECTION} />
-        <TextField label="Buyer account" value={d.buyer} onChange={(v) => filters.set('buyer', v)} error={errors.buyer} maxLength={13} />
-        <TextField label="Seller account" value={d.seller} onChange={(v) => filters.set('seller', v)} error={errors.seller} maxLength={13} />
-        <SortFields
-          value={OFFER_SORTS.find((s) => s === d.sort) ?? 'timestamp'}
-          onChange={(v) => filters.set('sort', v)}
-          options={[
-            { value: 'timestamp', label: 'Time' },
-            { value: 'price_upx', label: 'Price' },
-            { value: 'price_to_mint', label: 'Price ÷ mint' },
-          ]}
-          dir={d.order === 'asc' ? 'asc' : 'desc'}
-          onDir={(v) => filters.set('order', v)}
-        />
-      </FilterBar>
-      <DataState query={list} label="offers" skeleton={<TableSkeleton columns={SKELETON_COLUMNS} rows={10} />} empty="No accepted offers match these filters." emptyAction={{ label: 'Reset filters', onClick: filters.reset }}>
-        {() => (
-          <DataTable
-            caption="Accepted offers"
-            sort={{ key: request.sort ?? 'timestamp', dir: request.order ?? 'desc' }}
-            onSort={(next) => filters.applyNow({ sort: next.key, order: next.dir })}
-            rows={list.rows}
-            rowKey={(o) => `${o.offer_id}:${o.trx_id}`}
-            columns={[
-              { key: 'when', label: 'When', muted: true, sortKey: 'timestamp', render: (o) => formatInstant(o.timestamp) },
-              { key: 'property', label: 'Property', wrap: true, render: (o) => <PropertyLink id={o.property_id} label={o.address} /> },
-              { key: 'city', label: 'City', muted: true, render: (o) => o.city || NONE },
-              { key: 'price', label: 'Price', num: true, sortKey: 'price_upx', render: (o) => formatUpx(o.price_upx) },
-              { key: 'ratio', label: 'Price ÷ mint', num: true, sortKey: 'price_to_mint', render: (o) => formatMultiple(o.price_to_mint) },
-              { key: 'buyer', label: 'Buyer', render: (o) => <AccountLink account={o.buyer} username={o.buyer_username} /> },
-              { key: 'seller', label: 'Seller (accepted)', render: (o) => <AccountLink account={o.seller} /> },
+        <FilterField label="City">
+          <SearchFilterField kind="city" label="City" value={d.city} onChange={(v) => filters.set('city', v)} width={180} />
+        </FilterField>
+        <TextField label="Neighborhood" value="" onChange={() => undefined} disabledReason={NO_OFFER_NEIGHBORHOOD} placeholder="Not available" width={160} />
+        <CollectionField />
+        <TextField label="Buyer account" value={d.buyer} onChange={(v) => filters.set('buyer', v)} error={buyerError} mono maxLength={13} width={150} />
+        <TextField label="Seller account" value={d.seller} onChange={(v) => filters.set('seller', v)} error={sellerError} mono maxLength={13} width={150} />
+        <FilterField label="Sort">
+          <Select<OfferSort>
+            size="dense"
+            width={140}
+            label="Sort"
+            value={OFFER_SORTS.find((s) => s === d.sort) ?? 'timestamp'}
+            onChange={(v) => filters.set('sort', v)}
+            options={[
+              { value: 'timestamp', label: 'Time' },
+              { value: 'price_upx', label: 'Price' },
+              { value: 'price_to_mint', label: 'Price ÷ mint' },
             ]}
-            footer={<ListPager list={list} />}
           />
-        )}
-      </DataState>
-    </section>
+        </FilterField>
+        <FilterField label="Dir">
+          <Segment size="dense" label="Sort direction" value={d.order === 'asc' ? 'asc' : 'desc'} onChange={(v) => filters.set('order', v)} options={DIR_OPTIONS} />
+        </FilterField>
+      </FilterBar>
+
+      <Block id="offers" title="Accepted offers" note="Off-book sales a seller accepted; never in Sales · market layer">
+        <Region
+          query={list}
+          skeleton={<DataTable<Offer> columns={OFFER_COLUMNS} rows={[]} loading skeletonRows={10} />}
+          emptyMessage="No accepted offers match these filters."
+          emptyAction={applied > 0 ? { label: 'Reset filters', onClick: filters.reset } : undefined}
+        >
+          {() => (
+            <DataTable<Offer>
+              columns={OFFER_COLUMNS}
+              rows={list.rows}
+              rowKey={(o) => `${o.offer_id}:${o.trx_id}`}
+              sort={{ key: request.sort ?? 'timestamp', dir: request.order ?? 'desc' }}
+              onSort={(s) => filters.applyNow({ sort: s.key, order: s.dir })}
+              footer={<ListPager list={list} />}
+            />
+          )}
+        </Region>
+      </Block>
+    </>
   );
 }
 
@@ -359,97 +402,68 @@ function OffersTab({ params }: { params: ParamSource }) {
 
 const RATE_KEYS = ['method'] as const;
 const RATE_DAYS = 90;
+type MethodChoice = 'preferred' | (typeof RATE_METHODS)[number];
 
-function RatesTab({ params }: { params: ParamSource }) {
+const RATE_COLUMNS: Column<RateRow>[] = [
+  { key: 'day', label: 'Day', render: (r) => formatDay(r.day) },
+  { key: 'method', label: 'Method', mono: true, render: (r) => r.method },
+  { key: 'rate', label: 'UPX per $1', num: true, render: (r) => formatRate(r.upx_per_usd) },
+  { key: 'band', label: 'p25–p75', num: true, render: (r) => `${formatRate(r.p25)}–${formatRate(r.p75)}` },
+  { key: 'samples', label: 'Samples', num: true, render: (r) => formatInt(r.samples) },
+  { key: 'cities', label: 'Cities', num: true, render: (r) => formatInt(r.cities) },
+  { key: 'listings', label: 'UPX / USD listings', num: true, render: (r) => `${formatInt(r.upx_listings)} / ${formatInt(r.fiat_listings)}` },
+];
+
+function RatesView({ params }: { params: ParamSource }) {
   const filters = useFilters(RATE_KEYS, { tab: 'rates' });
   const method = readEnum(params, 'method', RATE_METHODS);
-  const chart = useLedgerQuery<UpxUsd>(
-    queryKey('/market/upx-usd', { method, limit: RATE_DAYS }),
-    (c, signal) => c.market.upxUsd({ method, limit: RATE_DAYS }, { signal }),
-    { heavy: true, isEmpty: (d) => d.points.length === 0 },
-  );
-  const rows = useOffsetPages<RateRow>(queryKey('/rates', { method }), (page, c, signal) => c.rates.list({ method, ...page }, { signal }), {
-    pageSize: PAGE_SIZE,
+  const chart = useLedgerQuery<UpxUsd>(queryKey('/market/upx-usd', { method, limit: RATE_DAYS }), (c, signal) => c.market.upxUsd({ method, limit: RATE_DAYS }, { signal }), {
+    heavy: true,
+    isEmpty: (d) => d.points.length === 0,
   });
-  const shownMethod = method ?? chart.data?.preferred;
-  const series = chart.data && shownMethod ? rateSeries(chart.data, shownMethod) : [];
-  const summary = rateSummary(series);
+  const rows = useOffsetPages<RateRow>(queryKey('/rates', { method }), (page, c, signal) => c.rates.list({ method, ...page }, { signal }), { pageSize: PAGE_SIZE });
+  const shown = method ?? chart.data?.preferred;
+  const series = chart.data && shown ? rateSeries(chart.data, shown) : [];
   return (
     <>
       <FilterBar
-        label="Choose a rate method"
-        dirty={filters.dirty}
-        applying={(chart.fetching || rows.fetching) && rows.paging === null}
+        state={filterBarState(filters.dirty, (chart.fetching || rows.fetching) && rows.paging === null, method ? 1 : 0)}
         appliedCount={method ? 1 : 0}
-        onApply={filters.apply}
+        onApply={async () => filters.apply()}
         onReset={filters.reset}
       >
-        <SelectField
-          label="Method"
-          value={RATE_METHODS.find((m) => m === filters.draft.method) ?? 'preferred'}
-          onChange={(v) => filters.set('method', v === 'preferred' ? '' : v)}
-          options={[{ value: 'preferred', label: 'Ledger’s preferred' }, ...RATE_METHODS.map((m) => ({ value: m, label: m }))]}
-        />
+        <FilterField label="Method">
+          <Select<MethodChoice>
+            size="dense"
+            width={200}
+            label="Rate method"
+            value={RATE_METHODS.find((m) => m === filters.draft.method) ?? 'preferred'}
+            onChange={(v) => filters.set('method', v === 'preferred' ? '' : v)}
+            options={[{ value: 'preferred', label: 'Ledger’s preferred' }, ...RATE_METHODS.map((m) => ({ value: m, label: m }))]}
+          />
+        </FilterField>
       </FilterBar>
 
-      <section className="em-section" aria-labelledby="rate-chart-h">
-        <div className="em-section-head">
-          <h2 id="rate-chart-h" className="em-h3">
-            UPX per $1, last {RATE_DAYS} days
-          </h2>
-          <LayerNote layer="market" updatedAt={chart.updatedAt} />
-        </div>
-        <div className="em-card">
-          <DataState query={chart} label="the rate chart" skeleton={<Skeleton height={260} />} empty="No rate points for this method yet.">
-            {(d) => (
-              <div style={{ display: 'grid', gap: 10 }}>
-                <p className="em-caption">
-                  Method <code>{shownMethod}</code>
-                  {shownMethod === d.preferred ? ' (the ledger’s preferred method)' : ''}.{' '}
-                  {d.spread !== null && <>Spread between methods today: {formatInt(d.spread)} UPX. </>}
-                  {d.notes.join(' ')}
-                </p>
-                {series.length === 0 ? (
-                  <p className="em-state">No points for {shownMethod} in this window.</p>
-                ) : (
-                  <RateChart
-                    series={series}
-                    label={summary ? `UPX per US dollar by ${shownMethod}, latest ${formatInt(summary.upxPerUsd)} on ${formatDay(summary.day)}` : 'UPX per US dollar'}
-                  />
-                )}
-              </div>
-            )}
-          </DataState>
-        </div>
-      </section>
-
-      <section className="em-section" aria-labelledby="rate-rows-h">
-        <div className="em-section-head">
-          <h2 id="rate-rows-h" className="em-h3">
-            Daily rate rows
-          </h2>
-          <span className="em-caption">/rates, newest first</span>
-        </div>
-        <DataState query={rows} label="rate rows" skeleton={<TableSkeleton columns={SKELETON_COLUMNS} rows={8} />} empty="No rate rows for this method.">
-          {() => (
-            <DataTable
-              caption="Daily UPX/USD rate rows"
-              rows={rows.rows}
-              rowKey={(r) => `${r.day}:${r.method}`}
-              columns={[
-                { key: 'day', label: 'Day', render: (r) => formatDay(r.day) },
-                { key: 'method', label: 'Method', mono: true, render: (r) => r.method },
-                { key: 'rate', label: 'UPX per $1', num: true, render: (r) => formatInt(r.upx_per_usd) },
-                { key: 'band', label: 'p25–p75', num: true, render: (r) => `${formatInt(r.p25)}–${formatInt(r.p75)}` },
-                { key: 'samples', label: 'Samples', num: true, render: (r) => formatInt(r.samples) },
-                { key: 'cities', label: 'Cities', num: true, render: (r) => formatInt(r.cities) },
-                { key: 'listings', label: 'UPX / USD listings', num: true, render: (r) => `${formatInt(r.upx_listings)} / ${formatInt(r.fiat_listings)}` },
-              ]}
-              footer={<ListPager list={rows} />}
-            />
+      <Block id="rate-chart" title={`UPX per $1, last ${RATE_DAYS} days`} note="Market layer · rebuilt every 6 h at :17">
+        <Region query={chart} skeleton={<Skeleton height={300} />} emptyMessage="No rate points for this method yet.">
+          {(d) => (
+            <Card>
+              <span style={{ font: 'var(--type-caption)', color: 'var(--text-muted)' }}>
+                Method <code>{shown}</code>
+                {shown === d.preferred ? ' (the ledger’s preferred method)' : ''}
+                {d.spread !== null ? ` · spread between methods today ${formatRate(d.spread)} UPX` : ''} · {d.notes.join(' ')}
+              </span>
+              {series.length === 0 ? <p style={{ margin: 0 }}>No points for {shown} in this window.</p> : <RateFigure series={series} method={shown} />}
+            </Card>
           )}
-        </DataState>
-      </section>
+        </Region>
+      </Block>
+
+      <Block id="rate-rows" title="Daily rate rows" note="/rates, newest first">
+        <Region query={rows} skeleton={<DataTable<RateRow> columns={RATE_COLUMNS} rows={[]} loading skeletonRows={8} />} emptyMessage="No rate rows for this method.">
+          {() => <DataTable<RateRow> columns={RATE_COLUMNS} rows={rows.rows} rowKey={(r) => `${r.day}:${r.method}`} footer={<ListPager list={rows} />} />}
+        </Region>
+      </Block>
     </>
   );
 }

@@ -2,252 +2,222 @@
 
 /**
  * Overview: chain status and data freshness, the UPX/USD rate and the top
- * cities. Reads, in order:
+ * cities, composed like the kit screens (PageHeader with LiveIndicator, a
+ * StatTile row, Blocks of Cards and DataTables). Reads, in order:
  *   /status                      (cheap, immediately)
  *   /analytics/overview          (heavy slot)
  *   /market/upx-usd?limit=90     (heavy slot, after the one above)
  *   /market/cities?after=…       (heavy slot, only once scrolled near)
  * The heavy slot runs one at a time, so a page load never fires a burst.
  */
-
+import { Block, Card, DataTable, FactList, LiveIndicator, PageHeader, Skeleton, Sparkline, StatTile, TileRow } from '@forge/ui';
+import type { Column, LiveStatus } from '@forge/ui';
+import type { CityDay, Overview, Status, UpxUsd } from '@forge/upland-ledger';
 import Link from 'next/link';
 import { useRef } from 'react';
-import type { ReactNode } from 'react';
-import type { CityDay, Overview, Status, UpxUsd } from '@forge/upland-ledger';
 
-import { DataState } from './_components/DataState';
-import { DataTable, TableSkeleton } from './_components/DataTable';
-import { ChainStatus, LayerNote } from './_components/Freshness';
-import { LedgerSignIn } from './_components/LedgerSignIn';
-import { RateChart, Sparkline } from './_components/charts';
-import { routes } from './_components/links';
-import { LiveDot, Skeleton, StatTile } from './_components/primitives';
 import { hrefWith } from './_lib/filters';
-import {
-  formatCompact,
-  formatDay,
-  formatDuration,
-  formatInt,
-  formatSignedPercent,
-  formatUpx,
-  formatUsd,
-  utcDayOffset,
-} from './_lib/format';
+import { formatClock, formatDay, formatDuration, formatInstant, formatInt, formatRate, formatShortDay, formatUpx, utcDayOffset } from './_lib/format';
 import { useInView, useLedgerQuery } from './_lib/hooks';
-import { chainFreshness, DATA_LAYERS, rateSeries, rateSummary, rollupCities } from './_lib/market';
-import type { CityRollup } from './_lib/market';
+import { DATA_LAYERS, chainFreshness, rateSeries, rateSummary, rollupCities } from './_lib/market';
+import type { CityRollup, DataLayer } from './_lib/market';
 import { queryKey } from './_lib/query-core';
+import { RateFigure } from './_ui/RateFigure';
+import { Region } from './_ui/Region';
+import { SignInPrompt } from './_ui/SignIn';
+import { routes } from './_ui/links';
 
 const RATE_DAYS = 90;
 const CITY_DAYS = 7;
 const TOP_CITIES = 10;
 
-const CITY_COLUMNS = [
-  { key: 'city', label: 'City' },
-  { key: 'sales', label: `Sales (${CITY_DAYS} d)` },
-  { key: 'trend', label: 'Daily sales' },
-  { key: 'volume', label: 'Volume' },
-  { key: 'median', label: 'Median sale' },
-  { key: 'ask', label: 'Median ask' },
-];
-
 export default function OverviewPage() {
   const status = useLedgerQuery<Status>('/status', (c, signal) => c.status(undefined, { signal }));
-  const overview = useLedgerQuery<Overview>('/analytics/overview', (c, signal) => c.analytics.overview(undefined, { signal }), {
+  const overview = useLedgerQuery<Overview>('/analytics/overview', (c, signal) => c.analytics.overview(undefined, { signal }), { heavy: true });
+  const rate = useLedgerQuery<UpxUsd>(queryKey('/market/upx-usd', { limit: RATE_DAYS }), (c, signal) => c.market.upxUsd({ limit: RATE_DAYS }, { signal }), {
     heavy: true,
+    isEmpty: (d) => d.points.length === 0,
   });
-  const rate = useLedgerQuery<UpxUsd>(
-    queryKey('/market/upx-usd', { limit: RATE_DAYS }),
-    (c, signal) => c.market.upxUsd({ limit: RATE_DAYS }, { signal }),
-    { heavy: true, isEmpty: (d) => d.points.length === 0 },
-  );
-
-  const citiesRef = useRef<HTMLElement>(null);
+  const citiesRef = useRef<HTMLDivElement>(null);
   const citiesVisible = useInView(citiesRef);
   const after = utcDayOffset(CITY_DAYS);
-  const cities = useLedgerQuery<CityDay[]>(
-    queryKey('/market/cities', { after, limit: 1000 }),
-    (c, signal) => c.market.cities({ after, limit: 1000 }, { signal }),
-    { heavy: true, enabled: citiesVisible },
-  );
+  const cities = useLedgerQuery<CityDay[]>(queryKey('/market/cities', { after, limit: 1000 }), (c, signal) => c.market.cities({ after, limit: 1000 }, { signal }), {
+    heavy: true,
+    enabled: citiesVisible,
+  });
 
-  // A signed-out (or practice) viewer gets one prompt for the page, not one per section.
+  // A signed-out (or practice) viewer gets one prompt for the page, not one per region.
   if (status.view === 'unauthenticated' || overview.view === 'unauthenticated') {
     return (
       <>
-        <PageHead />
-        <LedgerSignIn onRetry={async () => Promise.all([status.refetch(), overview.refetch()])} />
+        <PageHeader title="Overview" />
+        <SignInPrompt onRetry={() => Promise.all([status.refetch(), overview.refetch()])} />
       </>
     );
   }
 
+  const fresh = status.data ? chainFreshness(status.data) : null;
+  const behindMinutes = fresh && (fresh.health === 'lagging' || fresh.health === 'stalled') && fresh.lagSeconds !== null ? Math.ceil(fresh.lagSeconds / 60) : null;
   const series = rate.data ? rateSeries(rate.data) : [];
   const summary = rateSummary(series);
-  const freshness = status.data ? chainFreshness(status.data) : null;
   const upx24h = overview.data?.transfers_24h_by_symbol.find((t) => t.symbol === 'UPX');
-  const tileState = (q: { view: string }): 'loading' | 'error' | 'ready' =>
-    q.view === 'loading' ? 'loading' : q.view === 'error' ? 'error' : 'ready';
+  const tileState = (v: string): 'loading' | 'error' | 'ready' => (v === 'loading' || v === 'idle' ? 'loading' : v === 'error' ? 'error' : 'ready');
+
+  const indicator: { status: LiveStatus; reason?: string } | null = !fresh
+    ? status.view === 'error'
+      ? { status: 'error', reason: 'Status unavailable' }
+      : { status: 'connecting' }
+    : fresh.health === 'live'
+      ? { status: 'live' }
+      : fresh.health === 'degraded'
+        ? { status: 'offline' }
+        : fresh.health === 'unknown'
+          ? { status: 'connecting' }
+          : null; // lagging/stalled: the stale banner says how far behind
 
   return (
     <>
-      <PageHead live={freshness ? <LiveDot status={freshness.health === 'degraded' ? 'offline' : freshness.health} /> : status.fetching ? <LiveDot status="checking" /> : null} />
+      <PageHeader
+        title="Overview"
+        lede="The Upland chain as the ledger sees it: ingest health, the UPX/USD rate and where trading is busiest."
+        aside={
+          indicator && (
+            <LiveIndicator
+              status={indicator.status}
+              reason={indicator.reason}
+              updatedAt={fresh?.latest ? formatClock(fresh.latest) : undefined}
+              onRetry={() => void status.refetch()}
+            />
+          )
+        }
+      />
 
-      <section aria-label="Key figures" className="em-stat-grid">
+      <TileRow>
         <StatTile
           label="Ingest lag"
-          state={tileState(status)}
+          state={tileState(status.view)}
           onRetry={status.refetch}
-          value={freshness ? formatDuration(freshness.lagSeconds) : null}
-          sub={freshness ? `Block ${formatInt(freshness.latestBlock)}` : undefined}
+          value={fresh ? formatDuration(fresh.lagSeconds) : undefined}
+          hint="How far the ledger's copy of the chain is behind the chain itself"
         />
         <StatTile
           label="Actions, 24 h"
-          state={tileState(overview)}
+          state={tileState(overview.view)}
           onRetry={overview.refetch}
-          value={overview.data ? formatCompact(overview.data.actions_24h) : null}
-          sub={overview.data ? `${formatCompact(overview.data.actions_total)} all time` : undefined}
+          value={overview.data?.actions_24h}
+          format={{ notation: 'compact', maximumFractionDigits: 1 }}
+          animate
         />
         <StatTile
           label="UPX moved, 24 h"
-          state={tileState(overview)}
+          state={tileState(overview.view)}
           onRetry={overview.refetch}
-          value={upx24h ? formatCompact(upx24h.amount) : overview.data ? '0' : null}
+          value={upx24h?.amount ?? (overview.data ? 0 : undefined)}
+          format={{ notation: 'compact', maximumFractionDigits: 1 }}
           unit="UPX"
-          sub={upx24h ? `${formatInt(upx24h.transfers)} transfers` : undefined}
         />
         <StatTile
           label="UPX per $1"
-          state={rate.view === 'loading' || rate.view === 'idle' ? 'loading' : rate.view === 'error' ? 'error' : 'ready'}
+          state={rate.view === 'empty' ? 'ready' : tileState(rate.view)}
           onRetry={rate.refetch}
-          value={summary ? formatInt(summary.upxPerUsd) : '—'}
-          trend={
-            summary && summary.change !== null
-              ? { value: summary.change, text: `${formatSignedPercent(summary.change)} since ${formatDay(summary.firstDay)}` }
-              : null
-          }
-          sub={summary ? `${formatUsd(summary.usdPerUpx)} per UPX · ${formatDay(summary.day)}` : rate.view === 'empty' ? 'No rate published yet' : undefined}
+          value={summary ? formatRate(summary.upxPerUsd) : '—'}
+          delta={summary && summary.change !== null ? Number((summary.change * 100).toFixed(1)) : undefined}
+          deltaLabel={summary ? `since ${formatShortDay(summary.firstDay)}` : undefined}
         />
-      </section>
+      </TileRow>
 
-      <div className="em-grid-2">
-        <section className="em-section" aria-labelledby="chain-h">
-          <div className="em-section-head">
-            <h2 id="chain-h" className="em-h3">
-              Chain status
-            </h2>
-            <span className="em-caption">/status</span>
-          </div>
-          <div className="em-card">
-            <DataState query={status} label="chain status" skeleton={<Skeleton height={120} />}>
-              {(s) => <ChainStatus status={s} />}
-            </DataState>
-          </div>
-        </section>
+      <div style={{ display: 'grid', gap: 20, gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 420px), 1fr))' }}>
+        <Block id="chain" title="Chain status" note={status.updatedAt ? `Checked ${formatClock(new Date(status.updatedAt))} UTC` : '/status'}>
+          <Region query={status} skeleton={<FactSkeleton />} emptyMessage="No status." staleMinutes={behindMinutes}>
+            {(s) => (
+              <Card>
+                <FactList
+                  items={[
+                    { term: 'Ingest lag', value: formatDuration(s.ingestion.lagSeconds), mono: true },
+                    { term: 'Latest action', value: formatInstant(s.ingestion.latestTimestamp), mono: true },
+                    { term: 'Latest block', value: formatInt(s.ingestion.latestBlock), mono: true },
+                    {
+                      term: 'History',
+                      value: `${s.history.backfillComplete ? 'Complete' : 'Backfilling'} from ${formatDay(s.history.earliestStoredTimestamp)}${s.history.pendingWindows + s.history.failedWindows > 0 ? ` · ${formatInt(s.history.pendingWindows)} windows pending, ${formatInt(s.history.failedWindows)} failed` : ''}`,
+                    },
+                    { term: 'Upstream', value: s.upstream.connected ? 'Connected' : 'Disconnected' },
+                    { term: 'Database', value: s.clickhouse.connected ? 'Connected' : 'Disconnected' },
+                  ]}
+                />
+                {fresh?.reason && <p style={{ margin: 0, font: 'var(--type-caption)', color: 'var(--text-muted)' }}>{fresh.reason}</p>}
+              </Card>
+            )}
+          </Region>
+        </Block>
 
-        <section className="em-section" aria-labelledby="fresh-h">
-          <div className="em-section-head">
-            <h2 id="fresh-h" className="em-h3">
-              Data freshness
-            </h2>
-            <span className="em-caption">How often each layer is rebuilt</span>
-          </div>
-          <DataTable
-            caption="Ledger data layers and how often they refresh"
-            rows={DATA_LAYERS}
+        <Block id="freshness" title="Data freshness" note="How often each ledger layer is rebuilt">
+          <DataTable<DataLayer>
+            rows={[...DATA_LAYERS]}
             rowKey={(l) => l.id}
-            columns={[
-              { key: 'layer', label: 'Layer', render: (l) => <strong>{l.label}</strong> },
-              { key: 'cadence', label: 'Refreshed', render: (l) => (l.id === 'chain' && freshness ? `Live, ${formatDuration(freshness.lagSeconds)} behind` : l.cadence) },
-              { key: 'covers', label: 'Feeds', wrap: true, muted: true, render: (l) => l.covers },
-            ]}
-            footer={<span>A sale shows in Market within 15 min, but property and account totals count it only after the next 6-hourly build.</span>}
+            columns={FRESHNESS_COLUMNS(fresh?.lagSeconds ?? null)}
+            footer={<span>A sale shows in Market within 15 min; property and account totals count it after the next 6-hourly build.</span>}
           />
-        </section>
+        </Block>
       </div>
 
-      <section className="em-section" aria-labelledby="rate-h">
-        <div className="em-section-head">
-          <h2 id="rate-h" className="em-h3">
-            UPX / USD
-          </h2>
-          <LayerNote layer="market" updatedAt={rate.updatedAt} />
-        </div>
-        <div className="em-card">
-          <DataState query={rate} label="the UPX/USD rate" skeleton={<Skeleton height={260} />} empty="The ledger has no UPX/USD rate yet.">
-            {(d) => (
-              <div style={{ display: 'grid', gap: 10 }}>
-                <p className="em-caption">
-                  Method <code>{d.preferred}</code>, last {series.length} days.{' '}
-                  {d.notes.length > 0 && <span>{d.notes.join(' ')}</span>}
-                </p>
-                <RateChart
-                  series={series}
-                  label={
-                    summary
-                      ? `UPX per US dollar over ${series.length} days, latest ${formatInt(summary.upxPerUsd)} on ${formatDay(summary.day)}.`
-                      : 'UPX per US dollar'
-                  }
-                />
-              </div>
-            )}
-          </DataState>
-        </div>
-      </section>
+      <Block id="rate" title="UPX / USD" note="Market layer · rebuilt every 6 h at :17">
+        <Region
+          query={rate}
+          skeleton={
+            <Card>
+              <Skeleton width="70%" />
+              <Skeleton height={260} />
+            </Card>
+          }
+          emptyMessage="The ledger has no UPX/USD rate yet."
+        >
+          {(d) => (
+            <Card>
+              <span style={{ font: 'var(--type-caption)', color: 'var(--text-muted)' }}>
+                Method <code>{d.preferred}</code> · last {series.length} days · {d.notes.join(' ')}
+              </span>
+              <RateFigure series={series} />
+            </Card>
+          )}
+        </Region>
+      </Block>
 
-      <section className="em-section" aria-labelledby="cities-h" ref={citiesRef}>
-        <div className="em-section-head">
-          <h2 id="cities-h" className="em-h3">
-            Top cities, last {CITY_DAYS} days
-          </h2>
-          <LayerNote layer="market" updatedAt={cities.updatedAt} />
-        </div>
-        {cities.view === 'idle' ? (
-          <TableSkeleton columns={CITY_COLUMNS} rows={4} />
-        ) : (
-          <DataState
+      <div ref={citiesRef}>
+        <Block id="cities" title={`Top cities, last ${CITY_DAYS} days`} note="By UPX sales volume · market layer">
+          <Region
             query={cities}
-            label="top cities"
-            skeleton={<TableSkeleton columns={CITY_COLUMNS} rows={TOP_CITIES} />}
-            empty={`No city had market activity in the last ${CITY_DAYS} days.`}
+            skeleton={<DataTable<CityRollup> columns={CITY_COLUMNS} rows={[]} loading skeletonRows={TOP_CITIES} />}
+            emptyMessage={`No city had market activity in the last ${CITY_DAYS} days.`}
           >
-            {(rows) => <CityTable rows={rollupCities(rows).slice(0, TOP_CITIES)} />}
-          </DataState>
-        )}
-      </section>
+            {(rows) => <DataTable<CityRollup> columns={CITY_COLUMNS} rows={rollupCities(rows).slice(0, TOP_CITIES)} rowKey={(r) => r.city} />}
+          </Region>
+        </Block>
+      </div>
     </>
   );
 }
 
-function PageHead({ live }: { live?: ReactNode }) {
+function FactSkeleton() {
   return (
-    <div className="em-page-head">
-      <div>
-        <h1 className="em-h1">Overview</h1>
-        <p className="em-lede">The Upland chain as the ledger sees it: ingest health, the UPX/USD rate and where trading is busiest.</p>
-      </div>
-      {live}
-    </div>
+    <Card>
+      {[60, 75, 50, 80, 45, 55].map((w, i) => (
+        <Skeleton key={i} width={`${w}%`} />
+      ))}
+    </Card>
   );
 }
 
-function CityTable({ rows }: { rows: CityRollup[] }) {
-  return (
-    <DataTable
-      caption={`Top cities by UPX sales volume, last ${CITY_DAYS} days`}
-      rows={rows}
-      rowKey={(r) => r.city}
-      columns={[
-        {
-          key: 'city',
-          label: 'City',
-          render: (r) => <Link href={hrefWith(routes.market, { city: r.city })}>{r.city}</Link>,
-        },
-        { key: 'sales', label: `Sales (${CITY_DAYS} d)`, num: true, render: (r) => formatInt(r.sales) },
-        { key: 'trend', label: 'Daily sales', render: (r) => <Sparkline values={r.daily} /> },
-        { key: 'volume', label: 'Volume', num: true, render: (r) => formatUpx(r.volumeUpx, { compact: true }) },
-        { key: 'median', label: 'Median sale', num: true, render: (r) => formatUpx(r.medianSaleUpx) },
-        { key: 'ask', label: 'Median ask', num: true, render: (r) => formatUpx(r.medianAskUpx) },
-      ]}
-    />
-  );
-}
+const FRESHNESS_COLUMNS = (lag: number | null): Column<DataLayer>[] => [
+  { key: 'layer', label: 'Layer', render: (l) => <strong>{l.label}</strong> },
+  { key: 'cadence', label: 'Refreshed', render: (l) => (l.id === 'chain' && lag !== null ? `Live, ${formatDuration(lag)} behind` : l.cadence) },
+  { key: 'covers', label: 'Feeds', muted: true, render: (l) => <span style={{ whiteSpace: 'normal' }}>{l.covers}</span> },
+];
+
+const CITY_COLUMNS: Column<CityRollup>[] = [
+  { key: 'city', label: 'City', render: (r) => <Link href={hrefWith(routes.market, { city: r.city })}>{r.city}</Link> },
+  { key: 'sales', label: `Sales (${CITY_DAYS} d)`, num: true, render: (r) => formatInt(r.sales) },
+  { key: 'trend', label: 'Daily sales', render: (r) => (r.daily.length > 1 ? <Sparkline values={r.daily.map((d) => d.sales)} width={96} height={24} /> : '—') },
+  { key: 'volume', label: 'Volume', num: true, render: (r) => formatUpx(r.volumeUpx, { compact: true }) },
+  { key: 'median', label: 'Median sale', num: true, render: (r) => formatUpx(r.medianSaleUpx) },
+  { key: 'ask', label: 'Median ask', num: true, render: (r) => formatUpx(r.medianAskUpx) },
+];

@@ -1,58 +1,10 @@
 /**
- * The framework-free half of the data hooks: a short-lived response cache,
- * the client-side heavy-query slot, and what a failed read means for the
- * screen. `hooks.ts` wires these into React; everything here is plain
+ * The framework-free half of the data hooks: the client-side heavy-query
+ * slot, and what a failed read means for the screen. Caching and request
+ * state live in TanStack Query (`hooks.ts`). `hooks.ts` wires these into React; everything here is plain
  * functions and classes so it can be tested without a DOM.
  */
 import { LedgerError, isLedgerError } from '@forge/upland-ledger';
-
-/* --- cache ------------------------------------------------------------------ */
-
-/**
- * The ledger caches identical GET URLs for 15 s; this mirrors that in the
- * browser so moving between pages (or two widgets asking for the same thing)
- * doesn't spend the shared heavy-query slot twice. Only successful answers
- * are kept, and never longer than `ttlMs`.
- */
-export class ResponseCache {
-  private readonly entries = new Map<string, { value: unknown; at: number }>();
-
-  constructor(
-    private readonly ttlMs = 15_000,
-    private readonly now: () => number = Date.now,
-    private readonly maxEntries = 200,
-  ) {}
-
-  get<T>(key: string): { value: T; at: number } | undefined {
-    const hit = this.entries.get(key);
-    if (hit === undefined) return undefined;
-    if (this.now() - hit.at > this.ttlMs) {
-      this.entries.delete(key);
-      return undefined;
-    }
-    return { value: hit.value as T, at: hit.at };
-  }
-
-  set(key: string, value: unknown): number {
-    const at = this.now();
-    this.entries.delete(key);
-    this.entries.set(key, { value, at });
-    while (this.entries.size > this.maxEntries) {
-      const oldest = this.entries.keys().next().value;
-      if (oldest === undefined) break;
-      this.entries.delete(oldest);
-    }
-    return at;
-  }
-
-  delete(key: string): void {
-    this.entries.delete(key);
-  }
-
-  clear(): void {
-    this.entries.clear();
-  }
-}
 
 /* --- the heavy-query slot --------------------------------------------------- */
 

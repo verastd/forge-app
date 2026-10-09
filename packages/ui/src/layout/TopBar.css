@@ -1,0 +1,16 @@
+/*
+ * TopBar at phone width: the bar must never be wider than the screen (it sets
+ * the page width). Clocks, the "/" hint and the brand text give way; the
+ * search box shrinks; menu, search, theme and account stay.
+ */
+@media (max-width: 639.98px) {
+  .em-topbar {
+    gap: 8px !important;
+    padding: 0 8px 0 4px !important;
+  }
+  .em-topbar__clocks,
+  .em-topbar__kbd,
+  .em-topbar__brand {
+    display: none !important;
+  }
+}
