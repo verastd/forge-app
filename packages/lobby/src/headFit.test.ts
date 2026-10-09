@@ -187,6 +187,19 @@ describe('autoPlacement, a closed face', () => {
     expect(screen.center[1] - screen.size[1] / 2).toBeLessThanOrEqual(ROBOT_EYES[0][1]);
   });
 
+  it('centres the eyes on a screen that sits off to one side', () => {
+    // A flat front with a bar 8 mm proud down its left side: the face, and the screen, lie right of centre.
+    const shell = slab([-0.35, 0, -0.2], [0.35, 0.4, 0.2]);
+    const bar = slab([-0.35, 0, 0.2], [-0.15, 0.4, 0.215]);
+    const triangles = [...shell, ...bar];
+    const placement = autoPlacement('replace', triangles, triangles);
+    const screen = placement.screen!;
+    expect(screen.center[0]).toBeGreaterThan(0.01);
+    const [left, right] = placement.eyes!;
+    expect((left[0] + right[0]) / 2).toBeCloseTo(screen.center[0], 4);
+    expect(right[0] - left[0]).toBeCloseTo(ROBOT_EYES[1][0] - ROBOT_EYES[0][0], 4);
+  });
+
   it('leaves a face too small for both eyes alone', () => {
     // A flat strip between the eyes, the face either side of it angled away.
     const strip = slab([-0.04, 0.02, 0.1], [0.04, 0.38, 0.2]);

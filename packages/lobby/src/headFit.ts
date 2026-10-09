@@ -145,7 +145,7 @@ export function autoPlacement(
       // An open face is closed by a screen, a closed one covered: the eyes sit on it, facing straight out.
       // Centred on the screen, at the robot's own spacing.
       const z = screen.center[2] + HEAD_FIT.eyeLift;
-      const eyes = ROBOT_EYES.map((eye) => clampPoint([eye[0], screen.center[1], z])) as [Point3, Point3];
+      const eyes = ROBOT_EYES.map((eye) => clampPoint([screen.center[0] + eye[0], screen.center[1], z])) as [Point3, Point3];
       return { scale, offset, eyes, eyeAngles: [0, 0, 0], screen };
     }
     const hits = ROBOT_EYES.map((eye) => surfaceAt(triangles, scale, offset, eye));
