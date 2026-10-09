@@ -14,6 +14,10 @@ commands:
   tasks          List open, agent-ready tasks (agent-ready + status:open).
   claim <n>      Claim issue <n> by posting the /claim command.
   status         Show your GitHub identity and where to check tier/claims.
+  check [args]   Run Foreman's protocol gate (G0) on your branch before you
+                 push: tools/forge/protocol-check.py, needs only git and
+                 python3. Pass --scope <issue.md> to fence the diff against
+                 the task's forge-scope block, --title to check the PR title.
 
 forge is a thin wrapper around the GitHub CLI (`gh`). Install it from
 https://cli.github.com/ and run `gh auth login` before using this.
@@ -60,6 +64,13 @@ cmd_claim() {
   echo "forge: done. Foreman will comment with your lease terms (or a rejection reason) shortly."
 }
 
+cmd_check() {
+  # No gh needed: the check reads git and .github/forge-protocol.json only.
+  local here
+  here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  exec python3 "${here}/protocol-check.py" "$@"
+}
+
 cmd_status() {
   require_gh
   echo "forge: your GitHub identity:"
@@ -84,6 +95,10 @@ main() {
     status)
       shift
       cmd_status "$@"
+      ;;
+    check)
+      shift
+      cmd_check "$@"
       ;;
     -h|--help|help|"")
       usage
