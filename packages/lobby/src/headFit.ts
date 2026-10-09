@@ -234,16 +234,50 @@ export function rescale(placement: HeadPlacement, scale: number): HeadPlacement 
     scale: next,
     offset: grow(placement.offset),
     ...(placement.eyes ? { eyes: [grow(placement.eyes[0]), grow(placement.eyes[1])] as [Point3, Point3] } : {}),
+    // The face screen is the model's face: it grows and shrinks with it, and stays on it.
+    ...(placement.screen
+      ? {
+          screen: {
+            center: grow(placement.screen.center),
+            size: [clampScreen(placement.screen.size[0] * factor), clampScreen(placement.screen.size[1] * factor)] as [number, number],
+          },
+        }
+      : {}),
   };
 }
 
-/** A placement moved by `delta` metres, its eyes with it. */
+/**
+ * A placement whose face screen is moved so its centre is at `to` (metres) on
+ * `axis` (0 across, 1 up), the glowing eyes going with it: they sit on the
+ * screen, so the face moves as one. A head without a screen is unchanged.
+ */
+export function moveScreen(placement: HeadPlacement, axis: 0 | 1, to: number): HeadPlacement {
+  const screen = placement.screen;
+  if (!screen) return placement;
+  const center: Point3 = [...screen.center];
+  center[axis] = to;
+  const placed = clampPoint(center);
+  const shift = placed[axis] - screen.center[axis];
+  const move = (p: Readonly<Point3>): Point3 => {
+    const next: Point3 = [...p];
+    next[axis] += shift;
+    return clampPoint(next);
+  };
+  return {
+    ...placement,
+    screen: { ...screen, center: placed },
+    ...(placement.eyes ? { eyes: [move(placement.eyes[0]), move(placement.eyes[1])] as [Point3, Point3] } : {}),
+  };
+}
+
+/** A placement moved by `delta` metres, its eyes and face screen with it. */
 export function nudge(placement: HeadPlacement, delta: Readonly<Point3>): HeadPlacement {
   const move = (p: Readonly<Point3>): Point3 => clampPoint([p[0] + delta[0], p[1] + delta[1], p[2] + delta[2]]);
   return {
     ...placement,
     offset: move(placement.offset),
     ...(placement.eyes ? { eyes: [move(placement.eyes[0]), move(placement.eyes[1])] as [Point3, Point3] } : {}),
+    ...(placement.screen ? { screen: { ...placement.screen, center: move(placement.screen.center) } } : {}),
   };
 }
 
@@ -481,6 +515,13 @@ function spread(values: number[]): [number, number] {
 
 function clampScale(scale: number): number {
   return round(Math.min(HEAD_FIT.maxScale, Math.max(HEAD_FIT.minScale, scale)));
+}
+
+/** The smallest a face screen may be across or down (AvatarHeadPlacement's limit), metres. */
+const SCREEN_MIN = 0.01;
+
+function clampScreen(size: number): number {
+  return round(Math.min(HEAD_FIT.screenMax, Math.max(SCREEN_MIN, size)));
 }
 
 function clampPoint(p: Point3): Point3 {

@@ -24,7 +24,18 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
-import { HEAD_FIT, ROBOT_EYES, alignToEye, anglesFromNormal, autoPlacement, defaultColors, nudge, rescale, rotateAbout } from '@forge/lobby';
+import {
+  HEAD_FIT,
+  ROBOT_EYES,
+  alignToEye,
+  anglesFromNormal,
+  autoPlacement,
+  defaultColors,
+  moveScreen,
+  nudge,
+  rescale,
+  rotateAbout,
+} from '@forge/lobby';
 import type { AvatarColors, HeadPlacement, HeadScreen, Point3, WornFace } from '@forge/lobby';
 import type { AvatarHead, AvatarHeadFit, AvatarHeadPlacement } from '@forge/shared';
 
@@ -102,6 +113,12 @@ function defaultScreen(placement: HeadPlacement): HeadScreen {
   const z = Math.round((Math.min(eyes[0][2], eyes[1][2]) - HEAD_FIT.eyeLift) * 10_000) / 10_000;
   return { center: [0, eyes[0][1], z], size: [0.25, 0.15] };
 }
+
+/** Moving the face screen (and the eyes on it): across from the middle, and up from the neck, in centimetres. */
+const SCREEN_MOVES = [
+  { axis: 0, label: 'Screen left · right', less: 'left', more: 'right', min: -15, max: 15 },
+  { axis: 1, label: 'Screen down · up', less: 'down', more: 'up from the neck', min: -5, max: 45 },
+] as const;
 
 const degrees = (radians: number): number => Math.round((radians * 180) / Math.PI);
 
@@ -388,6 +405,12 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled, w
     });
   };
 
+  /** Screen left/right and up/down: its centre, in centimetres, the glowing eyes going with it. */
+  const onScreenMove = (axis: 0 | 1) => (event: ChangeEvent<HTMLInputElement>): void => {
+    const metres = Number(event.target.value) / 100;
+    setPlacement((current) => (current ? moveScreen(current, axis, metres) : current));
+  };
+
   const onEyeAngle = (index: 0 | 1) => (event: ChangeEvent<HTMLInputElement>): void => {
     const radians = (Number(event.target.value) * Math.PI) / 180;
     setPlacement((current) => {
@@ -585,6 +608,29 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled, w
                       disabled={locked}
                       aria-label={label}
                       aria-valuetext={`${cm} centimetres`}
+                    />
+                  </label>
+                );
+              })}
+            {placement?.screen &&
+              SCREEN_MOVES.map((control) => {
+                const cm = Math.round(placement.screen!.center[control.axis] * 1000) / 10;
+                const words = control.axis === 0 ? (cm === 0 ? 'centred' : `${Math.abs(cm)} cm ${cm < 0 ? control.less : control.more}`) : `${cm} cm ${control.more}`;
+                return (
+                  <label key={control.label} className={`${styles.label} ${styles.fitFull}`}>
+                    <span className={styles.sliderHead} aria-hidden="true">
+                      {control.label} <span className={styles.sliderValue}>{words}</span>
+                    </span>
+                    <input
+                      type="range"
+                      min={control.min}
+                      max={control.max}
+                      step={0.5}
+                      value={Math.max(control.min, Math.min(control.max, cm))}
+                      onChange={onScreenMove(control.axis)}
+                      disabled={locked}
+                      aria-label={control.label}
+                      aria-valuetext={`${words}, the eyes with it`}
                     />
                   </label>
                 );
