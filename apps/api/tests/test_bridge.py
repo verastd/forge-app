@@ -30,6 +30,7 @@ from .bridge_helpers import (
     OTHER,
     ROUTINE_TOKEN,
     ROUTINE_URL,
+    TEST_TASKS,
     USER,
     BridgeEnv,
     install_bridge,
@@ -57,7 +58,7 @@ def other_headers(auth_headers: AuthHeaders) -> dict[str, str]:
 
 
 def task_one() -> Any:
-    task = FixtureTaskSource().get_task(CSV_TASK)
+    task = FixtureTaskSource(TEST_TASKS).get_task(CSV_TASK)
     assert task is not None
     return task
 
@@ -918,7 +919,7 @@ def test_a_shipped_bounty_mentions_its_reward(
     client: TestClient, env: BridgeEnv, user_headers: dict[str, str]
 ) -> None:
     claim(client, user_headers, 3)  # reward class R1
-    task = FixtureTaskSource().get_task(3)
+    task = FixtureTaskSource(TEST_TASKS).get_task(3)
     assert task is not None and task.rewardClass == "R1"
     env.github.add_pull(30, USER.login, branch_name(3, task.title), state="closed", merged=True)
     shipped = client.get("/api/bridge/status/3", headers=user_headers).json()
@@ -1169,11 +1170,33 @@ def test_fork_check(client: TestClient, env: BridgeEnv, user_headers: dict[str, 
 
 
 def test_fixture_tasks_carry_their_criteria() -> None:
-    tasks = FixtureTaskSource().list_tasks()
+    tasks = FixtureTaskSource(TEST_TASKS).list_tasks()
     assert len(tasks) == 8
     assert all(len(task.acceptanceCriteria) == 3 for task in tasks)
     assert all(task.url.endswith(f"/issues/{task.id}") for task in tasks)
     assert branch_name(1, tasks[0].title) == CSV_BRANCH
+
+
+def test_the_committed_tasks_are_the_real_task_specs() -> None:
+    """Production's fixtures/tasks.json is the Contribute board: the Task Specs posted as
+    issues on verastd/forge-app, mirrored from docs/tasks/. Each names its issue, carries
+    three criteria and the labels Foreman reads, and at least one is open to a T0 account
+    so a first contributor has something to claim."""
+    tasks = FixtureTaskSource().list_tasks()
+    assert [task.id for task in tasks] == [48, 49, 50, 51, 52]
+    for task in tasks:
+        assert task.url == f"https://github.com/verastd/forge-app/issues/{task.id}"
+        assert len(task.acceptanceCriteria) == 3
+        assert {
+            "agent-ready",
+            "status:open",
+            f"size:{task.size}",
+            f"tier-floor:{task.tierFloor}",
+        } <= set(task.labels)
+        assert (task.rewardClass == "none") == (
+            not any(label.startswith("bounty:") for label in task.labels)
+        )
+    assert any(task.tierFloor == "T0" and task.size in ("XS", "S") for task in tasks)
 
 
 def test_the_github_task_source_waits_for_foreman(client: TestClient, env: BridgeEnv) -> None:

@@ -30,8 +30,8 @@ against real GitHub with a test account.
   account.
 - **A checkout of `forge-app`** with `make setup` done. The commands below
   run from its root.
-- **Task 1** is one of the API's checked-in fixture tasks (the only task
-  source) and a T0 task, so the test account can claim it (tasks above T0
+- **Task 49** is one of the API's checked-in tasks (the Task Specs posted as
+  issues, the only task source) and the T0 task, so the test account can claim it (tasks above T0
   can't be claimed by anyone yet). Claiming a task you already hold changes
   nothing, but once you let it go, or its 48 hours run out, the same
   account can't claim it again for 24 hours: keep the claim between tests,
@@ -52,9 +52,9 @@ start rail outside the web app:
 
 ```sh
 cd apps/api
-uv run python -m forge_api.tools.live_rails --rail <id> --login <login> --task 1          # dry run
-uv run python -m forge_api.tools.live_rails --rail <id> --login <login> --task 1 --check  # read only
-uv run python -m forge_api.tools.live_rails --rail <id> --login <login> --task 1 --go     # starts it
+uv run python -m forge_api.tools.live_rails --rail <id> --login <login> --task 49          # dry run
+uv run python -m forge_api.tools.live_rails --rail <id> --login <login> --task 49 --check  # read only
+uv run python -m forge_api.tools.live_rails --rail <id> --login <login> --task 49 --go     # starts it
 ```
 
 With neither flag it prints the request it would send, with the credential
@@ -111,12 +111,12 @@ one-time token, which the web app does as soon as the start answers?
 
 ```sh
 cd apps/api
-uv run python -m forge_api.tools.live_rails --rail copilot --login <login> --task 1 --check
-uv run python -m forge_api.tools.live_rails --rail copilot --login <login> --task 1 --go
+uv run python -m forge_api.tools.live_rails --rail copilot --login <login> --task 49 --check
+uv run python -m forge_api.tools.live_rails --rail copilot --login <login> --task 49 --go
 ```
 
 Part B, FORGE's own path, the one contributors take: with `agent_start` on
-and `FORGE_START_RAILS=copilot`, sign in as the test account, claim task 1,
+and `FORGE_START_RAILS=copilot`, sign in as the test account, claim task 49,
 press "Start GitHub Copilot", approve GitHub's one-time authorization
 (GitHub may skip its page if the account approved FORGE before), and come
 back to the task page. Do this on a local or preview deployment if you
@@ -164,7 +164,7 @@ and write on the fork), in `GITHUB_USER_TOKEN`.
 **Run.**
 
 1. In the browser, as the test account, comment on the draft pull request:
-   `@claude` followed by the brief for task 1 (from
+   `@claude` followed by the brief for task 49 (from
    `GET /api/bridge/tasks/1/brief?login=<login>` on the API). Then the same
    with `@codex`.
 2. Post the same comment through the API, as FORGE would:
@@ -202,8 +202,8 @@ installed on the fork, and an API key from
 
 ```sh
 cd apps/api
-uv run python -m forge_api.tools.live_rails --rail jules --login <login> --task 1 --check
-uv run python -m forge_api.tools.live_rails --rail jules --login <login> --task 1 --go
+uv run python -m forge_api.tools.live_rails --rail jules --login <login> --task 49 --check
+uv run python -m forge_api.tools.live_rails --rail jules --login <login> --task 49 --go
 ```
 
 `--check` lists the account's Jules sources and should find
@@ -237,7 +237,7 @@ Connectors, press +, then Add custom connector with the URL
 `https://forge-app-eta-mocha.vercel.app/mcp`, then Connect: sign in with
 GitHub as the test account and press Allow.
 
-**Run.** On the Contribute page, claim task 1 and press "Claude Code on the
+**Run.** On the Contribute page, claim task 49 and press "Claude Code on the
 web", then send. Once the repo includes `.mcp.json`, repeat with the
 claude.ai connector removed (Customize → Connectors), to see whether
 `.mcp.json` works alone, and whether the session asks to approve it or to
@@ -294,8 +294,8 @@ Cursor with access to the fork, and an API key from
 
 ```sh
 cd apps/api
-uv run python -m forge_api.tools.live_rails --rail cursor --login <login> --task 1 --check
-uv run python -m forge_api.tools.live_rails --rail cursor --login <login> --task 1 --go
+uv run python -m forge_api.tools.live_rails --rail cursor --login <login> --task 49 --check
+uv run python -m forge_api.tools.live_rails --rail cursor --login <login> --task 49 --go
 ```
 
 **Look at.** The agent at the printed link: the branch it works on, and
@@ -315,8 +315,8 @@ access to the fork, and from <https://app.devin.ai/settings> an API key in
 
 ```sh
 cd apps/api
-uv run python -m forge_api.tools.live_rails --rail devin --login <login> --task 1 --check
-uv run python -m forge_api.tools.live_rails --rail devin --login <login> --task 1 --go
+uv run python -m forge_api.tools.live_rails --rail devin --login <login> --task 49 --check
+uv run python -m forge_api.tools.live_rails --rail devin --login <login> --task 49 --go
 ```
 
 **Look at.** The session at the printed link: the branch, the pull request,
@@ -337,8 +337,8 @@ connected with access to the fork, and an API key from its settings in
 
 ```sh
 cd apps/api
-uv run python -m forge_api.tools.live_rails --rail openhands --login <login> --task 1 --check
-uv run python -m forge_api.tools.live_rails --rail openhands --login <login> --task 1 --go
+uv run python -m forge_api.tools.live_rails --rail openhands --login <login> --task 49 --check
+uv run python -m forge_api.tools.live_rails --rail openhands --login <login> --task 49 --go
 ```
 
 **Look at.** The conversation at the printed link: the repository and
@@ -361,8 +361,8 @@ in `CLAUDE_ROUTINE_URL` and its token in `CLAUDE_ROUTINE_TOKEN`.
 
 ```sh
 cd apps/api
-uv run python -m forge_api.tools.live_rails --rail claude-routine --login <login> --task 1 --check
-uv run python -m forge_api.tools.live_rails --rail claude-routine --login <login> --task 1 --go
+uv run python -m forge_api.tools.live_rails --rail claude-routine --login <login> --task 49 --check
+uv run python -m forge_api.tools.live_rails --rail claude-routine --login <login> --task 49 --go
 ```
 
 A routine has no read-only call, so `--check` can prove little more than
@@ -529,7 +529,7 @@ attestation, and does the task page then follow it like any other?
   one: on production, everyone who holds a task gets the three steps while
   those two settings are there.
 - The test account, signed in to FORGE with GitHub, with no fork of
-  `verastd/forge-app` yet (see Before you start), holding task 1.
+  `verastd/forge-app` yet (see Before you start), holding task 49.
 - An agent that can push to the test account's repositories. Claude Code
   on the web with the test account's GitHub connected (test 4) is the
   simplest; any Open my agent rail will do.

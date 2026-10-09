@@ -22,6 +22,10 @@ from forge_api.services.identity import Identity
 
 from .conftest import FakeClock
 
+#: The eight synthetic tasks the Bridge's tests run against (sizes, tiers and rewards
+#: chosen for the cases below). Production's fixtures/tasks.json holds the real Task Specs.
+TEST_TASKS = Path(__file__).resolve().parent / "fixtures" / "tasks.json"
+
 #: 32 bytes, so its base64 is a valid FORGE_VAULT_KEY. Tests only.
 TEST_VAULT_MASTER = b"test-only-forge-vault-master-key"
 OTHER_VAULT_MASTER = b"test-only-another-vault-master!!"
@@ -399,7 +403,7 @@ def install_bridge(monkeypatch: pytest.MonkeyPatch, clock: FakeClock) -> BridgeE
     # GitHub answers are cached against the same fake clock, so `advance(61)` expires them.
     monkeypatch.setattr(bridge_service, "_github", github.reads(lambda: clock().timestamp()))
     monkeypatch.setattr(bridge_service, "_rail_client", vendor.client())
-    monkeypatch.setattr(bridge_service, "_source", FixtureTaskSource())
+    monkeypatch.setattr(bridge_service, "_source", FixtureTaskSource(TEST_TASKS))
     return BridgeEnv(
         clock=clock, store=store, github=github, vendor=vendor, monkeypatch=monkeypatch
     )

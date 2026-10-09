@@ -3,8 +3,7 @@ import type { Locator, Page } from '@playwright/test';
 
 import apiTasks from '../../apps/api/src/forge_api/fixtures/tasks.json';
 import { TASK_FIXTURES } from '../../apps/web/src/lib/fixtures';
-import { COPY_STEP } from '../../packages/shared/dist/index.js';
-import golden from '../fixtures/brief-golden.json';
+import { COPY_STEP, compileBrief } from '../../packages/shared/dist/index.js';
 import { demoSignIn } from './helpers/session';
 
 /**
@@ -18,7 +17,7 @@ import { demoSignIn } from './helpers/session';
  * identity call is simulated in the tab (lib/offline.ts), never sent to the
  * BFF. The "Open my agent" links are real links all the same, so their hrefs
  * are checked against the brief byte for byte — the practice account has no
- * fork, so it's the golden brief without a login.
+ * fork, so it's the compiler's brief with no login and no copy.
  */
 
 /** Force the offline path so every assertion holds with or without the API up. */
@@ -29,13 +28,15 @@ async function goOffline(page: Page): Promise<void> {
 /** The practice app has to say so, on every screen that can invent data. */
 const DEMO_BANNER = 'Demo mode — this is practice data. Nothing here is real or saved.';
 
-const BRIEF_WITHOUT_LOGIN = (() => {
-  const found = golden.cases.find((entry) => entry.name === 'without login');
-  if (found === undefined) {
-    throw new Error('brief-golden.json lost its "without login" case');
-  }
-  return found.brief;
-})();
+/** The task the practice account claims: the one open to T0. */
+const PRACTICE_TASK = TASK_FIXTURES.find((task) => task.tierFloor === 'T0');
+if (PRACTICE_TASK === undefined) throw new Error('no T0 task in the fixtures for the practice account to claim');
+const PRACTICE_PATH = `/contribute/task/${PRACTICE_TASK.id}`;
+/** The first card on the board, whatever its tier: what browsing checks. */
+const FIRST_TASK = TASK_FIXTURES[0];
+if (FIRST_TASK === undefined) throw new Error('no task fixtures');
+/** The brief the practice page hands to every open rail: the compiler's own output, with no login and no copy (the practice account has neither). */
+const BRIEF_WITHOUT_LOGIN = compileBrief(PRACTICE_TASK, PRACTICE_TASK.acceptanceCriteria, null);
 
 const START_RAILS = ['GitHub Copilot', 'Google Jules', 'Cursor cloud agent', 'Devin', 'OpenHands Cloud', 'Claude Code routine'];
 const OPEN_LINKS = [
@@ -46,12 +47,12 @@ const OPEN_LINKS = [
   'Cursor app',
 ];
 
-/** Signs in with the practice account and lands on task 1, claimed. */
+/** Signs in with the practice account and lands on the T0 task, claimed. */
 async function claimTaskOne(page: Page): Promise<void> {
   await goOffline(page);
-  await page.goto(`/signin?next=${encodeURIComponent('/contribute/task/1')}`);
+  await page.goto(`/signin?next=${encodeURIComponent(PRACTICE_PATH)}`);
   await demoSignIn(page);
-  await expect(page).toHaveURL(/\/contribute\/task\/1$/);
+  await expect(page).toHaveURL(new RegExp(`${PRACTICE_PATH}$`));
   await page.getByRole('button', { name: 'Claim this' }).click();
   await expect(page.getByText(/yours for 48h/)).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Your agent', exact: true })).toBeVisible();
@@ -73,7 +74,7 @@ async function hrefQuery(link: Locator): Promise<URLSearchParams> {
 }
 
 test.describe('browsing the Bridge', () => {
-  test('lists the eight starter tasks in plain language', async ({ page }) => {
+  test('lists the posted Task Specs in plain language', async ({ page }) => {
     await page.goto('/contribute');
 
     await expect(page.getByText(DEMO_BANNER)).toBeVisible();
@@ -81,9 +82,9 @@ test.describe('browsing the Bridge', () => {
     await expect(page.getByText('Point the coding agent you already pay for at a task.')).toBeVisible();
 
     const cards = page.getByRole('region', { name: 'Tasks' }).getByRole('link');
-    await expect(cards).toHaveCount(8);
+    await expect(cards).toHaveCount(5);
     await expect(
-      page.getByText('Let people download the Upland data they are looking at as a spreadsheet file.'),
+      page.getByText('Give the lobby one list of everything a robot can do, so each new trick comes with its own speed limit and its own on-screen feedback.'),
     ).toBeVisible();
     // A task is priced in the contributor's agent time, never in dollars.
     await expect(page.getByText('Agent runs ~1 hour').first()).toBeVisible();
@@ -94,7 +95,7 @@ test.describe('browsing the Bridge', () => {
     page,
   }) => {
     await page.goto('/contribute');
-    const summary = 'Let people download the Upland data they are looking at as a spreadsheet file.';
+    const summary = 'Give the lobby one list of everything a robot can do, so each new trick comes with its own speed limit and its own on-screen feedback.';
     const card = page.getByRole('region', { name: 'Tasks' }).getByRole('article').filter({ has: page.getByRole('link', { name: summary, exact: true }) });
     const chip = card.getByText('Agent runs ~1 hour');
     const tip = card.getByRole('tooltip', { includeHidden: true });
@@ -127,7 +128,7 @@ test.describe('browsing the Bridge', () => {
     page,
   }) => {
     await page.goto('/contribute');
-    const summary = 'Let people download the Upland data they are looking at as a spreadsheet file.';
+    const summary = 'Give the lobby one list of everything a robot can do, so each new trick comes with its own speed limit and its own on-screen feedback.';
     const card = page.getByRole('region', { name: 'Tasks' }).getByRole('article').filter({ has: page.getByRole('link', { name: summary, exact: true }) });
     const chip = card.getByText('Agent runs ~1 hour');
     const tip = card.getByRole('tooltip', { includeHidden: true });
@@ -152,33 +153,34 @@ test.describe('browsing the Bridge', () => {
     page,
   }) => {
     await page.goto('/contribute');
-    const summary = 'Let people download the Upland data they are looking at as a spreadsheet file.';
+    const summary = 'Give the lobby one list of everything a robot can do, so each new trick comes with its own speed limit and its own on-screen feedback.';
     const link = page.getByRole('region', { name: 'Tasks' }).getByRole('link', { name: summary, exact: true });
-    await expect(link).toHaveAttribute('href', '/contribute/task/1');
+    await expect(link).toHaveAttribute('href', '/contribute/task/48');
     // Every card's link has a name of its own: its summary, never nothing.
     const names = await page.getByRole('region', { name: 'Tasks' }).getByRole('link').evaluateAll((links) =>
       links.map((element) => element.textContent?.trim() ?? ''),
     );
-    expect(names).toHaveLength(8);
+    expect(names).toHaveLength(TASK_FIXTURES.length);
     expect(names.every((name) => name.length > 10)).toBe(true);
     // The card's corner, far from the summary, still opens it.
     const card = page.getByRole('region', { name: 'Tasks' }).getByRole('article').filter({ has: page.getByRole('link', { name: summary, exact: true }) });
     const box = await card.boundingBox();
     if (box === null) throw new Error('no card');
     await page.mouse.click(box.x + box.width - 12, box.y + box.height - 12);
-    await expect(page).toHaveURL(/\/contribute\/task\/1$/);
+    await expect(page).toHaveURL(new RegExp(`/contribute/task/${FIRST_TASK.id}$`));
   });
 
   test('filters down to the tasks that carry a reward', async ({ page }) => {
     await page.goto('/contribute');
 
     const cards = page.getByRole('region', { name: 'Tasks' }).getByRole('link');
-    await expect(cards).toHaveCount(8);
+    await expect(cards).toHaveCount(TASK_FIXTURES.length);
 
+    const rewarded = TASK_FIXTURES.filter((task) => task.rewardClass !== 'none').length;
     await page.getByRole('button', { name: 'Has a reward' }).click();
-    await expect(cards).toHaveCount(6);
+    await expect(cards).toHaveCount(rewarded);
     // It says a reward is attached, never what it is worth in dollars.
-    await expect(page.getByText('reward attached')).toHaveCount(6);
+    await expect(page.getByText('reward attached')).toHaveCount(rewarded);
     await expect(page.getByText(/\$\s?\d/)).toHaveCount(0);
   });
 
@@ -188,14 +190,14 @@ test.describe('browsing the Bridge', () => {
     await goOffline(page);
     await page.goto('/contribute');
 
-    await page.getByText('Let people download the Upland data they are looking at as a spreadsheet file.').click();
+    await page.getByText('Give the lobby one list of everything a robot can do, so each new trick comes with its own speed limit and its own on-screen feedback.').click();
 
-    await expect(page).toHaveURL(/\/contribute\/task\/1$/);
+    await expect(page).toHaveURL(new RegExp(`/contribute/task/${FIRST_TASK.id}$`));
     await expect(page.getByRole('heading', { name: 'What done looks like' })).toBeVisible();
-    await expect(page.getByRole('list').filter({ hasText: 'GET /api/upland/export' })).toBeVisible();
+    await expect(page.getByRole('list').filter({ hasText: 'Every action kind the lobby sends' })).toBeVisible();
     await expect(page.getByRole('link', { name: 'Sign in to claim' })).toHaveAttribute(
       'href',
-      '/signin?next=%2Fcontribute%2Ftask%2F1',
+      `/signin?next=${encodeURIComponent(`/contribute/task/${FIRST_TASK.id}`)}`,
     );
     await expect(page.getByRole('button', { name: 'Claim this' })).toHaveCount(0);
     // Nothing to hand to an agent before the task is yours.
@@ -265,7 +267,7 @@ test.describe('claiming with the practice account', () => {
     await expect(open.getByText("Press Get started on this page first, so your copy has FORGE's connector settings.")).toBeVisible();
     await expect(open.getByText('Open your copy in Antigravity. The FORGE connector is already set up in it.')).toBeVisible();
     await expect(open.getByText(/Settings → Customizations, press Authenticate next to forge, then paste the code/)).toBeVisible();
-    await expect(open.getByText('Ask it: Start FORGE task #1')).toBeVisible();
+    await expect(open.getByText(`Ask it: Start FORGE task #${PRACTICE_TASK.id}`)).toBeVisible();
   });
 
   test('copying the brief is a closed fallback, and it holds the same brief', async ({ page }) => {
@@ -364,7 +366,9 @@ test.describe('claiming with the practice account', () => {
 test.describe('a task above the practice account’s tier', () => {
   test('says so, as the API does, and nothing is claimed (tier_too_low)', async ({ page }) => {
     await goOffline(page);
-    await page.goto(`/signin?next=${encodeURIComponent('/contribute/task/4')}`);
+    const above = TASK_FIXTURES.find((task) => task.tierFloor !== 'T0');
+    if (above === undefined) throw new Error('no task above T0 in the fixtures');
+    await page.goto(`/signin?next=${encodeURIComponent(`/contribute/task/${above.id}`)}`);
     await demoSignIn(page);
     await page.getByRole('button', { name: 'Claim this' }).click();
     await expect(page.getByText('This task needs a contributor tier above T0; it opens up as you ship work.')).toBeVisible();
@@ -382,7 +386,7 @@ test.describe('with the FORGE connector switched off', () => {
         body: JSON.stringify({ contribute_bridge: true, agent_start: true, mcp_connector: false }),
       }),
     );
-    await page.goto(`/signin?next=${encodeURIComponent('/contribute/task/1')}`);
+    await page.goto(`/signin?next=${encodeURIComponent(PRACTICE_PATH)}`);
     await demoSignIn(page);
     await page.getByRole('button', { name: 'Claim this' }).click();
 
@@ -416,11 +420,11 @@ test.describe('the practice account is nobody on GitHub', () => {
     await page.route('**/api/bridge/tasks', (route) =>
       route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ tasks: [card, ...others] }) }),
     );
-    await page.route('**/api/bridge/tasks/1', (route) =>
+    await page.route('**/api/bridge/tasks/48', (route) =>
       route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ task: card, acceptanceCriteria: criteria, branch: 'task/1-x', brief: BRIEF_WITHOUT_LOGIN }),
+        body: JSON.stringify({ task: card, acceptanceCriteria: criteria, branch: 'task/48-x', brief: BRIEF_WITHOUT_LOGIN }),
       }),
     );
     await page.goto(`/signin?next=${encodeURIComponent('/contribute')}`);
@@ -430,7 +434,7 @@ test.describe('the practice account is nobody on GitHub', () => {
     await expect(first).toContainText('someone is on it');
     await expect(first).not.toContainText('yours right now');
 
-    await page.goto('/contribute/task/1');
+    await page.goto('/contribute/task/48');
     await expect(page.getByText('you is on this one right now.')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Claim this' })).toBeDisabled();
     await expect(page.getByRole('heading', { name: 'Your agent', exact: true })).toHaveCount(0);
@@ -448,7 +452,7 @@ test.describe('with agent_start switched off', () => {
         body: JSON.stringify({ contribute_bridge: true, agent_start: false }),
       }),
     );
-    await page.goto(`/signin?next=${encodeURIComponent('/contribute/task/1')}`);
+    await page.goto(`/signin?next=${encodeURIComponent(PRACTICE_PATH)}`);
     await demoSignIn(page);
     await page.getByRole('button', { name: 'Claim this' }).click();
 
@@ -492,7 +496,7 @@ test.describe('the offline task fixtures', () => {
   test('match the API fixtures field for field', () => {
     const served = apiTasks.map((task) => ({ ...task, status: 'open' }));
     expect(apiTasks.some((task) => 'rewardUsd' in task)).toBe(false);
-    expect(TASK_FIXTURES.map((task) => task.id)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(TASK_FIXTURES.map((task) => task.id)).toEqual([48, 49, 50, 51, 52]);
     expect(TASK_FIXTURES).toStrictEqual(served);
   });
 });

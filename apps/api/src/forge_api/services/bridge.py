@@ -437,7 +437,8 @@ class TaskSource(Protocol):
 
 
 class FixtureTaskSource:
-    """Reads the committed starter tasks (PRD Appendix H.3 self-hosting list)."""
+    """Reads the committed task list: the Task Specs posted as issues on verastd/forge-app,
+    mirrored from their reviewed copies in docs/tasks/ (issue text itself is never read)."""
 
     def __init__(self, path: Path | None = None) -> None:
         self._path = path or _FIXTURE_PATH

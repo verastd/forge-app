@@ -16,7 +16,7 @@ from forge_api.services.identity import Identity
 from forge_api.services.mcp_types import ToolContext, ToolDef, ToolError, ToolOutput
 from forge_api.services.state import get_state_db
 
-from .bridge_helpers import OTHER, USER, BridgeEnv, install_bridge
+from .bridge_helpers import OTHER, TEST_TASKS, USER, BridgeEnv, install_bridge
 from .conftest import FakeClock
 
 CSV_BRANCH = "task/1-polish-the-csv-export-in-the-data-app"
@@ -198,7 +198,7 @@ def test_list_tasks_filters(env: BridgeEnv) -> None:
 
 
 def test_get_task_gives_the_personal_brief_and_the_lease(env: BridgeEnv) -> None:
-    task = FixtureTaskSource().get_task(1)
+    task = FixtureTaskSource(TEST_TASKS).get_task(1)
     assert task is not None
     unclaimed = call("get_task", {"task_id": 1})
     assert unclaimed.structured is not None
@@ -414,7 +414,7 @@ def test_the_forge_task_prompt(env: BridgeEnv) -> None:
     ]
     ctx = ToolContext(identity=USER, db=get_state_db())
     (message,) = prompt.render(ctx, {"task_id": "#1"})
-    task = FixtureTaskSource().get_task(1)
+    task = FixtureTaskSource(TEST_TASKS).get_task(1)
     assert task is not None
     assert message["role"] == "user"
     assert message["content"]["type"] == "text"

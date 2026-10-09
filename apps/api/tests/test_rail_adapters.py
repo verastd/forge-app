@@ -59,6 +59,7 @@ from .bridge_helpers import (
     OPENHANDS_KEY,
     ROUTINE_TOKEN,
     ROUTINE_URL,
+    TEST_TASKS,
     BridgeEnv,
     FakeVendor,
     install_bridge,
@@ -107,7 +108,7 @@ RAILS: list[StartRail] = list(CREDENTIALS)
 
 
 def request_for(rail: StartRail, credential: RailCredential | None = None) -> AdapterRequest:
-    task = FixtureTaskSource().get_task(1)
+    task = FixtureTaskSource(TEST_TASKS).get_task(1)
     assert task is not None
     return AdapterRequest(
         task_id=task.id,

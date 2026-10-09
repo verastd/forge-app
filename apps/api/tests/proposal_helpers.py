@@ -20,7 +20,7 @@ from forge_api.services.identity import Identity
 from forge_api.services.proposals import Proposals, advance_all
 from forge_api.services.state import StateDB, get_state_db
 
-from .bridge_helpers import BridgeEnv, install_bridge
+from .bridge_helpers import TEST_TASKS, BridgeEnv, install_bridge
 from .conftest import AuthHeaders, FakeClock
 
 ALICE = Identity(sub="1001", login="octo-contributor")
@@ -252,6 +252,8 @@ def install_board(monkeypatch: pytest.MonkeyPatch, clock: FakeClock) -> BridgeEn
     tasks published from proposals."""
     env = install_bridge(monkeypatch, clock)
     monkeypatch.setattr(
-        bridge_service, "_source", CompositeTaskSource(FixtureTaskSource(), PublishedTaskSource())
+        bridge_service,
+        "_source",
+        CompositeTaskSource(FixtureTaskSource(TEST_TASKS), PublishedTaskSource()),
     )
     return env

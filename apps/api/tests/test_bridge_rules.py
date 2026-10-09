@@ -29,6 +29,7 @@ from .bridge_helpers import (
     DEVIN_ORG,
     JULES_KEY,
     OTHER,
+    TEST_TASKS,
     USER,
     BridgeEnv,
     github_time,
@@ -602,7 +603,7 @@ def test_a_task_above_t0_answers_tier_too_low(
 
 def test_the_agents_md_task_is_for_maintainers_only() -> None:
     """mcp L5: task 4 edits a protected path by nature; its text stays as it is."""
-    task = FixtureTaskSource().get_task(4)
+    task = FixtureTaskSource(TEST_TASKS).get_task(4)
     assert task is not None
     assert (task.title, task.tierFloor) == ("Improve AGENTS.md build and scope instructions", "T2")
 
@@ -801,7 +802,10 @@ def test_the_vendor_call_limit_holds_under_concurrent_relays(env: BridgeEnv) -> 
     env.vault_on()
     env.start_rails("jules")
     bridge = Bridge(
-        env.store, FixtureTaskSource(), bridge_service.get_github_reads(), env.vendor.client()
+        env.store,
+        FixtureTaskSource(TEST_TASKS),
+        bridge_service.get_github_reads(),
+        env.vendor.client(),
     )
     bridge.claim(USER, 1)
     bridge.dispatch(

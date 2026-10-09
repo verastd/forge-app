@@ -30,7 +30,15 @@ from forge_api.services.github_reads import GitHubReads, GitHubUnavailable
 from forge_api.services.identity import Identity
 from forge_api.services.state import get_state_db
 
-from .bridge_helpers import OTHER, USER, BridgeEnv, github_time, install_bridge, json_response
+from .bridge_helpers import (
+    OTHER,
+    TEST_TASKS,
+    USER,
+    BridgeEnv,
+    github_time,
+    install_bridge,
+    json_response,
+)
 from .conftest import AuthHeaders, FakeClock
 
 CSV_TASK = 1
@@ -897,7 +905,7 @@ def test_send_for_review_opens_the_pull_request_as_the_contributor(
         assert (request.url.scheme, request.url.host) == ("https", "api.github.com")
         assert request.headers["Authorization"] == f"Bearer {TOKEN}"
     sent = env.github.bodies()[3]
-    task = FixtureTaskSource().get_task(CSV_TASK)
+    task = FixtureTaskSource(TEST_TASKS).get_task(CSV_TASK)
     assert task is not None
     assert sent["title"] == f"[#1] {task.title}"
     assert sent["head"] == f"octo-contributor:{CSV_BRANCH}"
@@ -1137,7 +1145,7 @@ def test_the_title_and_body_come_from_trusted_task_data_only(
 ) -> None:
     """An agent's progress note never reaches the pull request; a `"` in the title is `'`
     there, as in the brief."""
-    task = FixtureTaskSource().get_task(CSV_TASK)
+    task = FixtureTaskSource(TEST_TASKS).get_task(CSV_TASK)
     assert task is not None
     quoted = bridge_service.TaskFixture(
         **{**task.__dict__, "title": 'Fix the "Help" link', "acceptanceCriteria": []}
@@ -2578,7 +2586,7 @@ def test_no_rail_sentence_a_contributor_reads_says_fork() -> None:
 
 
 def test_the_brief_names_the_fork_for_the_agent_and_says_copy_otherwise() -> None:
-    task = FixtureTaskSource().get_task(CSV_TASK)
+    task = FixtureTaskSource(TEST_TASKS).get_task(CSV_TASK)
     assert task is not None
     from forge_api.services.brief import compile_brief
 
@@ -2645,7 +2653,7 @@ def test_the_rules_are_those_of_the_main_each_diff_was_compared_with(
     rules, never the first one's (a cache keyed by nothing but "the rules" would let it
     through, and FORGE would attest)."""
     first = branch_name(CSV_TASK, "Polish the CSV export in the Data app")
-    task_three = FixtureTaskSource().get_task(3)
+    task_three = FixtureTaskSource(TEST_TASKS).get_task(3)
     assert task_three is not None
     second = branch_name(3, task_three.title)
     claim(client, user_headers)

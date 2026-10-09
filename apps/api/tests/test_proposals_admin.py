@@ -410,15 +410,15 @@ def test_published_tasks_are_numbered_from_10001(floor: Floor) -> None:
     for missing in (1, 10000, 10003, 2**63, 2**80):
         assert source.get_task(missing) is None
     board = CompositeTaskSource(FixtureTaskSource(), source)
-    assert board.get_task(1) is not None and board.get_task(10001) == first
+    assert board.get_task(48) is not None and board.get_task(10001) == first
     assert board.get_task(9999) is None
-    assert [task.id for task in board.list_tasks()] == [*range(1, 9), 10001, 10002]
+    assert [task.id for task in board.list_tasks()] == [48, 49, 50, 51, 52, 10001, 10002]
 
 
 def test_the_default_board_serves_the_fixtures_then_the_published_tasks() -> None:
     source = bridge_service.get_task_source()
     assert isinstance(source, CompositeTaskSource)
-    assert [task.id for task in source.list_tasks()] == list(range(1, 9))
+    assert [task.id for task in source.list_tasks()] == [48, 49, 50, 51, 52]
 
 
 # --- shipped ----------------------------------------------------------------------------
