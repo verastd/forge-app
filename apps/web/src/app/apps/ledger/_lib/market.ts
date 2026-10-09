@@ -133,7 +133,7 @@ export interface DataLayer {
 
 /** The ledger's refresh cadence per layer (README, "Freshness"). */
 export const DATA_LAYERS: readonly DataLayer[] = [
-  { id: 'chain', label: 'Chain', cadence: 'Live, about 1 s behind', covers: 'Actions, transfers, contracts, analytics' },
+  { id: 'chain', label: 'Chain', cadence: 'Streamed live from the chain', covers: 'Actions, transfers, contracts, analytics' },
   { id: 'decoded', label: 'Decoded events', cadence: 'Every 15 min', covers: 'Sales, listings, property history' },
   { id: 'market', label: 'Market layer', cadence: 'Every 6 h, at :17', covers: 'Properties, accounts, offers, rates, cities, signals' },
   { id: 'reference', label: 'Reference data', cadence: 'Daily at 04:43 UTC', covers: 'Neighborhoods, collections, Upland API details' },

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { LedgerError, createLedgerClient } from '@forge/upland-ledger';
 
 import { example } from './fixtures.test-helper';
-import { HeavySlot, ResponseCache, describeError, isAbort, queryKey, toLedgerError, viewState } from './query-core';
+import { HeavySlot, describeError, isAbort, queryKey, toLedgerError, viewState } from './query-core';
 import type { QuerySnapshot } from './query-core';
 
 const snap = <T>(over: Partial<QuerySnapshot<T>>): QuerySnapshot<T> => ({
@@ -24,32 +24,6 @@ function clientAnswering(answer: (path: string) => { status: number; body: unkno
     },
   });
 }
-
-describe('ResponseCache', () => {
-  it('serves entries until the TTL passes, then forgets them', () => {
-    let now = 1_000;
-    const cache = new ResponseCache(15_000, () => now);
-    cache.set('/status', { ok: 1 });
-    expect(cache.get('/status')).toEqual({ value: { ok: 1 }, at: 1_000 });
-    now += 15_000;
-    expect(cache.get('/status')?.value).toEqual({ ok: 1 });
-    now += 1;
-    expect(cache.get('/status')).toBeUndefined();
-  });
-
-  it('evicts the oldest entry past its size bound', () => {
-    const cache = new ResponseCache(60_000, () => 0, 2);
-    cache.set('a', 1);
-    cache.set('b', 2);
-    cache.set('c', 3);
-    expect(cache.get('a')).toBeUndefined();
-    expect(cache.get('c')?.value).toBe(3);
-    cache.delete('c');
-    expect(cache.get('c')).toBeUndefined();
-    cache.clear();
-    expect(cache.get('b')).toBeUndefined();
-  });
-});
 
 describe('HeavySlot', () => {
   it('runs heavy reads one at a time, in order', async () => {

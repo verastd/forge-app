@@ -1,0 +1,284 @@
+/*
+ * Embers tokens, copied value-for-value from design_handoff_embers/tokens/*.css.
+ *
+ * One deliberate change: the handoff puts tokens on :root. FORGE's site
+ * stylesheet already owns :root names such as --accent, --text-muted and
+ * --border-strong, so here every token and base rule is scoped to `.em-root`
+ * (the element AppShell renders). Dark values apply when next-themes sets
+ * data-theme="dark" on <html>, or when .em-root carries it itself.
+ * Fonts are self-hosted (@forge/ui/fonts), per DESIGN_SYSTEM.md; the
+ * handoff's Google Fonts @import is not used.
+ */
+
+/* Embers color tokens. Light on :root, dark on [data-theme="dark"]. Semantic names follow PRD 6.5 rule 4 and COMPONENT_MAP §6. All text pairs ≥ 4.5:1, indicators ≥ 3:1. */
+.em-root {
+  /* Base scales */
+  --n-0: #ffffff; --n-50: #f7f7f7; --n-100: #efefef; --n-150: #e8e8e8; --n-200: #dedede; --n-300: #c6c6c6; --n-400: #9e9e9e; --n-500: #6f6f6f; --n-600: #525252; --n-700: #3a3a3a; --n-800: #272727; --n-850: #1f1f1f; --n-900: #171717; --n-950: #101010; --n-1000: #0a0a0a;
+  --ember-200: oklch(0.90 0.09 60); --ember-300: oklch(0.82 0.14 52); --ember-400: oklch(0.74 0.18 48); --ember-500: oklch(0.66 0.19 48); --ember-600: #BF5700; --ember-700: oklch(0.48 0.15 48); --ember-800: oklch(0.36 0.11 48);
+  --green-400: oklch(0.80 0.17 150); --green-600: oklch(0.55 0.15 150); --green-800: oklch(0.32 0.08 150);
+  --red-400: oklch(0.74 0.18 25); --red-600: oklch(0.56 0.20 25); --red-800: oklch(0.32 0.10 25);
+  --yellow-400: oklch(0.86 0.16 92); --yellow-600: oklch(0.62 0.13 85); --yellow-800: oklch(0.36 0.07 85);
+  --blue-400: oklch(0.78 0.12 245); --blue-600: oklch(0.55 0.15 250); --blue-800: oklch(0.32 0.08 250);
+  --teal-400: oklch(0.80 0.12 195); --teal-600: oklch(0.55 0.11 200);
+  --violet-400: oklch(0.76 0.15 300); --violet-600: oklch(0.55 0.20 300);
+  --purple-400: oklch(0.74 0.17 310); --purple-600: oklch(0.52 0.22 305);
+  --orange-400: oklch(0.76 0.17 50); --orange-600: oklch(0.60 0.18 45);
+
+  /* Surfaces */
+  --surface-page: var(--n-50);
+  --surface-card: var(--n-0);
+  --surface-sunken: var(--n-100);
+  --surface-hover: var(--n-100);
+  --surface-active: var(--n-150);
+  --surface-popover: var(--n-0);
+  --surface-inverse: var(--n-900);
+  --surface-overlay: rgb(10 10 10 / 0.5);
+  --track: var(--n-200);
+  --skeleton: var(--n-150);
+  --skeleton-shine: var(--n-50);
+
+  /* Text */
+  --text-primary: var(--n-950);
+  --text-secondary: var(--n-600);
+  --text-muted: var(--n-500);
+  --text-inverse: var(--n-0);
+  --text-link: var(--ember-700);
+  --text-link-hover: var(--ember-800);
+
+  /* Borders */
+  --border-subtle: var(--n-200);
+  --border-strong: var(--n-400);
+  --border-focus: var(--ember-600);
+
+  /* Brand */
+  --accent: var(--ember-600);
+  --accent-hover: var(--ember-700);
+  --accent-strong: var(--ember-700);
+  --accent-soft: oklch(0.95 0.04 55);
+  --on-accent: var(--n-0);
+  --brand-aurora-1: oklch(0.82 0.14 55); --brand-aurora-2: #BF5700; --brand-aurora-3: oklch(0.42 0.15 35);
+
+  /* Danger */
+  --danger: var(--red-600);
+  --danger-hover: oklch(0.48 0.19 25);
+  --on-danger: var(--n-0);
+
+  /* States (PRD 6.5 rule 4) */
+  --state-live: var(--green-600);
+  --state-reconnecting: var(--yellow-600);
+  --state-offline: var(--red-600);
+  --state-success: var(--green-600);
+  --state-error: var(--red-600);
+  --state-warning: var(--yellow-600);
+  --state-stale: var(--yellow-600);
+  --state-info: var(--blue-600);
+  --state-neutral: var(--n-500);
+  --state-success-soft: oklch(0.95 0.05 150); --state-error-soft: oklch(0.95 0.04 25); --state-warning-soft: oklch(0.96 0.06 92); --state-info-soft: oklch(0.95 0.03 250);
+
+  /* Tiers */
+  --tier-free: var(--n-500);
+  --tier-basic: var(--teal-600);
+  --tier-premium: var(--violet-600);
+  --tier-free-soft: var(--n-100); --tier-basic-soft: oklch(0.94 0.04 200); --tier-premium-soft: oklch(0.94 0.05 300);
+
+  /* Collection tiers (A.3) and treasure rarity (A.13) */
+  --collection-tier-1: var(--blue-600);
+  --collection-tier-2: var(--purple-600);
+  --collection-tier-3: var(--orange-600);
+  --collection-tier-4: var(--red-600);
+  --collection-tier-5: var(--yellow-600);
+  --rarity-limited: var(--purple-600);
+  --rarity-exclusive: var(--orange-600);
+  --rarity-rare: var(--red-600);
+  --rarity-limited-soft: oklch(0.94 0.05 305); --rarity-exclusive-soft: oklch(0.95 0.05 45); --rarity-rare-soft: oklch(0.95 0.04 25);
+
+  /* User levels (A.5) */
+  --level-visitor: var(--n-500); --level-uplander: var(--green-600); --level-pro: var(--blue-600); --level-director: var(--purple-600); --level-executive: var(--orange-600); --level-chief: var(--red-600); --level-7plus: var(--yellow-600);
+
+  /* Money and charts */
+  --price-up: var(--green-600);
+  --price-down: var(--red-600);
+  --chart-series-1: var(--ember-500); --chart-series-2: var(--blue-600); --chart-series-3: var(--green-600); --chart-series-4: var(--purple-600); --chart-series-5: var(--teal-600); --chart-series-6: var(--red-600); --chart-series-7: var(--yellow-600); --chart-series-8: var(--n-500);
+  --chart-grid: var(--n-200);
+  --map-for-sale-upx: var(--green-600);
+  --map-for-sale-usd: var(--blue-600);
+  --map-locked: var(--n-400);
+  --map-owned: var(--ember-500);
+
+  /* Elevation */
+  --elevation-1: 0 1px 2px rgb(10 10 10 / 0.06), 0 1px 1px rgb(10 10 10 / 0.04);
+  --elevation-2: 0 4px 12px rgb(10 10 10 / 0.10), 0 1px 3px rgb(10 10 10 / 0.06);
+  --elevation-3: 0 16px 40px rgb(10 10 10 / 0.16), 0 2px 6px rgb(10 10 10 / 0.08);
+  --focus-ring: 0 0 0 2px var(--surface-card), 0 0 0 4px var(--border-focus);
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] .em-root,
+.em-root[data-theme="dark"] {
+  --surface-page: var(--n-1000);
+  --surface-card: var(--n-900);
+  --surface-sunken: var(--n-950);
+  --surface-hover: var(--n-850);
+  --surface-active: var(--n-800);
+  --surface-popover: var(--n-850);
+  --surface-inverse: var(--n-100);
+  --surface-overlay: rgb(0 0 0 / 0.65);
+  --track: var(--n-800);
+  --skeleton: var(--n-850);
+  --skeleton-shine: var(--n-800);
+
+  --text-primary: var(--n-100);
+  --text-secondary: var(--n-300);
+  --text-muted: var(--n-400);
+  --text-inverse: var(--n-950);
+  --text-link: var(--ember-300);
+  --text-link-hover: var(--ember-200);
+
+  --border-subtle: var(--n-800);
+  --border-strong: var(--n-600);
+  --border-focus: var(--ember-400);
+
+  --accent: var(--ember-400);
+  --accent-hover: var(--ember-300);
+  --accent-strong: var(--ember-300);
+  --accent-soft: oklch(0.27 0.07 48);
+  --on-accent: var(--n-1000);
+  --brand-aurora-1: oklch(0.74 0.18 48); --brand-aurora-2: #BF5700; --brand-aurora-3: oklch(0.36 0.13 35);
+
+  --danger: var(--red-400);
+  --danger-hover: oklch(0.80 0.15 25);
+  --on-danger: var(--n-1000);
+
+  --state-live: var(--green-400);
+  --state-reconnecting: var(--yellow-400);
+  --state-offline: var(--red-400);
+  --state-success: var(--green-400);
+  --state-error: var(--red-400);
+  --state-warning: var(--yellow-400);
+  --state-stale: var(--yellow-400);
+  --state-info: var(--blue-400);
+  --state-neutral: var(--n-400);
+  --state-success-soft: oklch(0.27 0.05 150); --state-error-soft: oklch(0.27 0.06 25); --state-warning-soft: oklch(0.28 0.05 92); --state-info-soft: oklch(0.27 0.05 250);
+
+  --tier-free: var(--n-400);
+  --tier-basic: var(--teal-400);
+  --tier-premium: var(--violet-400);
+  --tier-free-soft: var(--n-850); --tier-basic-soft: oklch(0.27 0.04 200); --tier-premium-soft: oklch(0.28 0.06 300);
+
+  --collection-tier-1: var(--blue-400);
+  --collection-tier-2: var(--purple-400);
+  --collection-tier-3: var(--orange-400);
+  --collection-tier-4: var(--red-400);
+  --collection-tier-5: var(--yellow-400);
+  --rarity-limited: var(--purple-400);
+  --rarity-exclusive: var(--orange-400);
+  --rarity-rare: var(--red-400);
+  --rarity-limited-soft: oklch(0.28 0.07 305); --rarity-exclusive-soft: oklch(0.29 0.07 45); --rarity-rare-soft: oklch(0.28 0.07 25);
+
+  --level-visitor: var(--n-400); --level-uplander: var(--green-400); --level-pro: var(--blue-400); --level-director: var(--purple-400); --level-executive: var(--orange-400); --level-chief: var(--red-400); --level-7plus: var(--yellow-400);
+
+  --price-up: var(--green-400);
+  --price-down: var(--red-400);
+  --chart-series-1: var(--ember-400); --chart-series-2: var(--blue-400); --chart-series-3: var(--green-400); --chart-series-4: var(--purple-400); --chart-series-5: var(--teal-400); --chart-series-6: var(--red-400); --chart-series-7: var(--yellow-400); --chart-series-8: var(--n-400);
+  --chart-grid: var(--n-800);
+  --map-for-sale-upx: var(--green-400);
+  --map-for-sale-usd: var(--blue-400);
+  --map-locked: var(--n-600);
+  --map-owned: var(--ember-400);
+
+  --elevation-1: 0 1px 2px rgb(0 0 0 / 0.5), 0 0 0 1px rgb(255 255 255 / 0.03);
+  --elevation-2: 0 6px 16px rgb(0 0 0 / 0.55), 0 0 0 1px rgb(255 255 255 / 0.04);
+  --elevation-3: 0 20px 48px rgb(0 0 0 / 0.7), 0 0 0 1px rgb(255 255 255 / 0.05);
+  --focus-ring: 0 0 0 2px var(--surface-card), 0 0 0 4px var(--border-focus);
+  color-scheme: dark;
+}
+
+.em-root {
+  --font-sans: "Work Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* Size scale (px) */
+  --text-2xs: 11px; --text-xs: 12px; --text-sm: 13px; --text-base: 14px; --text-md: 16px; --text-lg: 20px; --text-xl: 24px; --text-2xl: 32px; --text-3xl: 44px;
+  --leading-tight: 1.15; --leading-snug: 1.3; --leading-normal: 1.5;
+  --tracking-tight: -0.01em; --tracking-normal: 0; --tracking-wide: 0.06em;
+  --weight-regular: 400; --weight-medium: 500; --weight-semibold: 600; --weight-bold: 700;
+
+  /* Composite styles */
+  --type-display: var(--weight-semibold) var(--text-3xl)/var(--leading-tight) var(--font-sans);
+  --type-h1: var(--weight-semibold) var(--text-2xl)/var(--leading-tight) var(--font-sans);
+  --type-h2: var(--weight-semibold) var(--text-xl)/var(--leading-snug) var(--font-sans);
+  --type-h3: var(--weight-semibold) var(--text-lg)/var(--leading-snug) var(--font-sans);
+  --type-title: var(--weight-semibold) var(--text-md)/var(--leading-snug) var(--font-sans);
+  --type-body: var(--weight-regular) var(--text-base)/var(--leading-normal) var(--font-sans);
+  --type-body-sm: var(--weight-regular) var(--text-sm)/var(--leading-normal) var(--font-sans);
+  --type-label: var(--weight-medium) var(--text-sm)/var(--leading-snug) var(--font-sans);
+  --type-caption: var(--weight-regular) var(--text-xs)/var(--leading-snug) var(--font-sans);
+  --type-eyebrow: var(--weight-semibold) var(--text-2xs)/var(--leading-snug) var(--font-sans);
+  --type-num-lg: var(--weight-medium) var(--text-xl)/var(--leading-tight) var(--font-mono);
+  --type-num: var(--weight-regular) var(--text-sm)/var(--leading-normal) var(--font-mono);
+  --type-code: var(--weight-regular) var(--text-xs)/var(--leading-normal) var(--font-mono);
+}
+
+.em-root {
+  --space-0: 0; --space-1: 2px; --space-2: 4px; --space-3: 6px; --space-4: 8px; --space-5: 12px; --space-6: 16px; --space-7: 20px; --space-8: 24px; --space-9: 32px; --space-10: 40px; --space-11: 48px; --space-12: 64px; --space-13: 96px;
+
+  --radius-xs: 3px; --radius-sm: 4px; --radius-md: 6px; --radius-lg: 10px; --radius-xl: 14px; --radius-pill: 999px;
+
+  /* Control sizes: dense 32 for tables and filter bars, 36 standard, 40 comfortable, 44 touch minimum */
+  --control-dense: 32px; --control-standard: 36px; --control-comfortable: 40px; --control-touch: 44px;
+  --control-padding-x: 12px;
+  --row-dense: 36px; --row-standard: 44px;
+
+  /* Layout */
+  --topbar-height: 52px; --sidebar-width: 248px; --content-max: 1440px; --gutter: 24px; --filterbar-gap: 8px;
+  --z-sticky: 10; --z-popover: 40; --z-dialog: 50; --z-toast: 60;
+}
+
+.em-root {
+  --dur-instant: 0ms; --dur-fast: 120ms; --dur-base: 180ms; --dur-slow: 280ms; --dur-highlight: 2000ms;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1); --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1); --ease-spring: cubic-bezier(0.34, 1.3, 0.64, 1);
+}
+@keyframes em-spin { to { transform: rotate(360deg); } }
+@keyframes em-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+@keyframes em-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+@keyframes em-row-in { from { background-color: var(--accent-soft); } to { background-color: transparent; } }
+@keyframes em-marquee { from { transform: translateX(0); } to { transform: translateX(-100%); } }
+@keyframes em-beam { from { offset-distance: 0%; } to { offset-distance: 100%; } }
+@keyframes em-lattice { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
+@keyframes em-shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
+@keyframes em-progress-indeterminate { from { left: -40%; } to { left: 100%; } }
+@keyframes em-toast-in { from { opacity: 0; transform: translateY(8px) scale(0.98); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .em-root { --dur-fast: 0ms; --dur-base: 0ms; --dur-slow: 0ms; }
+  .em-root .em-motion { animation: none !important; }
+}
+
+/* Body resets and a handful of global utility hooks used by components. */
+.em-root { font-family: var(--font-sans); font-size: var(--text-base); line-height: var(--leading-normal); color: var(--text-primary); background: var(--surface-page); -webkit-font-smoothing: antialiased; font-feature-settings: "tnum" 1, "cv11" 1; }
+.em-root a { color: var(--text-link); text-decoration: none; }
+.em-root a:hover { color: var(--text-link-hover); text-decoration: underline; text-underline-offset: 2px; }
+.em-root *:focus { outline: none; }
+.em-root *:focus-visible { box-shadow: var(--focus-ring); border-radius: var(--radius-sm); }
+.em-root .em-num, .em-root .em-mono, .em-root code, .em-root kbd { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.em-root .em-sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.em-root ::selection { background: var(--accent-soft); }
+
+
+/* --- FORGE host neutralisation ---------------------------------------------
+ * The host site's globals.css styles bare elements (strong, headings, lists,
+ * tables, focus outlines). Inside .em-root those must not leak into Embers
+ * components, so they are reset to inherit at zero specificity (:where), and
+ * the one focus treatment is the Embers ring above.
+ */
+.em-root { min-height: 100vh; color-scheme: light; }
+:root[data-theme="dark"] .em-root, .em-root[data-theme="dark"] { color-scheme: dark; }
+.em-root :where(h1, h2, h3, h4, p, ul, ol, dl, dd, figure) { margin: 0; }
+.em-root :where(h1, h2, h3, h4) { font: inherit; letter-spacing: normal; }
+.em-root :where(ul, ol) { padding: 0; }
+.em-root :where(strong) { color: inherit; font-weight: var(--weight-semibold); }
+.em-root :where(table) { font-size: inherit; border-collapse: separate; }
+.em-root :where(thead th, tbody td) { padding: 0; background: none; border: 0; font: inherit; letter-spacing: normal; text-transform: none; color: inherit; vertical-align: middle; }
+.em-root :where(tbody tr) { transition: none; }
+.em-root :where(tbody tr:hover td) { background: none; }
+.em-root :where(a, button, summary, [tabindex]):focus-visible { outline: none; }
+.em-root *, .em-root *::before, .em-root *::after { box-sizing: border-box; }

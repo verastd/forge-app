@@ -1,0 +1,67 @@
+{
+  "name": "@forge/ui",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Embers design system for FORGE apps: tokens, self-hosted fonts and the Embers components (design_handoff_embers), ported to TSX. Feature code imports UI only from here.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./styles.css": "./src/styles/embers.css",
+    "./fonts": {
+      "types": "./dist/fonts.d.ts",
+      "import": "./dist/fonts.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src/styles"
+  ],
+  "sideEffects": [
+    "*.css",
+    "./dist/fonts.js"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && node scripts/copy-css.mjs",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint src",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "react": "^19",
+    "react-dom": "^19"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9",
+    "@testing-library/dom": "~10.4.1",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.7",
+    "@types/node": "^22",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@vitest/coverage-v8": "^2.1",
+    "eslint": "^9",
+    "jsdom": "~25.0.1",
+    "react": "~19",
+    "react-dom": "~19",
+    "typescript": "~5.6",
+    "typescript-eslint": "^8",
+    "vitest": "^2.1"
+  },
+  "dependencies": {
+    "@fontsource/geist-mono": "~5.3.0",
+    "@fontsource/work-sans": "~5.3.0",
+    "echarts": "~6.1.0",
+    "lucide-react": "~1.48.0",
+    "next-themes": "~0.4.6"
+  }
+}

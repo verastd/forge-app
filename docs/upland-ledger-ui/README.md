@@ -1,6 +1,7 @@
 # Upland Ledger UI — screenshots
 
-Screenshots of `/apps/ledger` for the PR that adds it. They come from a local
+Screenshots of `/apps/ledger` for the PR that adds it, rendered entirely from
+`@forge/ui` (the Embers design-system port). They come from a local
 `next dev` (live build) with a sealed member session, the `upland_ledger` flag
 on, and `/bff/ledger/*` answered with the **captured ledger responses** in
 `packages/upland-ledger/examples/` (2026-10-09). The numbers are real ledger
@@ -15,8 +16,9 @@ capture used small limits.
 | `market-*-1440-dark.png` | Market tabs: sales, listings, offers, rates |
 | `opportunities-1440-dark.png`, `opportunities-1280-light.png` | Signals with their evidence explained |
 | `account-1440-dark.png` | Account profile and chain actions |
-| `overview-390-dark.png`, `market-sales-390-dark.png` | Phone width: drawer nav, tables as cards |
-| `overview-1280-dark-slow.png` | Loading: skeletons, the "Checking" live dot |
+| `overview-1280-light.png` | Overview in the light theme |
+| `overview-390-dark.png`, `market-sales-390-dark.png`, `account-390-dark.png` | Phone width (390 px, no horizontal scroll): drawer nav, tables as cards |
+| `overview-1280-dark-slow.png` | Loading: skeletons in every region, "Connecting" live dot |
 | `overview-1280-dark-502.png` | Ledger down: each section says so, with Retry |
 | `overview-1280-dark-401.png` | A member the ledger answers with 401: sign-in prompt, no data |
 | `market-sales-1280-dark-empty.png` | Empty result, with "Reset filters" |

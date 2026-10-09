@@ -16,13 +16,14 @@
     "@forge/flags": "workspace:*",
     "@forge/lobby": "workspace:*",
     "@forge/shared": "workspace:*",
+    "@forge/ui": "workspace:*",
     "@forge/upland-ledger": "workspace:*",
+    "@tanstack/react-query": "5.103.2",
     "livekit-client": "^2.22.3",
     "livekit-server-sdk": "^2.19.1",
     "next": "^15",
     "react": "^19",
     "react-dom": "^19",
-    "recharts": "~3.10.1",
     "three": "~0.186.1"
   },
   "devDependencies": {
