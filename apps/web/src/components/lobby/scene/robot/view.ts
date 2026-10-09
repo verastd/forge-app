@@ -502,7 +502,8 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
         toFile(face.center[0] + w / 2 - tuck, 0),
         toFile(face.center[1] + h / 2 - tuck, 1),
       );
-      headCut.z.value = toFile(face.center[2], 2);
+      // Just behind the screen: a screen laid on a closed face shows through it, as one closing a hollow does.
+      headCut.z.value = toFile(face.center[2] - HEAD_FIT.screenCut, 2);
     }
     if (head.fit !== 'replace') return;
     if (eyes) {

@@ -562,7 +562,7 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled, w
                   {placement?.screen
                     ? 'Closes the face and covers the model’s own eyes; the glowing eyes sit on it.'
                     : auto?.screen
-                      ? 'Off: the model’s open face shows.'
+                      ? 'Off: the model’s own face (and eyes) show.'
                       : 'This model has a face of its own. Switch on to put a screen over it.'}
                 </span>
               </span>

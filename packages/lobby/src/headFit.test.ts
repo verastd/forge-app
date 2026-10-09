@@ -156,6 +156,61 @@ describe('autoPlacement, an open face', () => {
   });
 });
 
+describe('autoPlacement, a closed face', () => {
+  it('lays the screen on its flat front, so the model’s own eyes give way to the robot’s', () => {
+    // A closed head whose flat front (a painted face) is framed by bricks 8 mm proud of it, as Tripo's Lego head is.
+    const shell = slab([-0.35, 0, -0.2], [0.35, 0.4, 0.2]);
+    const frame = [...slab([-0.35, 0, 0.2], [0.35, 0.05, 0.215]), ...slab([-0.35, 0.35, 0.2], [0.35, 0.4, 0.215])];
+    const triangles = [...shell, ...frame];
+    const placement = autoPlacement('replace', triangles, triangles);
+    const screen = placement.screen!;
+    expect(screen).toBeDefined();
+    const face = placePoint(placement, [0, 0.2, 0.2]);
+    expect(screen.center[2]).toBeCloseTo(face[2], 3);
+    // The face between the frame's bricks, not the bricks.
+    expect(screen.size[1]).toBeLessThan(placePoint(placement, [0, 0.35, 0])[1] - placePoint(placement, [0, 0.05, 0])[1] + 0.02);
+    for (const eye of placement.eyes ?? []) {
+      expect(eye[1]).toBe(screen.center[1]);
+      expect(eye[2]).toBeCloseTo(screen.center[2] + HEAD_FIT.eyeLift, 4);
+    }
+    expect(placement.eyeAngles).toEqual([0, 0, 0]);
+  });
+
+  it('takes a face-sized window round the eyes when the flat front is bigger than a face', () => {
+    // A tall, flat-fronted head: the front runs far above the eyes.
+    const tall = slab([-0.35, 0, -0.2], [0.35, 1.2, 0.2]);
+    const placement = autoPlacement('replace', tall, tall);
+    const screen = placement.screen!;
+    expect(screen.size[1]).toBe(HEAD_FIT.faceMaxHeight);
+    // Kept on the face: its bottom edge no lower than the front's.
+    expect(screen.center[1] - screen.size[1] / 2).toBeGreaterThanOrEqual(-HEAD_FIT.screenStep);
+    expect(screen.center[1] - screen.size[1] / 2).toBeLessThanOrEqual(ROBOT_EYES[0][1]);
+  });
+
+  it('centres the eyes on a screen that sits off to one side', () => {
+    // A flat front with a bar 8 mm proud down its left side: the face, and the screen, lie right of centre.
+    const shell = slab([-0.35, 0, -0.2], [0.35, 0.4, 0.2]);
+    const bar = slab([-0.35, 0, 0.2], [-0.15, 0.4, 0.215]);
+    const triangles = [...shell, ...bar];
+    const placement = autoPlacement('replace', triangles, triangles);
+    const screen = placement.screen!;
+    expect(screen.center[0]).toBeGreaterThan(0.01);
+    const [left, right] = placement.eyes!;
+    expect((left[0] + right[0]) / 2).toBeCloseTo(screen.center[0], 4);
+    expect(right[0] - left[0]).toBeCloseTo(ROBOT_EYES[1][0] - ROBOT_EYES[0][0], 4);
+  });
+
+  it('leaves a face too small for both eyes alone', () => {
+    // A flat strip between the eyes, the face either side of it angled away.
+    const strip = slab([-0.04, 0.02, 0.1], [0.04, 0.38, 0.2]);
+    const left = [-0.04, 0.02, 0.2, -0.35, 0.02, 0, -0.35, 0.38, 0, -0.04, 0.02, 0.2, -0.35, 0.38, 0, -0.04, 0.38, 0.2];
+    const right = left.map((v, i) => (i % 3 === 0 ? -v : v));
+    const shell = slab([-0.35, 0, -0.2], [0.35, 0.4, -0.1]);
+    const triangles = [...shell, ...strip, ...left, ...right];
+    expect(autoPlacement('replace', triangles, triangles).screen).toBeUndefined();
+  });
+});
+
 describe('autoPlacement, a face accessory', () => {
   const mask = solid([-0.4, 0, -0.25], [0.4, 1, 0.25]);
 

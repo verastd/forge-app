@@ -69,6 +69,22 @@ export const HEAD_FIT = Object.freeze({
   screenTuck: 0.005,
   /** The largest a face screen may be across or down (AvatarHeadPlacement's limit), metres. */
   screenMax: 0.6,
+  /**
+   * A closed face (no hollow): the flat front round the eyes, within this much (metres) of
+   * its depth between them, takes the screen too, so the model's own eyes (painted or
+   * sculpted) give way to the robot's.
+   */
+  faceDepth: 0.005,
+  /** How squarely (the surface normal's forward share) a closed face must look ahead to take a flat screen. */
+  faceFlat: 0.97,
+  /** How small a closed face may be and still take a screen (both eyes on it), metres. */
+  faceMinWidth: 0.12,
+  faceMinHeight: 0.06,
+  /** The largest screen a closed face takes, metres: the face, not the whole front of the head. */
+  faceMaxWidth: 0.4,
+  faceMaxHeight: 0.3,
+  /** The renderer cuts the model this far behind a screen, so a screen laid on a face shows through it. */
+  screenCut: 0.002,
   /** How far an eye sits proud of the face under it, metres. */
   eyeLift: 0.004,
   /** A face accessory is this wide, metres: most of the face screen. */
@@ -124,11 +140,12 @@ export function autoPlacement(
     const scale = clampScale(HEAD_FIT.headWidth / Math.max(x1 - x0, 1e-9));
     const offset = clampPoint([-scale * ((x0 + x1) / 2), -scale * bottom, -scale * ((z0 + z1) / 2)]);
     const front = scale * z1 + offset[2];
-    const screen = findScreen(triangles, scale, offset);
+    const screen = findScreen(triangles, scale, offset) ?? findFace(triangles, scale, offset, front);
     if (screen) {
-      // An open face: a screen closes it, and the eyes sit on the screen, facing straight out.
+      // An open face is closed by a screen, a closed one covered: the eyes sit on it, facing straight out.
+      // Centred on the screen, at the robot's own spacing.
       const z = screen.center[2] + HEAD_FIT.eyeLift;
-      const eyes = ROBOT_EYES.map((eye) => clampPoint([eye[0], eye[1], z])) as [Point3, Point3];
+      const eyes = ROBOT_EYES.map((eye) => clampPoint([screen.center[0] + eye[0], screen.center[1], z])) as [Point3, Point3];
       return { scale, offset, eyes, eyeAngles: [0, 0, 0], screen };
     }
     const hits = ROBOT_EYES.map((eye) => surfaceAt(triangles, scale, offset, eye));
@@ -372,6 +389,68 @@ function findScreen(triangles: ArrayLike<number>, scale: number, offset: Point3)
     center: clampPoint([middle[0] + ((left + right) / 2) * step, middle[1] + ((down + up) / 2) * step, frame - HEAD_FIT.screenInset]),
     size: [round(width), round(height)],
   };
+}
+
+/**
+ * The flat front of a closed face, round the eyes: flooded out from between
+ * them over a grid of rays, as far as the face stays within HEAD_FIT.faceDepth
+ * of its depth there. The screen lies on it (its middle depth), sized to it
+ * and no bigger than a face; the renderer cuts what stands proud of it (a
+ * sculpted eye), and the screen covers what is painted on it. Null when there
+ * is no such face: nothing between the eyes, or a face too curved or too small
+ * to hold both eyes.
+ */
+function findFace(triangles: ArrayLike<number>, scale: number, offset: Point3, front: number): HeadScreen | null {
+  if (triangles.length < 9) return null;
+  const step = HEAD_FIT.screenStep;
+  const reach = Math.round(HEAD_FIT.screenSearch / step);
+  const middle: Point3 = [0, ROBOT_EYES[0][1], 0];
+  // Only squarely forward-facing surface counts: a curved or angled face keeps its own shape (and eye angles).
+  const depth = (i: number, j: number): number => {
+    const hit = surfaceAt(triangles, scale, offset, [middle[0] + i * step, middle[1] + j * step, 0]);
+    if (!hit) return -Infinity;
+    const [nx, ny, nz] = hit.normal;
+    return nz >= HEAD_FIT.faceFlat * Math.hypot(nx, ny, nz) ? hit.z : -Infinity;
+  };
+  const z0 = depth(0, 0);
+  // The face is the head's front, not the back of a hollow that isn't framed all round.
+  if (!Number.isFinite(z0) || z0 < front - HEAD_FIT.screenRecess) return null;
+  const seen = new Set<string>(['0,0']);
+  const queue: [number, number][] = [[0, 0]];
+  const depths: number[] = [];
+  let [left, right, down, up] = [0, 0, 0, 0];
+  while (queue.length > 0) {
+    const [i, j] = queue.pop()!;
+    left = Math.min(left, i);
+    right = Math.max(right, i);
+    down = Math.min(down, j);
+    up = Math.max(up, j);
+    for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+      const [ni, nj] = [i + di, j + dj];
+      const key = `${ni},${nj}`;
+      if (seen.has(key) || Math.abs(ni) > reach || Math.abs(nj) > reach) continue;
+      seen.add(key);
+      const z = depth(ni, nj);
+      if (Math.abs(z - z0) <= HEAD_FIT.faceDepth) {
+        depths.push(z);
+        queue.push([ni, nj]);
+      }
+    }
+  }
+  const width = (right - left + 1) * step;
+  const height = (up - down + 1) * step;
+  if (width < HEAD_FIT.faceMinWidth || height < HEAD_FIT.faceMinHeight) return null;
+  depths.sort((a, b) => a - b);
+  const z = depths[Math.floor(depths.length / 2)]!;
+  /** The screen along one axis: the whole face when it fits, else a face-sized window round the eyes, kept on the face. */
+  const span = (lo: number, hi: number, max: number): [number, number] => {
+    const [from, to] = [lo * step - step / 2, hi * step + step / 2];
+    if (to - from <= max) return [(from + to) / 2, to - from];
+    return [Math.min(to - max / 2, Math.max(from + max / 2, 0)), max];
+  };
+  const [x, w] = span(left, right, HEAD_FIT.faceMaxWidth);
+  const [y, h] = span(down, up, HEAD_FIT.faceMaxHeight);
+  return { center: clampPoint([middle[0] + x, middle[1] + y, z]), size: [round(w), round(h)] };
 }
 
 function clampAngle(angle: number): number {
