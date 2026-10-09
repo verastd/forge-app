@@ -495,3 +495,12 @@
 .fitFull {
   flex: 1 1 100%;
 }
+
+.twoTone {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  font-size: 13px;
+  cursor: pointer;
+}

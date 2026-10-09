@@ -104,6 +104,13 @@ register_schema(
             member_id TEXT PRIMARY KEY REFERENCES avatars_members (member_id),
             head_id TEXT NOT NULL REFERENCES avatars_heads (id)
         )""",
+        # A robot's right eye (when it differs from the left) and its finish. No row: one eye
+        # colour, painted.
+        """CREATE TABLE IF NOT EXISTS avatars_member_looks (
+            member_id TEXT PRIMARY KEY REFERENCES avatars_members (member_id),
+            eye_right TEXT,
+            finish TEXT
+        )""",
         # Who a head was made for: only they can wear it. No row: nobody yet.
         """CREATE TABLE IF NOT EXISTS avatars_head_owners (
             head_id TEXT PRIMARY KEY REFERENCES avatars_heads (id),
@@ -349,11 +356,16 @@ def _avatar(row: dict[str, Any]) -> Avatar:
     return Avatar(
         memberId=row["member_id"],
         colors=AvatarColors(
-            shell=row["shell"], trim=row["trim"], accent=row["accent"], eye=row["eye"]
+            shell=row["shell"],
+            trim=row["trim"],
+            accent=row["accent"],
+            eye=row["eye"],
+            eyeRight=row["l_eye_right"],
         ),
         head=row["head_id"],
         accessory=row["x_accessory"],
         chest=row["chest_sha256"],
+        finish=row["l_finish"],
         updatedAt=members_service.from_db(row["updated_at"]).isoformat(),
     )
 
@@ -442,10 +454,12 @@ def _head_row(db: StateDB, head_id: str) -> dict[str, Any] | None:
     return db.query_one(f"{_HEAD_SELECT} WHERE h.id = ?", (head_id,))
 
 
-#: A dressed robot with its face accessory (NULL when it has none).
+#: A dressed robot with its face accessory, right eye and finish (NULL when it has none).
 _MEMBER_SELECT: Final = (
-    "SELECT m.*, x.head_id AS x_accessory FROM avatars_members m "
-    "LEFT JOIN avatars_member_accessories x ON x.member_id = m.member_id"
+    "SELECT m.*, x.head_id AS x_accessory, l.eye_right AS l_eye_right, l.finish AS l_finish "
+    "FROM avatars_members m "
+    "LEFT JOIN avatars_member_accessories x ON x.member_id = m.member_id "
+    "LEFT JOIN avatars_member_looks l ON l.member_id = m.member_id"
 )
 
 
@@ -507,6 +521,14 @@ def set_avatar(db: StateDB, member_id: str, update: AvatarUpdate, now: datetime)
                 "INSERT INTO avatars_member_accessories (member_id, head_id) VALUES (?, ?)",
                 (member_id, update.accessory),
             )
+        # Paint is the default: kept as no finish at all, so every painted robot reads the same.
+        finish = None if update.finish == "paint" else update.finish
+        db.execute("DELETE FROM avatars_member_looks WHERE member_id = ?", (member_id,))
+        if c.eyeRight is not None or finish is not None:
+            db.execute(
+                "INSERT INTO avatars_member_looks (member_id, eye_right, finish) VALUES (?, ?, ?)",
+                (member_id, c.eyeRight, finish),
+            )
         row = _avatar_row(db, member_id)
     assert row is not None
     return _avatar(row)
@@ -517,6 +539,7 @@ def reset_avatar(db: StateDB, member_id: str) -> None:
     with db.transaction():
         row = _avatar_row(db, member_id)
         db.execute("DELETE FROM avatars_member_accessories WHERE member_id = ?", (member_id,))
+        db.execute("DELETE FROM avatars_member_looks WHERE member_id = ?", (member_id,))
         db.execute("DELETE FROM avatars_members WHERE member_id = ?", (member_id,))
         _drop_unused_assets(db, [row["chest_sha256"] if row else None])
 

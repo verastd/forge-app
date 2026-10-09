@@ -220,8 +220,47 @@ export interface AvatarColors {
   trim: string;
   /** The chestplate's frame and the face screen's rim. */
   accent: string;
-  /** The eyes, and the thruster's glow. */
+  /** The eyes, and the thruster's glow (with `eyeRight`, the eye on the left as you look at the robot). */
   eye: string;
+  /** The eye on the right as you look at the robot (the robot's own left), when it differs from `eye`. */
+  eyeRight?: string;
+}
+
+/** What a robot's armour is made of. The shell colour tints chrome and ice. */
+export type AvatarFinish = 'paint' | 'chrome' | 'ice';
+
+export const AVATAR_FINISHES: readonly AvatarFinish[] = Object.freeze(['paint', 'chrome', 'ice'] as const);
+
+/**
+ * How a finish renders, per surface: the shell (armour), the trim and the
+ * joints, each [shell, trim, joint]. `lift` mixes the base colour toward white
+ * (chrome stays bright whatever its tint); `alpha` below 1 lets the body be
+ * seen into (ice); `rim` is a glow round the silhouette in the lifted shell
+ * colour (ice's edge light); `env` is how much of the room the body reflects.
+ */
+export interface FinishLook {
+  metalness: readonly [number, number, number];
+  roughness: readonly [number, number, number];
+  alpha: readonly [number, number, number];
+  lift: number;
+  rim: number;
+  env: number;
+  /** Drawn see-through (after everything solid). */
+  transparent: boolean;
+}
+
+const FINISH_LOOKS: Readonly<Record<AvatarFinish, FinishLook>> = Object.freeze({
+  // Today's look, exactly.
+  paint: { metalness: [0.25, 0.55, 0.85], roughness: [0.4, 0.3, 0.34], alpha: [1, 1, 1], lift: 0, rim: 0, env: 0.55, transparent: false },
+  // Mirror-bright: all metal, barely rough, reflecting the room.
+  chrome: { metalness: [1, 1, 1], roughness: [0.06, 0.12, 0.2], alpha: [1, 1, 1], lift: 0.12, rim: 0, env: 1.4, transparent: false },
+  // Clear and glossy, seen into, with light caught at the edges.
+  ice: { metalness: [0, 0, 0.2], roughness: [0.12, 0.15, 0.22], alpha: [0.72, 0.78, 0.9], lift: 0.05, rim: 1, env: 0.5, transparent: true },
+});
+
+/** How `finish` renders; anything else (absent, or one this client doesn't know) is paint. */
+export function finishLook(finish: AvatarFinish | null | undefined): FinishLook {
+  return finish && Object.hasOwn(FINISH_LOOKS, finish) ? FINISH_LOOKS[finish] : FINISH_LOOKS.paint;
 }
 
 /**

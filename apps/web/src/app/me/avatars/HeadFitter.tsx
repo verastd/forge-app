@@ -36,7 +36,7 @@ import {
   rescale,
   rotateAbout,
 } from '@forge/lobby';
-import type { AvatarColors, HeadPlacement, HeadScreen, Point3, ScreenAtScale, WornFace } from '@forge/lobby';
+import type { AvatarColors, AvatarFinish, HeadPlacement, HeadScreen, Point3, ScreenAtScale, WornFace } from '@forge/lobby';
 import type { AvatarHead, AvatarHeadFit, AvatarHeadPlacement } from '@forge/shared';
 
 import { createRobotPreview } from '../../../components/lobby/scene/robot/preview';
@@ -59,7 +59,7 @@ export interface HeadFitterProps {
    * Whose robot it is fitted on: their colours, and the replacing head they
    * wear, which a face accessory is fitted over (and lined up with its eyes).
    */
-  wearer?: { colors: AvatarColors; head: AvatarHead | null } | null;
+  wearer?: { colors: AvatarColors; head: AvatarHead | null; finish?: AvatarFinish | null } | null;
 }
 
 type Reading = { kind: 'reading' } | { kind: 'ready'; measure: HeadMeasure } | { kind: 'error'; message: string };
@@ -274,7 +274,10 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled, w
 
   // The robot wears it as it stands (over the wearer's head, for an accessory), in the wearer's colours.
   const wearerColors = wearer?.colors ?? null;
-  const colorKey = wearerColors ? `${wearerColors.shell}${wearerColors.trim}${wearerColors.accent}${wearerColors.eye}` : '';
+  const wearerFinish = wearer?.finish ?? null;
+  const colorKey = wearerColors
+    ? `${wearerColors.shell}${wearerColors.trim}${wearerColors.accent}${wearerColors.eye}${wearerColors.eyeRight ?? ''}${wearerFinish ?? ''}`
+    : '';
   useEffect(() => {
     const preview = previewRef.current;
     if (!preview || reading.kind !== 'ready' || !placement) return;
@@ -293,6 +296,7 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled, w
       name: 'Fitting',
       colors: wearerColors ?? defaultColors(FITTING_LOOK_ID),
       chest: null,
+      finish: wearerFinish,
       ...(worn ? { head: worn, accessory: fitted } : { head: fitted }),
     };
     preview.setLook(look);

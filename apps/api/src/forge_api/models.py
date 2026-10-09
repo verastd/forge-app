@@ -1038,6 +1038,8 @@ AVATAR_EYE_NODES: Final = ("EyeL", "EyeR")
 #: replace: the robot's own head is hidden; accessory: a face accessory worn over it (a
 #: mask, a visor, a helmet), the eyes staying where they always are.
 AvatarHeadFit = Literal["replace", "accessory"]
+#: What a robot's armour is made of (zod AVATAR_FINISHES); None on an avatar: paint.
+AvatarFinish = Literal["paint", "chrome", "ice"]
 AVATAR_PLACEMENT_SCALE_MIN: Final = 0.01
 AVATAR_PLACEMENT_SCALE_MAX: Final = 10
 AVATAR_PLACEMENT_REACH: Final = 1
@@ -1073,6 +1075,8 @@ class AvatarColors(BaseModel):
     trim: _HexColor
     accent: _HexColor
     eye: _HexColor
+    #: The eye on the right as you look at the robot, when it differs; None: `eye`.
+    eyeRight: _HexColor | None = None
 
 
 class Avatar(BaseModel):
@@ -1082,6 +1086,8 @@ class Avatar(BaseModel):
     #: A face accessory worn over the head; None: none.
     accessory: _AvatarHeadId | None = None
     chest: _Sha256 | None = None
+    #: What the armour is made of; None: paint.
+    finish: AvatarFinish | None = None
     updatedAt: str
 
 
@@ -1161,6 +1167,7 @@ class AvatarUpdate(BaseModel):
     colors: AvatarColors
     head: _AvatarHeadId | None = None
     accessory: _AvatarHeadId | None = None
+    finish: AvatarFinish | None = None
 
 
 class AvatarChestUpload(BaseModel):

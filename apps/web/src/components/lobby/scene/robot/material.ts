@@ -27,8 +27,8 @@
  */
 
 import * as THREE from 'three';
-import { CHEST_PANEL, FACE_PANEL, ZONE } from '@forge/lobby';
-import type { AvatarColors } from '@forge/lobby';
+import { CHEST_PANEL, FACE_PANEL, ZONE, finishLook } from '@forge/lobby';
+import type { AvatarColors, AvatarFinish } from '@forge/lobby';
 
 /** The dark gunmetal every robot's joints share. */
 export const JOINT_COLOR = 0x2a2e35;
@@ -51,6 +51,14 @@ export interface RobotUniforms {
   uTime: { value: number };
   /** Talking: the chest and face glow a little brighter. */
   uTalk: { value: number };
+  /** The finish (@forge/lobby's finishLook), each [shell, trim, joint]. */
+  uMetal: { value: THREE.Vector3 };
+  uRough: { value: THREE.Vector3 };
+  uAlpha: { value: THREE.Vector3 };
+  /** How far the armour's colour goes toward white (chrome, ice). */
+  uLift: { value: number };
+  /** Ice's light round the silhouette. */
+  uRim: { value: number };
 }
 
 const f = (n: number): string => n.toFixed(4);
@@ -95,6 +103,11 @@ uniform float uChestFull;
 uniform float uThrust;
 uniform float uTime;
 uniform float uTalk;
+uniform vec3 uMetal;
+uniform vec3 uRough;
+uniform vec3 uAlpha;
+uniform float uLift;
+uniform float uRim;
 varying float vZone;
 varying vec3 vBind;
 varying vec3 vBindN;
@@ -108,16 +121,18 @@ float robotRoundRect(vec2 p, vec2 halfSize, float r) {
 const FRAGMENT_COLOR = /* glsl */ `
 #include <color_fragment>
 int robotZone = int(vZone + 0.5);
-float robotRough = 0.4;
-float robotMetal = 0.25;
+// The finish: the armour's, the trim's and the joints' metal, roughness and see-through.
+float robotRough = uRough.x;
+float robotMetal = uMetal.x;
+float robotAlpha = uAlpha.x;
 vec3 robotEmit = vec3(0.0);
-vec3 robotBase = uShell;
+vec3 robotBase = mix(uShell, vec3(1.0), uLift);
 if (robotZone == ${ZONE.trim} || robotZone == ${ZONE.headTrim}) {
-  robotBase = uTrim; robotRough = 0.3; robotMetal = 0.55;
+  robotBase = mix(uTrim, vec3(1.0), uLift); robotRough = uRough.y; robotMetal = uMetal.y; robotAlpha = uAlpha.y;
 } else if (robotZone == ${ZONE.joint}) {
-  robotBase = uJoint; robotRough = 0.34; robotMetal = 0.85;
+  robotBase = uJoint; robotRough = uRough.z; robotMetal = uMetal.z; robotAlpha = uAlpha.z;
 } else if (robotZone == ${ZONE.thruster}) {
-  robotBase = uJoint; robotRough = 0.3; robotMetal = 0.8;
+  robotBase = uJoint; robotRough = uRough.z - 0.04; robotMetal = uMetal.z - 0.05; robotAlpha = uAlpha.z;
   // Brightest at the tip, fading up the cone.
   float tip = 1.0 - smoothstep(0.0, 0.16, vBind.y);
   robotEmit = uEye * (0.25 + 2.4 * tip * tip) * uThrust;
@@ -160,6 +175,8 @@ if (robotZone == ${ZONE.trim} || robotZone == ${ZONE.headTrim}) {
   robotEmit += screen * (0.75 + 0.35 * uTalk) * lit;
   robotBase = mix(robotBase, uAccent * 0.5, frame);
   robotEmit += uAccent * frame * 0.9;
+  // The chestplate is a screen, solid whatever the armour is made of.
+  robotAlpha = mix(robotAlpha, 1.0, clamp(lit + frame, 0.0, 1.0));
 } else if (robotZone == ${ZONE.head} && vBindN.z > 0.55 && vBind.z > 0.09) {
   vec2 p = vBind.xy - vec2(${f(faceCentre[0]!)}, ${f(faceCentre[1]!)});
   float d = robotRoundRect(p, vec2(${f(faceHalf[0]!)}, ${f(faceHalf[1]!)}), 0.03);
@@ -172,14 +189,20 @@ if (robotZone == ${ZONE.trim} || robotZone == ${ZONE.headTrim}) {
   robotEmit += uEye * glass * (0.025 + 0.02 * uTalk);
   robotBase = mix(robotBase, uAccent * 0.5, rim);
   robotEmit += uAccent * rim * 0.7;
+  // So is the face.
+  robotAlpha = mix(robotAlpha, 1.0, clamp(glass + rim, 0.0, 1.0));
 }
 diffuseColor.rgb = robotBase;
+diffuseColor.a = robotAlpha;
 `;
 
 const FRAGMENT_EMISSIVE = /* glsl */ `
 #include <emissivemap_fragment>
 float robotFacing = clamp(dot(normal, normalize(vViewPosition)), 0.0, 1.0);
 totalEmissiveRadiance += robotEmit + uEye * pow(1.0 - robotFacing, 3.0) * 0.12;
+// Ice: light caught round the edges in its own (lightened) colour, and a cold glow through it.
+totalEmissiveRadiance += mix(uShell, vec3(1.0), 0.5) * pow(1.0 - robotFacing, 2.0) * uRim * 1.2;
+totalEmissiveRadiance += pow(uShell, vec3(1.8)) * 0.55 * uRim * (1.0 - robotMetal);
 `;
 
 /** A body material for one robot. Every one shares its program; each has its own uniforms. */
@@ -201,6 +224,11 @@ export function createBodyMaterial(envMap: THREE.Texture, placeholder: THREE.Tex
     uHideHead: { value: 0 },
     uTime: { value: 0 },
     uTalk: { value: 0 },
+    uMetal: { value: new THREE.Vector3() },
+    uRough: { value: new THREE.Vector3() },
+    uAlpha: { value: new THREE.Vector3(1, 1, 1) },
+    uLift: { value: 0 },
+    uRim: { value: 0 },
   };
   const material = new THREE.MeshStandardMaterial({ envMap, envMapIntensity: 0.55 });
   material.name = 'robot-body';
@@ -217,7 +245,24 @@ export function createBodyMaterial(envMap: THREE.Texture, placeholder: THREE.Tex
       .replace('#include <emissivemap_fragment>', FRAGMENT_EMISSIVE);
   };
   material.customProgramCacheKey = () => 'forge-robot-body-v1';
+  finish(material, uniforms, 'paint');
   return { material, uniforms };
+}
+
+/** Sets what a robot's armour is made of: paint, chrome or ice. */
+export function finish(material: THREE.MeshStandardMaterial, uniforms: RobotUniforms, kind: AvatarFinish | null | undefined): void {
+  const look = finishLook(kind);
+  uniforms.uMetal.value.set(...look.metalness);
+  uniforms.uRough.value.set(...look.roughness);
+  uniforms.uAlpha.value.set(...look.alpha);
+  uniforms.uLift.value = look.lift;
+  uniforms.uRim.value = look.rim;
+  material.envMapIntensity = look.env;
+  if (material.transparent !== look.transparent) {
+    // Ice is drawn after everything solid, still writing depth so a robot's own parts and its neighbours sort.
+    material.transparent = look.transparent;
+    material.needsUpdate = true;
+  }
 }
 
 /** Sets a robot's paint. */

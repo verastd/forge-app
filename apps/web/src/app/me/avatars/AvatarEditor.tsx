@@ -16,8 +16,8 @@
 import dynamic from 'next/dynamic';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent, FormEvent } from 'react';
-import { AVATAR_PALETTES, defaultColors, emblemInitials } from '@forge/lobby';
-import type { AvatarColors } from '@forge/lobby';
+import { AVATAR_FINISHES, AVATAR_PALETTES, defaultColors, emblemInitials } from '@forge/lobby';
+import type { AvatarColors, AvatarFinish } from '@forge/lobby';
 import {
   AVATAR_CHEST_MAX_BYTES,
   AVATAR_CHEST_MAX_PIXELS,
@@ -81,6 +81,13 @@ const COLOR_FIELDS: { key: keyof AvatarColors; label: string; hint: string }[] =
   { key: 'eye', label: 'Eyes', hint: 'Eyes and thruster' },
 ];
 
+/** What each finish is called, and what it looks like. */
+const FINISH_CHOICES: Record<AvatarFinish, { label: string; hint: string }> = {
+  paint: { label: 'Paint', hint: 'Painted armour, as it comes' },
+  chrome: { label: 'Chrome', hint: 'Mirror-bright metal, tinted by the Armour colour' },
+  ice: { label: 'Ice', hint: 'See-through, glossy, lit at the edges; tinted by the Armour colour' },
+};
+
 const FIT_LABEL: Record<AvatarHeadFit, string> = {
   replace: 'Replaces the head',
   accessory: 'Face accessory',
@@ -109,15 +116,24 @@ interface Draft {
   head: string | null;
   /** A face accessory worn over the head. */
   accessory: string | null;
+  /** What the armour is made of. */
+  finish: AvatarFinish;
 }
 
 function draftFor(memberId: string, list: AvatarList): Draft {
   const saved = list.avatars.find((a) => a.memberId === memberId);
-  return { colors: saved?.colors ?? defaultColors(memberId), head: saved?.head ?? null, accessory: saved?.accessory ?? null };
+  return {
+    colors: saved?.colors ?? defaultColors(memberId),
+    head: saved?.head ?? null,
+    accessory: saved?.accessory ?? null,
+    finish: saved?.finish ?? 'paint',
+  };
 }
 
+/** Every key, by name: a right eye on only one side is a change too. */
 function sameDraft(a: Draft, b: Draft): boolean {
-  return a.head === b.head && a.accessory === b.accessory && (Object.keys(a.colors) as (keyof AvatarColors)[]).every((k) => a.colors[k] === b.colors[k]);
+  const colours = (['shell', 'trim', 'accent', 'eye'] as const).every((k) => a.colors[k] === b.colors[k]);
+  return colours && (a.colors.eyeRight ?? null) === (b.colors.eyeRight ?? null) && a.head === b.head && a.accessory === b.accessory && a.finish === b.finish;
 }
 
 /** Reads an image's size in the browser, to refuse one the API would before uploading it. */
@@ -275,8 +291,10 @@ export function AvatarEditor() {
                         <i style={{ background: colors.shell }} />
                         <i style={{ background: colors.trim }} />
                         <i style={{ background: colors.eye }} />
+                        {colors.eyeRight && <i style={{ background: colors.eyeRight }} />}
                       </span>
                       <span className={styles.memberName}>@{member.login}</span>
+                      {saved?.finish && saved.finish !== 'paint' && <span className="chip">{FINISH_CHOICES[saved.finish].label}</span>}
                       {saved && (
                         <span className={styles.customDot} title="Customised">
                           <span className={styles.visuallyHidden}>(customised)</span>
@@ -324,6 +342,7 @@ interface DraftedLook {
   memberId: string;
   colors: AvatarColors;
   head: string | null;
+  finish: AvatarFinish;
 }
 
 interface RobotEditorProps {
@@ -339,8 +358,8 @@ function RobotEditor({ member, list, setList, onDirty, onDraft }: RobotEditorPro
   const saved: Avatar | undefined = list.avatars.find((a) => a.memberId === member.memberId);
   const [draft, setDraft] = useState<Draft>(() => draftFor(member.memberId, list));
   useEffect(() => {
-    onDraft({ memberId: member.memberId, colors: draft.colors, head: draft.head });
-  }, [onDraft, member.memberId, draft.colors, draft.head]);
+    onDraft({ memberId: member.memberId, colors: draft.colors, head: draft.head, finish: draft.finish });
+  }, [onDraft, member.memberId, draft.colors, draft.head, draft.finish]);
   const [busy, setBusy] = useState<Busy>({ kind: 'idle' });
   const [chestUpload, setChestUpload] = useState<Upload>({ kind: 'idle' });
   const [removingChest, setRemovingChest] = useState(false);
@@ -366,15 +385,18 @@ function RobotEditor({ member, list, setList, onDirty, onDraft }: RobotEditorPro
   const head = draft.head ? (list.heads.find((h) => h.id === draft.head) ?? null) : null;
   const accessory = draft.accessory ? (list.heads.find((h) => h.id === draft.accessory) ?? null) : null;
   const look: RobotLook = useMemo(
-    () => ({ id: member.memberId, name: member.login, colors: draft.colors, head, accessory, chest: saved?.chest ?? null }),
-    [member.memberId, member.login, draft.colors, head, accessory, saved?.chest],
+    () => ({ id: member.memberId, name: member.login, colors: draft.colors, head, accessory, chest: saved?.chest ?? null, finish: draft.finish }),
+    [member.memberId, member.login, draft.colors, head, accessory, saved?.chest, draft.finish],
   );
 
   const commit = useCallback(async (): Promise<Avatar> => {
+    // A right eye and a finish are sent only when set: a robot without them saves as it always did.
+    const { eyeRight, ...colors } = draft.colors;
     const result = await saveAvatar(member.memberId, {
-      colors: draft.colors,
+      colors: eyeRight ? { ...colors, eyeRight } : colors,
       ...(draft.head ? { head: draft.head } : {}),
       ...(draft.accessory ? { accessory: draft.accessory } : {}),
+      ...(draft.finish !== 'paint' ? { finish: draft.finish } : {}),
     });
     setList((current) => ({ ...current, avatars: [...current.avatars.filter((a) => a.memberId !== result.memberId), result] }));
     return result;
@@ -398,7 +420,7 @@ function RobotEditor({ member, list, setList, onDirty, onDraft }: RobotEditorPro
     resetAvatar(member.memberId).then(
       () => {
         setList((current) => ({ ...current, avatars: current.avatars.filter((a) => a.memberId !== member.memberId) }));
-        setDraft({ colors: defaultColors(member.memberId), head: null, accessory: null });
+        setDraft({ colors: defaultColors(member.memberId), head: null, accessory: null, finish: 'paint' });
         setBusy({ kind: 'idle' });
       },
       (error: unknown) => setBusy({ kind: 'error', message: describeAvatarsError(error), retry: reset }),
@@ -551,24 +573,60 @@ function RobotEditor({ member, list, setList, onDirty, onDraft }: RobotEditorPro
         <fieldset className={styles.fieldset}>
           <legend className={styles.legend}>Colours</legend>
           <div className={styles.colors}>
-            {COLOR_FIELDS.map(({ key, label, hint }) => (
-              <label key={key} className={styles.color}>
+            {COLOR_FIELDS.map(({ key, label, hint }) => {
+              // Two-tone: the Eyes colour is the left eye (as you look at the robot), the right its own.
+              const twoTone = key === 'eye' && Boolean(draft.colors.eyeRight);
+              return (
+                <label key={key} className={styles.color}>
+                  <input
+                    type="color"
+                    value={draft.colors[key]}
+                    onChange={(event) => {
+                      const value = event.target.value.toLowerCase();
+                      setDraft((d) => ({ ...d, colors: { ...d.colors, [key]: value } }));
+                    }}
+                  />
+                  <span className={styles.colorText}>
+                    <span>{twoTone ? 'Left eye' : label}</span>
+                    <code>{draft.colors[key]}</code>
+                    <span className={styles.hint}>{twoTone ? 'As you look at the robot; and the thruster' : hint}</span>
+                  </span>
+                </label>
+              );
+            })}
+            {draft.colors.eyeRight && (
+              <label className={styles.color}>
                 <input
                   type="color"
-                  value={draft.colors[key]}
+                  value={draft.colors.eyeRight}
                   onChange={(event) => {
                     const value = event.target.value.toLowerCase();
-                    setDraft((d) => ({ ...d, colors: { ...d.colors, [key]: value } }));
+                    setDraft((d) => ({ ...d, colors: { ...d.colors, eyeRight: value } }));
                   }}
                 />
                 <span className={styles.colorText}>
-                  <span>{label}</span>
-                  <code>{draft.colors[key]}</code>
-                  <span className={styles.hint}>{hint}</span>
+                  <span>Right eye</span>
+                  <code>{draft.colors.eyeRight}</code>
+                  <span className={styles.hint}>As you look at the robot</span>
                 </span>
               </label>
-            ))}
+            )}
           </div>
+          <label className={styles.twoTone}>
+            <input
+              type="checkbox"
+              checked={Boolean(draft.colors.eyeRight)}
+              onChange={(event) => {
+                const on = event.target.checked;
+                setDraft((d) => {
+                  const rest: AvatarColors = { shell: d.colors.shell, trim: d.colors.trim, accent: d.colors.accent, eye: d.colors.eye };
+                  // Switched on, the right eye starts as the left's colour, ready to change.
+                  return { ...d, colors: on ? { ...rest, eyeRight: d.colors.eye } : rest };
+                });
+              }}
+            />
+            <span>Different right eye</span>
+          </label>
           <div className="row" style={{ gap: 6, flexWrap: 'wrap' }} aria-label="Palettes">
             {AVATAR_PALETTES.map((palette, i) => (
               <button
@@ -578,11 +636,29 @@ function RobotEditor({ member, list, setList, onDirty, onDraft }: RobotEditorPro
                 style={{ width: 30, height: 22, padding: 0, cursor: 'pointer' }}
                 title={`Palette ${i + 1}`}
                 aria-label={`Use palette ${i + 1}`}
-                onClick={() => setDraft((d) => ({ ...d, colors: { ...palette } }))}
+                onClick={() => setDraft((d) => ({ ...d, colors: d.colors.eyeRight ? { ...palette, eyeRight: d.colors.eyeRight } : { ...palette } }))}
               >
                 <i style={{ background: palette.shell }} />
                 <i style={{ background: palette.trim }} />
                 <i style={{ background: palette.eye }} />
+              </button>
+            ))}
+          </div>
+        </fieldset>
+
+        <fieldset className={styles.fieldset}>
+          <legend className={styles.legend}>Finish</legend>
+          <div className={styles.heads} role="group" aria-label="Finish">
+            {AVATAR_FINISHES.map((kind) => (
+              <button
+                key={kind}
+                type="button"
+                className={styles.headChoice}
+                aria-pressed={draft.finish === kind}
+                onClick={() => setDraft((d) => ({ ...d, finish: kind }))}
+              >
+                <span>{FINISH_CHOICES[kind].label}</span>
+                <span className={styles.headMeta}>{FINISH_CHOICES[kind].hint}</span>
               </button>
             ))}
           </div>
@@ -714,9 +790,10 @@ function HeadLibrary({ member, drafted, list, setList }: HeadLibraryProps) {
   const overHead = over === OWN_HEAD ? null : (ownHeads.find((h) => h.id === over) ?? null);
   const wearerColors = drafted?.colors ?? saved?.colors ?? (member ? defaultColors(member.memberId) : null);
   // Whose robot fittings are shown on: its colours as the editor shows them, and the head chosen to fit over.
+  const wearerFinish = drafted?.finish ?? saved?.finish ?? 'paint';
   const wearer = useMemo(
-    () => (member && wearerColors ? { colors: wearerColors, head: overHead } : null),
-    [member, wearerColors, overHead],
+    () => (member && wearerColors ? { colors: wearerColors, head: overHead, finish: wearerFinish } : null),
+    [member, wearerColors, overHead, wearerFinish],
   );
   const unassigned = list.heads.filter((h) => !h.owner);
   const [name, setName] = useState('');
