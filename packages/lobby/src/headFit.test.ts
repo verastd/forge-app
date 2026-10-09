@@ -8,6 +8,7 @@ import {
   anglesFromNormal,
   autoPlacement,
   eyeRotations,
+  moveScreen,
   nudge,
   placePoint,
   rescale,
@@ -318,6 +319,54 @@ describe('moving a fitted head', () => {
     expect(moved.eyes?.[0]).toEqual([-0.05, 0.11, 0.13]);
     expect(nudge({ scale: 1, offset: [0.99, 0, 0] }, [0.5, 0, 0]).offset[0]).toBe(HEAD_FIT.reach);
     expect(nudge({ scale: 1, offset: [0, 0, 0], eyes: null }, [0, 0, -0.001])).toEqual({ scale: 1, offset: [0, 0, -0.001], eyes: null });
+  });
+
+  it('takes its face screen with it: grown, shrunk and moved, the screen stays on the face', () => {
+    const screened: HeadPlacement = { ...fitted, screen: { center: [0, 0.1, 0.12], size: [0.2, 0.15] } };
+    const bigger = rescale(screened, 1);
+    expect(bigger.screen).toEqual({ center: [0, 0.2, 0.24], size: [0.4, 0.3] });
+    expect(rescale(bigger, 0.5).screen).toEqual(screened.screen);
+    // Held to the screen's own limits, however far the head goes.
+    expect(rescale(screened, 2).screen?.size).toEqual([HEAD_FIT.screenMax, HEAD_FIT.screenMax]);
+    expect(rescale({ ...screened, screen: { center: [0, 0, 0], size: [0.012, 0.012] } }, 0.25).screen?.size).toEqual([0.01, 0.01]);
+    // No screen, none made up; switched off, it stays off.
+    expect(rescale(fitted, 1)).not.toHaveProperty('screen');
+    expect(rescale({ ...fitted, screen: null }, 1).screen).toBeNull();
+
+    const moved = nudge(screened, [0.01, 0, -0.02]);
+    expect(moved.screen).toEqual({ center: [0.01, 0.1, 0.1], size: [0.2, 0.15] });
+    expect(nudge({ ...fitted, screen: null }, [0.01, 0, 0]).screen).toBeNull();
+  });
+
+  it('sizes the screen from one it had unclamped, so a trip to a limit and back changes nothing', () => {
+    const screened: HeadPlacement = { scale: 1, offset: [0, 0, 0], screen: { center: [0, 0.1, 0.1], size: [0.4, 0.2] } };
+    const at = { size: screened.screen!.size, scale: 1 };
+    const big = rescale(screened, 2, at);
+    expect(big.screen?.size).toEqual([HEAD_FIT.screenMax, 0.4]);
+    expect(rescale(big, 1, at).screen?.size).toEqual([0.4, 0.2]);
+    // Without one, it scales what it has (and the limit sticks).
+    expect(rescale(rescale(screened, 2), 1).screen?.size).toEqual([0.3, 0.2]);
+  });
+
+  it('moves the eyes and screen only as far as the head goes, held at the reach', () => {
+    const edge: HeadPlacement = { scale: 1, offset: [0.9, 0, 0], eyes: [[0.4, 0.1, 0.1], [0.5, 0.1, 0.1]], screen: { center: [0.5, 0.1, 0.1], size: [0.2, 0.1] } };
+    const pushed = nudge(edge, [0.3, 0, 0]);
+    expect(pushed.offset[0]).toBe(HEAD_FIT.reach);
+    expect(pushed.screen?.center[0]).toBeCloseTo(0.5 + (HEAD_FIT.reach - 0.9), 6);
+    expect(pushed.eyes?.[0][0]).toBeCloseTo(0.4 + (HEAD_FIT.reach - 0.9), 6);
+  });
+
+  it('moves its face screen into place, the eyes going with it', () => {
+    const screened: HeadPlacement = { ...fitted, screen: { center: [0, 0.1, 0.12], size: [0.2, 0.15] } };
+    const lower = moveScreen(screened, 1, 0.06);
+    expect(lower.screen).toEqual({ center: [0, 0.06, 0.12], size: [0.2, 0.15] });
+    expect(lower.eyes).toEqual([[-0.05, 0.06, 0.13], [0.05, 0.06, 0.13]]);
+    expect(lower.offset).toEqual(fitted.offset);
+    expect(moveScreen(screened, 0, 0.02).eyes?.[1]).toEqual([0.07, 0.1, 0.13]);
+    // Never past the reach; a head with its own eyes keeps them; no screen, nothing to move.
+    expect(moveScreen(screened, 1, 5).screen?.center[1]).toBe(HEAD_FIT.reach);
+    expect(moveScreen({ scale: 1, offset: [0, 0, 0], screen: { center: [0, 0.1, 0.1], size: [0.2, 0.1] } }, 1, 0.2)).not.toHaveProperty('eyes');
+    expect(moveScreen(fitted, 1, 0.2)).toBe(fitted);
   });
 
   it('never answers -0', () => {

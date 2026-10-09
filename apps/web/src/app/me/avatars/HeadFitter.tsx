@@ -24,8 +24,19 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
-import { HEAD_FIT, ROBOT_EYES, alignToEye, anglesFromNormal, autoPlacement, defaultColors, nudge, rescale, rotateAbout } from '@forge/lobby';
-import type { AvatarColors, HeadPlacement, HeadScreen, Point3, WornFace } from '@forge/lobby';
+import {
+  HEAD_FIT,
+  ROBOT_EYES,
+  alignToEye,
+  anglesFromNormal,
+  autoPlacement,
+  defaultColors,
+  moveScreen,
+  nudge,
+  rescale,
+  rotateAbout,
+} from '@forge/lobby';
+import type { AvatarColors, HeadPlacement, HeadScreen, Point3, ScreenAtScale, WornFace } from '@forge/lobby';
 import type { AvatarHead, AvatarHeadFit, AvatarHeadPlacement } from '@forge/shared';
 
 import { createRobotPreview } from '../../../components/lobby/scene/robot/preview';
@@ -103,6 +114,12 @@ function defaultScreen(placement: HeadPlacement): HeadScreen {
   return { center: [0, eyes[0][1], z], size: [0.25, 0.15] };
 }
 
+/** Moving the face screen (and the eyes on it): across from the middle, and up from the neck, in centimetres. */
+const SCREEN_MOVES = [
+  { axis: 0, label: 'Screen left · right', less: 'left', more: 'right', min: -15, max: 15 },
+  { axis: 1, label: 'Screen down · up', less: 'down', more: 'up from the neck', min: -5, max: 45 },
+] as const;
+
 const degrees = (radians: number): number => Math.round((radians * 180) / Math.PI);
 
 /** The face an accessory is fitted over: a replacing head's, when the wearer has one with placed eyes. */
@@ -135,6 +152,13 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled, w
   const [generation, setGeneration] = useState(0);
   const [reading, setReading] = useState<Reading>({ kind: 'reading' });
   const [placement, setPlacement] = useState<HeadPlacement | null>(null);
+  /**
+   * The face screen's size as last set, and the head scale it was set at: Size sizes the
+   * screen from this, never from a size a limit has clamped, so a drag to an extreme and
+   * back leaves it as it was. Anything but Size that changes the screen sets it again.
+   */
+  const screenAt = useRef<ScreenAtScale | null>(null);
+  const sizing = useRef(false);
   const [picking, setPicking] = useState<Picking>(null);
   // Fitted over another head (or none): a click that was aimed at the old one is dropped.
   const wornId = worn?.id ?? null;
@@ -351,8 +375,19 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled, w
 
   const onSize = (event: ChangeEvent<HTMLInputElement>): void => {
     const percent = Number(event.target.value);
-    setPlacement((current) => (current && base ? rescale(current, (base.scale * percent) / 100) : current));
+    sizing.current = true;
+    setPlacement((current) => (current && base ? rescale(current, (base.scale * percent) / 100, screenAt.current ?? undefined) : current));
   };
+
+  // The screen as set by anything but Size (auto-fit, its own sliders, switching it on, a saved fit): Size works from it.
+  const screenSize = placement?.screen?.size;
+  useEffect(() => {
+    if (sizing.current) {
+      sizing.current = false;
+      return;
+    }
+    screenAt.current = placement?.screen ? { size: placement.screen.size, scale: placement.scale } : null;
+  }, [screenSize?.[0], screenSize?.[1], placement?.screen, placement?.scale]);
 
   const onMove = (index: 0 | 1 | 2) => (event: ChangeEvent<HTMLInputElement>): void => {
     const wanted = Number(event.target.value);
@@ -386,6 +421,12 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled, w
       size[index] = metres;
       return { ...current, screen: { ...current.screen, size } };
     });
+  };
+
+  /** Screen left/right and up/down: its centre, in centimetres, the glowing eyes going with it. */
+  const onScreenMove = (axis: 0 | 1) => (event: ChangeEvent<HTMLInputElement>): void => {
+    const metres = Number(event.target.value) / 100;
+    setPlacement((current) => (current ? moveScreen(current, axis, metres) : current));
   };
 
   const onEyeAngle = (index: 0 | 1) => (event: ChangeEvent<HTMLInputElement>): void => {
@@ -585,6 +626,29 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled, w
                       disabled={locked}
                       aria-label={label}
                       aria-valuetext={`${cm} centimetres`}
+                    />
+                  </label>
+                );
+              })}
+            {placement?.screen &&
+              SCREEN_MOVES.map((control) => {
+                const cm = Math.round(placement.screen!.center[control.axis] * 1000) / 10;
+                const words = control.axis === 0 ? (cm === 0 ? 'centred' : `${Math.abs(cm)} cm ${cm < 0 ? control.less : control.more}`) : `${cm} cm ${control.more}`;
+                return (
+                  <label key={control.label} className={`${styles.label} ${styles.fitFull}`}>
+                    <span className={styles.sliderHead} aria-hidden="true">
+                      {control.label} <span className={styles.sliderValue}>{words}</span>
+                    </span>
+                    <input
+                      type="range"
+                      min={control.min}
+                      max={control.max}
+                      step={0.5}
+                      value={Math.max(control.min, Math.min(control.max, cm))}
+                      onChange={onScreenMove(control.axis)}
+                      disabled={locked}
+                      aria-label={control.label}
+                      aria-valuetext={`${words}, the eyes with it`}
                     />
                   </label>
                 );
