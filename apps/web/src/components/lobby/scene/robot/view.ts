@@ -35,17 +35,18 @@ import {
   HEAD_FIT,
   createBlinker,
   eyeRotations,
+  finishLook,
   foreDirection,
   hashId,
   reachArm,
   robotPose,
   rotateAbout,
 } from '@forge/lobby';
-import type { ArmAim, ArmsPose, AvatarColors, Blinker, MotionInput, MotionPose } from '@forge/lobby';
+import type { ArmAim, ArmsPose, AvatarColors, AvatarFinish, Blinker, MotionInput, MotionPose } from '@forge/lobby';
 import type { AvatarHead } from '@forge/shared';
 
 import type { RobotAssets, RobotBody } from './assets';
-import { JOINT_COLOR, createBodyMaterial, paint } from './material';
+import { JOINT_COLOR, createBodyMaterial, finish, paint } from './material';
 
 /**
  * After a head or chest image fails to load, how long before trying again: a
@@ -76,6 +77,8 @@ export interface RobotLook {
   accessory?: AvatarHead | null;
   /** The chest image's sha256; null wears the generated emblem. */
   chest: string | null;
+  /** What the armour is made of; absent or null: paint. */
+  finish?: AvatarFinish | null;
 }
 
 /** A look's identity, to tell when it changed. */
@@ -88,6 +91,8 @@ export function lookKey(look: RobotLook): string {
     c.trim,
     c.accent,
     c.eye,
+    c.eyeRight ?? '',
+    look.finish ?? 'paint',
     look.head?.sha256 ?? '',
     look.head?.fit ?? '',
     placementKey(look.head),
@@ -194,7 +199,7 @@ function sharedEyeGeometry(): THREE.ShapeGeometry {
 }
 
 /** A head material's role, from its name. */
-function roleOf(name: string): keyof AvatarColors | 'joint' | null {
+function roleOf(name: string): 'shell' | 'trim' | 'accent' | 'eye' | 'joint' | null {
   const lower = name.toLowerCase();
   for (const role of ['shell', 'trim', 'accent', 'joint', 'eye'] as const) {
     if (lower.startsWith(role)) return role;
@@ -281,6 +286,7 @@ interface ArmRig {
   foreShown: THREE.Quaternion | null;
 }
 
+const WHITE = new THREE.Color(1, 1, 1);
 const qModel = new THREE.Quaternion();
 const qParent = new THREE.Quaternion();
 const qBind = new THREE.Quaternion();
@@ -457,20 +463,24 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
     model.add(slot);
   }
 
-  // Eyes: a pill and its glow each. Depth-tested, so a face accessory covers them.
-  const eyeMaterial = new THREE.MeshBasicMaterial({ toneMapped: false });
-  const haloMaterial = new THREE.SpriteMaterial({
-    map: glow,
-    transparent: true,
-    blending: THREE.AdditiveBlending,
-    depthWrite: false,
-    opacity: 0.5,
-  });
-  const eyes = [0, 1].map(() => {
+  // Eyes: a pill and its glow each, each eye its own colour (the first, at -X, is the one on the left as
+  // you look at the robot). Depth-tested, so a face accessory covers them.
+  const eyeMaterials = [0, 1].map(() => new THREE.MeshBasicMaterial({ toneMapped: false }));
+  const haloMaterials = [0, 1].map(
+    () =>
+      new THREE.SpriteMaterial({
+        map: glow,
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        opacity: 0.5,
+      }),
+  );
+  const eyes = [0, 1].map((index) => {
     const group = new THREE.Group();
-    const pill = new THREE.Mesh(sharedEyeGeometry(), eyeMaterial);
+    const pill = new THREE.Mesh(sharedEyeGeometry(), eyeMaterials[index]);
     pill.renderOrder = 2;
-    const halo = new THREE.Sprite(haloMaterial);
+    const halo = new THREE.Sprite(haloMaterials[index]);
     halo.scale.setScalar(0.15);
     halo.position.z = 0.004;
     halo.renderOrder = 3;
@@ -580,6 +590,31 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
       const hex = role === 'joint' ? JOINT_COLOR : look.colors[role];
       standard.color.set(hex);
       if (role === 'eye' && standard.emissive) standard.emissive.set(hex);
+      // The armour's finish too: a chrome or ice robot's head is chrome or ice (its eyes stay as they are);
+      // painted, it's the model's own surface again, as it came.
+      if (role !== 'eye' && 'metalness' in standard) {
+        const own = (standard.userData.forgeSurface ??= {
+          metalness: standard.metalness,
+          roughness: standard.roughness,
+          env: standard.envMapIntensity,
+          transparent: standard.transparent,
+          opacity: standard.opacity,
+        }) as { metalness: number; roughness: number; env: number; transparent: boolean; opacity: number };
+        const painted = (look.finish ?? 'paint') === 'paint';
+        const surface = finishLook(look.finish);
+        const at = role === 'trim' ? 1 : role === 'joint' ? 2 : 0;
+        if (!painted && role !== 'joint') standard.color.lerp(WHITE, surface.lift);
+        standard.metalness = painted ? own.metalness : surface.metalness[at]!;
+        standard.roughness = painted ? own.roughness : surface.roughness[at]!;
+        standard.envMapIntensity = painted ? own.env : surface.env;
+        const opacity = painted ? own.opacity : surface.alpha[at]!;
+        const transparent = painted ? own.transparent : opacity < 1;
+        if (standard.transparent !== transparent) {
+          standard.transparent = transparent;
+          standard.needsUpdate = true;
+        }
+        standard.opacity = opacity;
+      }
     }
   };
 
@@ -806,8 +841,10 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
     key = nextKey;
     look = next;
     paint(uniforms, next.colors);
-    eyeMaterial.color.set(next.colors.eye).multiplyScalar(1.6);
-    haloMaterial.color.set(next.colors.eye);
+    finish(material, uniforms, next.finish);
+    const eyeColors = [next.colors.eye, next.colors.eyeRight ?? next.colors.eye];
+    eyeMaterials.forEach((each, i) => each.color.set(eyeColors[i]!).multiplyScalar(1.6));
+    haloMaterials.forEach((each, i) => each.color.set(eyeColors[i]!));
     flameMaterial.color.set(next.colors.eye);
     if (first || previous.head?.sha256 !== next.head?.sha256 || previous.head?.fit !== next.head?.fit) {
       pendingHead = null;
@@ -999,8 +1036,7 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
       dropAccessory();
       root.removeFromParent();
       material.dispose();
-      eyeMaterial.dispose();
-      haloMaterial.dispose();
+      for (const each of [...eyeMaterials, ...haloMaterials]) each.dispose();
       flameMaterial.dispose();
       screenMaterial.dispose();
       // The skeleton's bone texture is this robot's own.

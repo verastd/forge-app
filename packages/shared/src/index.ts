@@ -1274,6 +1274,14 @@ export type AvatarHeadFit = (typeof AVATAR_HEAD_FITS)[number];
 
 const hexColor = z.string().regex(/^#[0-9a-f]{6}$/);
 
+/**
+ * What a robot's armour is made of: `paint` (the painted look), `chrome`
+ * (mirror-bright metal) or `ice` (translucent). The shell colour tints chrome
+ * and ice. Absent on an avatar: paint.
+ */
+export const AVATAR_FINISHES = ['paint', 'chrome', 'ice'] as const;
+export type AvatarFinish = (typeof AVATAR_FINISHES)[number];
+
 export const AvatarColorsSchema = z.object({
   /** Armour and the torso. */
   shell: hexColor,
@@ -1281,8 +1289,10 @@ export const AvatarColorsSchema = z.object({
   trim: hexColor,
   /** The chestplate's frame and the face screen's rim. */
   accent: hexColor,
-  /** The eyes and the thruster. */
+  /** The eyes and the thruster (with `eyeRight`, the eye on the left as you look at the robot). */
   eye: hexColor,
+  /** The eye on the right as you look at the robot (the robot's own left), when it differs; absent: `eye`. */
+  eyeRight: hexColor.optional(),
 });
 export type AvatarColors = z.infer<typeof AvatarColorsSchema>;
 
@@ -1296,6 +1306,8 @@ export const AvatarSchema = z.object({
   accessory: z.string().regex(AVATAR_HEAD_ID).optional(),
   /** The chestplate image's sha256; absent: a generated emblem. */
   chest: z.string().regex(AVATAR_SHA256).optional(),
+  /** What the armour is made of; absent: paint. */
+  finish: z.enum(AVATAR_FINISHES).optional(),
   updatedAt: z.string(),
 });
 export type Avatar = z.infer<typeof AvatarSchema>;
@@ -1420,6 +1432,7 @@ export const AvatarUpdateSchema = z.object({
   colors: AvatarColorsSchema,
   head: z.string().regex(AVATAR_HEAD_ID).optional(),
   accessory: z.string().regex(AVATAR_HEAD_ID).optional(),
+  finish: z.enum(AVATAR_FINISHES).optional(),
 });
 export type AvatarUpdate = z.infer<typeof AvatarUpdateSchema>;
 
