@@ -563,8 +563,11 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
   let disposed = false;
 
   const placeEyes = (sockets: THREE.Object3D[]): void => {
+    // The first eye (colour `eye`) on the left as you look at the robot, whichever order the
+    // sockets come in: a file's EyeL is the robot's own left, and clicked eyes come either way.
+    const ordered = sockets.length === 2 && sockets[0]!.position.x > sockets[1]!.position.x ? [sockets[1]!, sockets[0]!] : sockets;
     eyes.forEach((eye, i) => {
-      const socket = sockets[i];
+      const socket = ordered[i];
       eye.group.removeFromParent();
       if (socket) socket.add(eye.group);
     });
@@ -850,6 +853,8 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
       pendingHead = null;
       headRetryAt = null;
       dropHead();
+      // A kept accessory takes the new colours and finish now, not when (or if) a head loads.
+      tint(accessoryMaterials);
       if (next.head) wearHead(next.head);
     } else {
       tintHead();

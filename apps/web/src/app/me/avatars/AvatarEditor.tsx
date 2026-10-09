@@ -342,6 +342,7 @@ interface DraftedLook {
   memberId: string;
   colors: AvatarColors;
   head: string | null;
+  finish: AvatarFinish;
 }
 
 interface RobotEditorProps {
@@ -357,8 +358,8 @@ function RobotEditor({ member, list, setList, onDirty, onDraft }: RobotEditorPro
   const saved: Avatar | undefined = list.avatars.find((a) => a.memberId === member.memberId);
   const [draft, setDraft] = useState<Draft>(() => draftFor(member.memberId, list));
   useEffect(() => {
-    onDraft({ memberId: member.memberId, colors: draft.colors, head: draft.head });
-  }, [onDraft, member.memberId, draft.colors, draft.head]);
+    onDraft({ memberId: member.memberId, colors: draft.colors, head: draft.head, finish: draft.finish });
+  }, [onDraft, member.memberId, draft.colors, draft.head, draft.finish]);
   const [busy, setBusy] = useState<Busy>({ kind: 'idle' });
   const [chestUpload, setChestUpload] = useState<Upload>({ kind: 'idle' });
   const [removingChest, setRemovingChest] = useState(false);
@@ -789,9 +790,10 @@ function HeadLibrary({ member, drafted, list, setList }: HeadLibraryProps) {
   const overHead = over === OWN_HEAD ? null : (ownHeads.find((h) => h.id === over) ?? null);
   const wearerColors = drafted?.colors ?? saved?.colors ?? (member ? defaultColors(member.memberId) : null);
   // Whose robot fittings are shown on: its colours as the editor shows them, and the head chosen to fit over.
+  const wearerFinish = drafted?.finish ?? saved?.finish ?? 'paint';
   const wearer = useMemo(
-    () => (member && wearerColors ? { colors: wearerColors, head: overHead } : null),
-    [member, wearerColors, overHead],
+    () => (member && wearerColors ? { colors: wearerColors, head: overHead, finish: wearerFinish } : null),
+    [member, wearerColors, overHead, wearerFinish],
   );
   const unassigned = list.heads.filter((h) => !h.owner);
   const [name, setName] = useState('');
