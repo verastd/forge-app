@@ -1,6 +1,6 @@
 # Task Spec: object state per cell, on data tracks, subscribed by distance
 
-Issue: not yet posted.
+Issue: [verastd/forge-app#52](https://github.com/verastd/forge-app/issues/52) (draft until its acceptance tests merge and it is labelled `agent-ready` + `status:open`).
 
 ## Goal
 
@@ -29,10 +29,14 @@ when the room is full.
 
 ## Acceptance tests
 
-`tests/acceptance/issue-<N>/test_cells.spec.ts` (committed by the spec
-author): `cellOf` and `neighbours` are stable and symmetric over the cave's
-limits; the feed's subscription set for a scripted walk matches the
-expected cells. The private suite additionally reruns the 100-member swarm.
+`tests/acceptance/issue-52/test_cells.py` (committed by the spec author,
+pytest, skipped until `tests/e2e/lobby-cells.spec.ts` and `apps/world`
+exist): the world publishes per cell on `obj:<cell>` tracks under 1200
+bytes, the feed subscribes by `neighbours` with voice's dwell at 2 Hz and
+reports its cells, the e2e spec checks a scripted walk's subscription set,
+and the baselines record the drop. `cellOf` and `neighbours` themselves are
+unit-tested in `packages/lobby`. The private suite additionally reruns the
+100-member swarm.
 
 ## Scope
 

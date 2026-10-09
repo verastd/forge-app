@@ -1,6 +1,6 @@
 # Task Spec: every behaviour's declared states, on screen
 
-Issue: not yet posted.
+Issue: [verastd/forge-app#49](https://github.com/verastd/forge-app/issues/49) (draft until its acceptance tests merge and it is labelled `agent-ready` + `status:open`).
 
 ## Goal
 
@@ -31,10 +31,13 @@ done, didn't reach, or why not.
 
 ## Acceptance tests
 
-`tests/acceptance/issue-<N>/test_behavior_states.spec.ts` (committed by the
-spec author): the three flows above, read through `data-behavior-state`, with
-reduced motion on and off. The private suite additionally checks the states
-on a phone-sized viewport.
+`tests/acceptance/issue-49/test_behavior_states.py` (committed by the spec
+author, pytest, skipped until `tests/e2e/lobby-behavior-states.spec.ts`
+exists): the controls take their copy from the catalog and hard-code none of
+it, show progress while `requested` and honour `confirmWithinMs`, the lobby
+root carries `data-behavior-state`, the panel announces a rejection, and the
+e2e spec names the three flows. The private suite additionally checks the
+states on a phone-sized viewport.
 
 ## Scope
 

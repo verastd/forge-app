@@ -1,6 +1,6 @@
 # Task Spec: the world participant, owning nothing at first
 
-Issue: not yet posted.
+Issue: [verastd/forge-app#51](https://github.com/verastd/forge-app/issues/51) (draft until its acceptance tests merge and it is labelled `agent-ready` + `status:open`).
 
 ## Goal
 
@@ -34,7 +34,7 @@ two people grab at once, and can switch off a misbehaving trick for everyone.
 
 ## Acceptance tests
 
-`tests/acceptance/issue-<N>/test_world.py` (committed by the spec author):
+`tests/acceptance/issue-51/test_world.py` (committed by the spec author):
 the kernel loop's tick accounting, the pause route's auth, and the flag's
 registration in all five places. The private suite additionally runs the
 process against a LiveKit container with two scripted catchers.
