@@ -8,7 +8,7 @@
 
 import * as THREE from 'three';
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
-import { STEP_ERROR_TEXT, STEP_MAX_BYTES, stepMeshes } from '@forge/lobby';
+import { STEP_ERROR_TEXT, STEP_MAX_BYTES, stepBytes, stepMeshes } from '@forge/lobby';
 import { MACHINE_BLUEPRINT_MAX_BYTES } from '@forge/shared';
 
 /** Where a conversion is: the CAD reader loading, reading the file, or meshing its parts (and how many). */
@@ -16,6 +16,13 @@ export type StepStage = { stage: 'engine' } | { stage: 'reading' } | { stage: 'm
 
 /** A conversion that can't go on, in words. */
 export class StepFailure extends Error {}
+
+/** The CAD reader didn't load: the connection, most likely, not the file. */
+const READER_FAILED = 'Couldn’t load the CAD reader: check your connection and try again.';
+
+/** Too detailed to keep, in words. */
+const tooDetailed = (bytes: number): string =>
+  `That model is too detailed (${Math.round(bytes / 1024 / 1024)} MB meshed; the most is ${MACHINE_BLUEPRINT_MAX_BYTES / 1024 / 1024} MB). Export it coarser, or with fewer parts.`;
 
 const metal = (color: [number, number, number] | null): THREE.MeshStandardMaterial =>
   new THREE.MeshStandardMaterial({
@@ -38,16 +45,16 @@ function read(buffer: ArrayBuffer, onStage: (stage: StepStage) => void, signal: 
       signal.removeEventListener('abort', stop);
       worker.terminate();
     };
-    worker.onmessage = (event: MessageEvent<{ stage?: 'engine' | 'reading'; result?: unknown; error?: string }>) => {
-      const { stage, result, error } = event.data;
+    worker.onmessage = (event: MessageEvent<{ stage?: 'engine' | 'reading'; result?: unknown; error?: string; phase?: 'engine' | 'reading' }>) => {
+      const { stage, result, error, phase } = event.data;
       if (stage) return onStage({ stage });
       done();
-      if (error !== undefined) reject(new StepFailure(STEP_ERROR_TEXT['not-step']));
+      if (error !== undefined) reject(new StepFailure(phase === 'engine' ? READER_FAILED : STEP_ERROR_TEXT['not-step']));
       else resolve(result);
     };
     worker.onerror = () => {
       done();
-      reject(new StepFailure('Couldn’t load the CAD reader: check your connection and try again.'));
+      reject(new StepFailure(READER_FAILED));
     };
     worker.postMessage({ buffer }, [buffer]);
   });
@@ -59,6 +66,9 @@ export async function stepToGlb(file: ArrayBuffer, onStage: (stage: StepStage) =
   const raw = await read(file, onStage, signal);
   const parts = stepMeshes(raw);
   if (typeof parts === 'string') throw new StepFailure(STEP_ERROR_TEXT[parts]);
+  // Too detailed to keep: said before the export, which would build it all on the page's thread.
+  const estimate = stepBytes(parts.meshes);
+  if (estimate > MACHINE_BLUEPRINT_MAX_BYTES) throw new StepFailure(tooDetailed(estimate));
   onStage({ stage: 'meshing', parts: parts.meshes.length });
   const scene = new THREE.Scene();
   const materials: THREE.Material[] = [];
@@ -77,11 +87,7 @@ export async function stepToGlb(file: ArrayBuffer, onStage: (stage: StepStage) =
   try {
     const glb = (await new GLTFExporter().parseAsync(scene, { binary: true })) as ArrayBuffer;
     if (signal.aborted) throw new DOMException('cancelled', 'AbortError');
-    if (glb.byteLength > MACHINE_BLUEPRINT_MAX_BYTES) {
-      throw new StepFailure(
-        `That model is too detailed (${Math.round(glb.byteLength / 1024 / 1024)} MB meshed; the most is ${MACHINE_BLUEPRINT_MAX_BYTES / 1024 / 1024} MB). Export it coarser, or with fewer parts.`,
-      );
-    }
+    if (glb.byteLength > MACHINE_BLUEPRINT_MAX_BYTES) throw new StepFailure(tooDetailed(glb.byteLength));
     return { glb, parts: parts.meshes.length };
   } finally {
     scene.traverse((object) => (object as THREE.Mesh).geometry?.dispose());

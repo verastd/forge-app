@@ -12,7 +12,7 @@
 
 /** The most bytes of a STEP file the browser reads (the glTF it makes must still fit MACHINE_BLUEPRINT_MAX_BYTES). */
 export const STEP_MAX_BYTES = 80 * 1024 * 1024;
-/** The most parts a STEP file may have (more are left out, and counted). */
+/** The most parts a STEP file may have (more, and it's refused rather than built short of parts). */
 export const STEP_MAX_PARTS = 2000;
 
 /** A part, as the CAD reader meshed it: positions in the file's own units, its triangles, its colour (linear RGB, 0–1). */
@@ -26,17 +26,18 @@ export interface StepMesh {
 
 export interface StepRead {
   meshes: StepMesh[];
-  /** Parts left out: past STEP_MAX_PARTS, or with nothing to draw. */
+  /** Parts left out because they have nothing sound to draw. */
   skipped: number;
 }
 
 /** Why a STEP file can't be a blueprint. */
-export type StepError = 'not-step' | 'no-parts' | 'too-big';
+export type StepError = 'not-step' | 'no-parts' | 'too-big' | 'too-many';
 
 export const STEP_ERROR_TEXT: Readonly<Record<StepError, string>> = Object.freeze({
   'not-step': 'That file isn’t a STEP model the CAD reader can open.',
   'no-parts': 'That STEP file has no solid parts to build.',
   'too-big': `That STEP file is too big (the most is ${STEP_MAX_BYTES / 1024 / 1024} MB).`,
+  'too-many': `That STEP file has too many parts (the most is ${STEP_MAX_PARTS.toLocaleString('en')}): export the main assembly without its small hardware.`,
 });
 
 type Record_ = Record<string, unknown>;
@@ -86,12 +87,18 @@ export function stepMeshes(result: unknown): StepRead | StepError {
   if (!isRecord(result) || result.success !== true || !Array.isArray(result.meshes)) return 'not-step';
   const meshes: StepMesh[] = [];
   let skipped = 0;
-  result.meshes.forEach((raw, n) => {
-    const read = meshes.length < STEP_MAX_PARTS ? mesh(raw, n) : null;
-    if (read) meshes.push(read);
-    else skipped += 1;
-  });
+  for (const [n, raw] of result.meshes.entries()) {
+    const read = mesh(raw, n);
+    if (!read) skipped += 1;
+    else if (meshes.length === STEP_MAX_PARTS) return 'too-many';
+    else meshes.push(read);
+  }
   return meshes.length === 0 ? 'no-parts' : { meshes, skipped };
+}
+
+/** About how many bytes a binary glTF of these parts takes (their buffers, and a little for each part's JSON). */
+export function stepBytes(meshes: readonly StepMesh[]): number {
+  return meshes.reduce((total, m) => total + m.positions.byteLength + (m.normals?.byteLength ?? m.positions.byteLength) + m.index.byteLength + 512, 1024);
 }
 
 /** A STEP file's name without its extension, for the library. */

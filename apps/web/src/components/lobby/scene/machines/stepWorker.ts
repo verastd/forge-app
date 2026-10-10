@@ -34,10 +34,17 @@ const MESHING = {
 };
 
 self.onmessage = async (event: MessageEvent<{ buffer: ArrayBuffer }>) => {
+  self.postMessage({ stage: 'engine' });
+  let occt: Awaited<ReturnType<NonNullable<typeof self.occtimportjs>>>;
   try {
-    self.postMessage({ stage: 'engine' });
     if (!self.occtimportjs) self.importScripts(READER);
-    const occt = await self.occtimportjs!({ locateFile: () => WASM });
+    occt = await self.occtimportjs!({ locateFile: () => WASM });
+  } catch (error) {
+    // The reader itself didn't load (the network, most likely): not the file's fault.
+    self.postMessage({ error: error instanceof Error ? error.message : String(error), phase: 'engine' });
+    return;
+  }
+  try {
     self.postMessage({ stage: 'reading' });
     const result = occt.ReadStepFile(new Uint8Array(event.data.buffer), MESHING) as { meshes?: { attributes?: Record<string, { array?: unknown }>; index?: { array?: unknown } }[] };
     // Hand the meshes back as typed arrays, moved rather than copied.
@@ -52,6 +59,6 @@ self.onmessage = async (event: MessageEvent<{ buffer: ArrayBuffer }>) => {
     }
     self.postMessage({ result }, moved);
   } catch (error) {
-    self.postMessage({ error: error instanceof Error ? error.message : String(error) });
+    self.postMessage({ error: error instanceof Error ? error.message : String(error), phase: 'reading' });
   }
 };

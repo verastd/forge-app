@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { STEP_ERROR_TEXT, STEP_MAX_PARTS, isStepFile, stepMeshes, stepName } from './step.js';
+import { STEP_ERROR_TEXT, STEP_MAX_PARTS, isStepFile, stepBytes, stepMeshes, stepName } from './step.js';
 
 /** A triangle as the CAD reader hands one back. */
 const tri = (name: unknown = 'Bolt', extra: Record<string, unknown> = {}) => ({
@@ -56,11 +56,19 @@ describe('a STEP file read by the CAD reader', () => {
     expect(read.skipped).toBe(bad.length);
   });
 
-  it('keeps at most STEP_MAX_PARTS', () => {
-    const read = stepMeshes({ success: true, meshes: Array.from({ length: STEP_MAX_PARTS + 3 }, () => tri()) });
+  it('refuses more than STEP_MAX_PARTS rather than building it short of parts', () => {
+    expect(stepMeshes({ success: true, meshes: Array.from({ length: STEP_MAX_PARTS + 1 }, () => tri()) })).toBe('too-many');
+    const most = stepMeshes({ success: true, meshes: [...Array.from({ length: STEP_MAX_PARTS }, () => tri()), null] });
+    if (typeof most === 'string') throw new Error(most);
+    expect(most.meshes).toHaveLength(STEP_MAX_PARTS);
+    expect(STEP_ERROR_TEXT['too-many']).toMatch(/2,000/);
+  });
+
+  it('says about how big its glTF will be, before it’s written', () => {
+    const read = stepMeshes({ success: true, meshes: [tri(), tri('No normals', { attributes: { position: { array: [0, 0, 0, 1, 0, 0, 0, 1, 0] } } })] });
     if (typeof read === 'string') throw new Error(read);
-    expect(read.meshes).toHaveLength(STEP_MAX_PARTS);
-    expect(read.skipped).toBe(3);
+    // 36 bytes of positions, 36 of normals (or room for them), 12 of index, 512 of JSON each, and 1024 more.
+    expect(stepBytes(read.meshes)).toBe(1024 + 2 * (36 + 36 + 12 + 512));
   });
 
   it('says why a file can’t be a blueprint', () => {
