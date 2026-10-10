@@ -235,6 +235,8 @@ export function createRobotPreview(
         turnRate: 0,
         viewerBearing: 0,
         viewerDistance: 99,
+        // Close enough that a chestplate clip plays (whatever the robot looks at).
+        chestDistance: camera.position.length(),
         reducedMotion: reducedMotion || still,
         talking: false,
       });

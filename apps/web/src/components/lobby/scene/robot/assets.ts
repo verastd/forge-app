@@ -102,6 +102,18 @@ class Cache<T> {
   }
 }
 
+/**
+ * A chestplate clip, shared by every robot wearing it: one video, decoded
+ * once. It plays while any of them wants it to (`want`), and holds its frame
+ * while none does.
+ */
+export interface ChestClip {
+  readonly texture: THREE.VideoTexture;
+  readonly video: HTMLVideoElement;
+  /** Whether `viewer` (a robot) wants it playing now. */
+  want(viewer: object, playing: boolean): void;
+}
+
 export interface RobotAssets {
   /** The shared body; resolves once, or rejects (the lobby keeps its orbs). */
   body: Promise<RobotBody>;
@@ -115,6 +127,8 @@ export interface RobotAssets {
   localHead(key: string, bytes: ArrayBuffer): Promise<GLTF>;
   /** A chestplate image, by sha256. */
   chest(sha256: string): Promise<THREE.Texture>;
+  /** A chestplate clip, by sha256: loaded whole (no streaming), muted, looping, paused until wanted. */
+  chestVideo(sha256: string): Promise<ChestClip>;
   /** A member's generated emblem, by id and name (cached per both). */
   emblem(id: string, name: string, colors: AvatarColors): THREE.Texture;
   /** The environment map robots (and only robots) are lit by. */
@@ -160,6 +174,7 @@ export function drawEmblem(canvas: HTMLCanvasElement, name: string, colors: Avat
 export function createRobotAssets(renderer: THREE.WebGLRenderer): RobotAssets {
   const heads = new Cache<GLTF>();
   const chests = new Cache<THREE.Texture>();
+  const clips = new Cache<ChestClip & { dispose(): void }>();
   const emblems = new Map<string, THREE.Texture>();
   const textureLoader = new THREE.TextureLoader();
 
@@ -189,6 +204,59 @@ export function createRobotAssets(renderer: THREE.WebGLRenderer): RobotAssets {
         return texture;
       });
     },
+    chestVideo(sha256) {
+      return clips.get(sha256, async () => {
+        // Fetched whole and played from memory: the asset route sends the file in one piece
+        // (no byte ranges), which Safari's <video> won't play from directly.
+        const response = await fetch(assetUrl(sha256));
+        if (!response.ok) throw new Error(`chest clip ${response.status}`);
+        const url = URL.createObjectURL(await response.blob());
+        const video = document.createElement('video');
+        video.muted = true;
+        video.loop = true;
+        video.playsInline = true;
+        video.preload = 'auto';
+        video.crossOrigin = 'anonymous';
+        try {
+          await new Promise<void>((resolve, reject) => {
+            video.addEventListener('loadeddata', () => resolve(), { once: true });
+            video.addEventListener('error', () => reject(new Error('chest clip would not play')), { once: true });
+            video.src = url;
+            video.load();
+          });
+        } catch (error) {
+          URL.revokeObjectURL(url);
+          throw error;
+        }
+        const texture = new THREE.VideoTexture(video);
+        texture.colorSpace = THREE.SRGBColorSpace;
+        // Its first frame, before it ever plays (a paused video has no frames to announce).
+        texture.needsUpdate = true;
+        const wanting = new Set<object>();
+        return {
+          texture,
+          video,
+          want(viewer, playing) {
+            if (playing) wanting.add(viewer);
+            else wanting.delete(viewer);
+            if (wanting.size > 0 && video.paused) {
+              // Muted and inline, so it may play without a gesture; if a browser still says no, it holds its frame.
+              video.play().catch(() => undefined);
+            } else if (wanting.size === 0 && !video.paused) {
+              video.pause();
+            }
+          },
+          dispose() {
+            wanting.clear();
+            video.pause();
+            video.removeAttribute('src');
+            video.load();
+            URL.revokeObjectURL(url);
+            texture.dispose();
+          },
+        };
+      });
+    },
     emblem(id, name, colors) {
       const key = `${id}\u0000${name}\u0000${colors.accent}${colors.eye}`;
       let texture = emblems.get(key);
@@ -211,9 +279,11 @@ export function createRobotAssets(renderer: THREE.WebGLRenderer): RobotAssets {
         for (const promise of promises) promise.then(each, () => undefined);
       };
       disposeLater(chests.values(), (texture) => texture.dispose());
+      disposeLater(clips.values(), (clip) => clip.dispose());
       disposeLater(heads.values(), (gltf) => disposeObject(gltf.scene));
       disposeLater([body], (b) => disposeObject(b.scene));
       chests.clear();
+      clips.clear();
       heads.clear();
     },
   };

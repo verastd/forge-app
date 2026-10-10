@@ -43,6 +43,7 @@ export function lookFrom(list: AvatarList | null, id: string, name: string): Rob
     head,
     accessory,
     chest: dressed?.chest ?? null,
+    chestType: dressed?.chestType ?? null,
     finish: dressed?.finish ?? null,
     back,
     cape: dressed?.cape ?? null,

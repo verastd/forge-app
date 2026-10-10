@@ -41,6 +41,7 @@ import {
   eyeRotations,
   finishLook,
   foreDirection,
+  chestPlays,
   hashId,
   reachArm,
   robotPose,
@@ -49,7 +50,7 @@ import {
 import type { ArmAim, ArmsPose, AvatarColors, AvatarFinish, Blinker, FlightArea, MotionInput, MotionPose, RoofGrid } from '@forge/lobby';
 import type { AvatarCape, AvatarHead } from '@forge/shared';
 
-import type { RobotAssets, RobotBody } from './assets';
+import type { ChestClip, RobotAssets, RobotBody } from './assets';
 import { createCape } from './cape';
 import type { CapeView } from './cape';
 import { createHelicopter } from './helicopter';
@@ -85,6 +86,8 @@ export interface RobotLook {
   accessory?: AvatarHead | null;
   /** The chest image's sha256; null wears the generated emblem. */
   chest: string | null;
+  /** What the chest file is: a clip (video/…) plays; absent or an image type, it's a picture. */
+  chestType?: string | null;
   /** What the armour is made of; absent or null: paint. */
   finish?: AvatarFinish | null;
   /** A library model worn on the back (fit `back`); absent or null: none. */
@@ -114,6 +117,7 @@ export function lookKey(look: RobotLook): string {
     placementKey(look.back ?? null),
     look.cape ? `${look.cape.outer}${look.cape.lining}` : '',
     look.chest ?? '',
+    look.chestType ?? '',
   ].join('|');
 }
 
@@ -147,6 +151,8 @@ export interface RobotAct {
 /** What drives one frame of a robot, besides its pose inputs. */
 export interface RobotFrame extends Omit<MotionInput, 'phase'> {
   dt: number;
+  /** How far the viewer is from its chestplate, for whether a clip there plays; absent: viewerDistance. */
+  chestDistance?: number;
   talking: boolean;
   act?: RobotAct;
 }
@@ -602,6 +608,9 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
   let backRetryAt: number | null = null;
   let cape: CapeView | null = null;
   let pendingChest: string | null = null;
+  // The chest clip it shows (shared with any other robot showing it), and who it is to that clip.
+  let clip: ChestClip | null = null;
+  const viewer = {};
   /** When to try a failed head or chest image again (performance.now() ms), or null. */
   let headRetryAt: number | null = null;
   let chestRetryAt: number | null = null;
@@ -978,7 +987,14 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
   };
 
   /** `retry`: the emblem stays up while the image is tried again, rather than the loading scan. */
+  /** Lets go of the chest clip it shows (it keeps playing for any other robot that wants it). */
+  const dropClip = (): void => {
+    clip?.want(viewer, false);
+    clip = null;
+  };
+
   const wearChest = (next: RobotLook, retry = false): void => {
+    dropClip();
     if (!retry) {
       uniforms.uChestFade.value = 0;
       chestFadeTarget = 0;
@@ -997,17 +1013,28 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
     const sha = next.chest;
     pendingChest = sha;
     if (!retry) uniforms.uChest.value = blank;
-    assets.chest(sha).then(
-      (texture) => {
-        if (disposed || pendingChest !== sha) return;
-        pendingChest = null;
-        if (retry) uniforms.uChestFade.value = 0;
-        const image = texture.image as { width?: number; height?: number } | undefined;
-        uniforms.uChest.value = texture;
-        uniforms.uChestAspect.value = image?.width && image.height ? image.width / image.height : 1;
-        uniforms.uChestFull.value = 1;
-        chestFadeTarget = 1;
-      },
+    const shown = (texture: THREE.Texture, width: number | undefined, height: number | undefined): void => {
+      if (retry) uniforms.uChestFade.value = 0;
+      uniforms.uChest.value = texture;
+      uniforms.uChestAspect.value = width && height ? width / height : 1;
+      uniforms.uChestFull.value = 1;
+      chestFadeTarget = 1;
+    };
+    const loading: Promise<unknown> = next.chestType?.startsWith('video/')
+      ? assets.chestVideo(sha).then((loaded) => {
+          if (disposed || pendingChest !== sha) return;
+          pendingChest = null;
+          clip = loaded;
+          shown(loaded.texture, loaded.video.videoWidth, loaded.video.videoHeight);
+        })
+      : assets.chest(sha).then((texture) => {
+          if (disposed || pendingChest !== sha) return;
+          pendingChest = null;
+          const image = texture.image as { width?: number; height?: number } | undefined;
+          shown(texture, image?.width, image?.height);
+        });
+    loading.then(
+      () => undefined,
       () => {
         if (disposed || pendingChest !== sha) return;
         pendingChest = null;
@@ -1235,6 +1262,7 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
       flame.position.y = -0.04 - 0.1 * p.thrust;
       flameMaterial.opacity = 0.35 + 0.55 * p.thrust;
       cape?.update(frame);
+      clip?.want(viewer, chestPlays({ viewerDistance: frame.chestDistance ?? frame.viewerDistance, reducedMotion: frame.reducedMotion }));
       if (flyer && flight) flyer.fly(flight.area, flight.grid, frame.t, flyerStart, frame.reducedMotion);
       return p;
     },
@@ -1244,6 +1272,7 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
       dropAccessory();
       dropBack();
       wearCape(null);
+      dropClip();
       root.removeFromParent();
       material.dispose();
       for (const each of [...eyeMaterials, ...haloMaterials]) each.dispose();

@@ -1259,6 +1259,14 @@ export const AVATAR_CHEST_MAX_PIXELS = 2048;
 export const AVATAR_HEAD_MAX_BYTES = 3 * 1024 * 1024;
 export const AVATAR_CHEST_TYPES = ['image/png', 'image/jpeg', 'image/webp'] as const;
 export type AvatarChestType = (typeof AVATAR_CHEST_TYPES)[number];
+/** A chestplate may be a short clip instead: muted, looping. */
+export const AVATAR_CHEST_VIDEO_TYPES = ['video/mp4', 'video/webm'] as const;
+export type AvatarChestVideoType = (typeof AVATAR_CHEST_VIDEO_TYPES)[number];
+/** Everything a chestplate may be. */
+export const AVATAR_CHEST_MEDIA_TYPES = [...AVATAR_CHEST_TYPES, ...AVATAR_CHEST_VIDEO_TYPES] as const;
+export type AvatarChestMediaType = (typeof AVATAR_CHEST_MEDIA_TYPES)[number];
+/** The most a chestplate clip may weigh, decoded: its base64 stays under a 4.5 MB request. */
+export const AVATAR_CHEST_VIDEO_MAX_BYTES = 3 * 1024 * 1024;
 /** The two empties a replacing head may carry to place the shared blinking eyes. */
 export const AVATAR_EYE_NODES = ['EyeL', 'EyeR'] as const;
 /**
@@ -1316,6 +1324,8 @@ export const AvatarSchema = z.object({
   accessory: z.string().regex(AVATAR_HEAD_ID).optional(),
   /** The chestplate image's sha256; absent: a generated emblem. */
   chest: z.string().regex(AVATAR_SHA256).optional(),
+  /** What the chestplate is (an image, or a clip it plays); absent with no chestplate. */
+  chestType: z.enum(AVATAR_CHEST_MEDIA_TYPES).optional(),
   /** What the armour is made of; absent: paint. */
   finish: z.enum(AVATAR_FINISHES).optional(),
   /** On its back, at most one of: a library model (a head whose fit is `back`)… */
@@ -1465,7 +1475,7 @@ export type AvatarUpdate = z.infer<typeof AvatarUpdateSchema>;
 
 /** `PUT /api/avatars/members/{memberId}/chest` (admins): the image, base64. */
 export const AvatarChestUploadSchema = z.object({
-  contentType: z.enum(AVATAR_CHEST_TYPES),
+  contentType: z.enum(AVATAR_CHEST_MEDIA_TYPES),
   data: z.string().min(1),
 });
 export type AvatarChestUpload = z.infer<typeof AvatarChestUploadSchema>;
