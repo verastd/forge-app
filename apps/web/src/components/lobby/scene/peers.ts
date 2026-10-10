@@ -278,6 +278,12 @@ export function createPeers(
       const width = layer.clientWidth;
       const height = layer.clientHeight;
       const seen = new Set<string>();
+      // Whom a robot's arm may look at: you, and everyone else here (where they were last frame).
+      const others = (but: string): Vec3[] => {
+        const out: Vec3[] = [{ x: viewer.x, y: viewer.y, z: viewer.z }];
+        for (const [other, each] of views) if (other !== but && each.handover > 0) out.push({ x: each.shown.x, y: each.shown.y, z: each.shown.z });
+        return out;
+      };
 
       for (const [id, peer] of peers) {
         seen.add(id);
@@ -357,6 +363,7 @@ export function createPeers(
             reducedMotion,
             talking: view.talking,
             act: act?.(id),
+            people: others(id),
           });
           tagY = robot.root.position.y + TAG_HEIGHT;
         }
@@ -456,6 +463,8 @@ export function createPeers(
           reducedMotion,
           talking: self.talking,
           act: self.act,
+          // Everyone else here.
+          people: [...views.values()].filter((each) => each.handover > 0).map((each) => ({ x: each.shown.x, y: each.shown.y, z: each.shown.z })),
         });
       }
       return robot.state === 'loading' ? 'loading' : 'ready';

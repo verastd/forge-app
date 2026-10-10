@@ -1408,6 +1408,10 @@ export type AvatarHeadFlyer = (typeof AVATAR_HEAD_FLYERS)[number];
 export const AVATAR_HEAD_EMITTERS = ['bricks'] as const;
 export type AvatarHeadEmitter = (typeof AVATAR_HEAD_EMITTERS)[number];
 
+/** How a back model moves on its own (`placement.motion`): `arm` bends it like an arm, bouncing around and looking at people with its tip. */
+export const AVATAR_HEAD_MOTIONS = ['arm'] as const;
+export type AvatarHeadMotion = (typeof AVATAR_HEAD_MOTIONS)[number];
+
 export const AvatarHeadPlacementSchema = z.object({
   scale: z.number().min(AVATAR_PLACEMENT_SCALE_MIN).max(AVATAR_PLACEMENT_SCALE_MAX),
   offset: placementPoint,
@@ -1464,6 +1468,13 @@ export const AvatarHeadPlacementSchema = z.object({
    * however the model is fitted. Absent: guessed, low on the model's back.
    */
   spout: z.tuple([z.number().min(0).max(1), z.number().min(0).max(1), z.number().min(0).max(1)]).nullish(),
+  /**
+   * How a back model moves on its own, for whoever wears it: `arm` rigs it
+   * as an arm when it loads (a chain of bones from where it's mounted to its
+   * far end) and bends it, bouncing around and turning its tip (its camera)
+   * to look at whoever is near. Back models only. Absent: it holds still.
+   */
+  motion: z.enum(AVATAR_HEAD_MOTIONS).nullish(),
 });
 export type AvatarHeadPlacement = z.infer<typeof AvatarHeadPlacementSchema>;
 

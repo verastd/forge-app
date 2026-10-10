@@ -222,6 +222,36 @@ test.describe('what a robot wears on its back', () => {
     await expect(back(page).getByRole('button', { name: /^Wings/ })).toBeVisible();
   });
 
+  test('a back model can move like an arm: the switch says what it does, it goes up with the fit, and the library says so', async ({ page, context, baseURL }) => {
+    await signInAs(context, baseURL ?? '', { sub: '4242', login: 'trent-admin' });
+    await openEditor(page, { avatars: [ROBOT], heads: [] });
+    const upload = held();
+    let sent: { fit?: string; placement?: { motion?: string } } | null = null;
+    await page.route('**/bff/avatars/heads/arm', async (route) => {
+      sent = route.request().postDataJSON() as typeof sent;
+      await upload.handler(route);
+    });
+    await page.getByLabel('Name').fill('Arm');
+    await page.getByRole('radio', { name: /Worn on the back/ }).check();
+    await page.getByLabel(/File \(\.glb/).setInputFiles({ name: 'arm.glb', mimeType: 'model/gltf-binary', buffer: WINGS });
+    const moves = page.getByRole('checkbox', { name: /Moves like an arm/ });
+    await expect(moves).toBeEnabled({ timeout: 90_000 });
+    await expect(moves).not.toBeChecked();
+    await expect(page.getByText('Off: it holds still.')).toBeVisible();
+    await moves.check();
+    await expect(page.getByText(/bounces around and turns its far end \(its camera\) to look at whoever’s near/)).toBeVisible();
+    // The preview keeps going with it on (it's rigged as it's worn there too).
+    await expect(page.locator('[data-fitter] [data-preview]')).toHaveAttribute('data-preview', 'ready');
+
+    await page.getByRole('button', { name: 'Add to library' }).click();
+    await expect(page.getByRole('button', { name: 'Uploading…' })).toBeVisible();
+    await expect.poll(() => sent).not.toBeNull();
+    expect(sent!.fit).toBe('back');
+    expect(sent!.placement!.motion).toBe('arm');
+    upload.release(200, { ...PACK, id: 'arm', name: 'Arm', fit: 'back', placement: sent!.placement });
+    await expect(page.locator('li', { hasText: 'Arm' }).getByText('Moves like an arm', { exact: true })).toBeVisible();
+  });
+
   test('a back model can make bricks: the Lego bot’s backpack is added with it, and the library says so', async ({ page, context, baseURL }) => {
     await signInAs(context, baseURL ?? '', { sub: '4242', login: 'trent-admin' });
     await openEditor(page, { avatars: [ROBOT], heads: [] });
