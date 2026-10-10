@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { ARM, armAxis, armWeights, createArmLook, stepArmLook } from './arm.js';
+import { ARM, armAxis, armJoints, armWeights, clearOf, createArmLook, stepArmLook } from './arm.js';
 import type { ArmLookInput } from './arm.js';
 
 /** A thin rod of points from (0, 0, 0) to (0, 1, 0), a little wide. */
@@ -39,37 +39,95 @@ describe('armAxis', () => {
   });
 });
 
+/** An arm along +y, 0 to 1 m, as rings of points whose radius follows `radius(t)`. */
+const shaped = (radius: (t: number) => number, rings = 200): Float32Array => {
+  const out: number[] = [];
+  for (let i = 0; i <= rings; i += 1) {
+    const t = i / rings;
+    for (let k = 0; k < 8; k += 1) {
+      const a = (k / 8) * Math.PI * 2;
+      out.push(Math.cos(a) * radius(t), t, Math.sin(a) * radius(t));
+    }
+  }
+  return new Float32Array(out);
+};
+const UP = { base: { x: 0, y: 0, z: 0 }, tip: { x: 0, y: 1, z: 0 } };
+
+describe('armJoints', () => {
+  it('bends at its narrowings (a wrist, an elbow), not in its thick parts', () => {
+    // Thick base, a waist at 0.35, a thick elbow, a thin forearm around 0.72, a big camera head at the end.
+    const radius = (t: number): number => (t < 0.3 ? 0.25 : t < 0.4 ? 0.12 : t < 0.62 ? 0.3 : t < 0.8 ? 0.1 : 0.28);
+    const joints = armJoints(shaped(radius), UP);
+    expect(joints).toHaveLength(2);
+    expect(joints[0]).toBeGreaterThan(0.3);
+    expect(joints[0]).toBeLessThan(0.4);
+    expect(joints[1]).toBeGreaterThan(0.62);
+    expect(joints[1]).toBeLessThan(0.8);
+    // Never within the camera head (the last fifth) or the base.
+    for (const j of joints) {
+      expect(j).toBeGreaterThanOrEqual(ARM.jointEdge);
+      expect(j).toBeLessThanOrEqual(1 - ARM.jointEdge);
+    }
+  });
+
+  it('keeps joints apart and to at most `max`, the deepest first', () => {
+    // Waists at 0.3 (the deepest), 0.4 (too near it to count too) and 0.65.
+    const waist = (t: number, at: number, r: number): number | null => (Math.abs(t - at) < 0.04 ? r : null);
+    const radius = (t: number): number => waist(t, 0.3, 0.04) ?? waist(t, 0.4, 0.1) ?? waist(t, 0.65, 0.12) ?? 0.3;
+    const two = armJoints(shaped(radius, 400), UP, 2);
+    expect(two).toHaveLength(2);
+    expect(two[0]).toBeGreaterThan(0.25);
+    expect(two[0]).toBeLessThan(0.38);
+    expect(two[1]).toBeGreaterThan(0.6);
+    expect(two[1]).toBeLessThan(0.7);
+    expect(two[1]! - two[0]!).toBeGreaterThanOrEqual(ARM.jointGap);
+    // With room for one, the deepest.
+    const one = armJoints(shaped(radius, 400), UP, 1);
+    expect(one).toHaveLength(1);
+    expect(one[0]).toBeLessThan(0.38);
+  });
+
+  it('with no narrowing to go by (a plain rod), bends at its thirds', () => {
+    expect(armJoints(shaped(() => 0.1), UP)).toEqual([1 / 3, 2 / 3]);
+    expect(armJoints(shaped(() => 0.1), UP, 1)).toEqual([1 / 3]);
+    // Points only at its ends (empty slices between) are no different.
+    expect(armJoints([0.1, 0, 0, 0.1, 1, 0], UP)).toEqual([1 / 3, 2 / 3]);
+  });
+});
+
 describe('armWeights', () => {
-  it('gives each vertex the bone of its stretch, shared with the one before near a joint', () => {
-    const positions = [0, 0, 0, 0, 0.3, 0, 0, 0.5, 0, 0, 0.65, 0, 0, 1, 0, 0, 1.4, 0, 0, -0.2, 0];
-    const { joints, weights } = armWeights(positions, { base: { x: 0, y: 0, z: 0 }, tip: { x: 0, y: 1, z: 0 } }, 4);
-    const at = (i: number) => ({ bones: [joints[i * 4], joints[i * 4 + 1]], weights: [weights[i * 4]!, weights[i * 4 + 1]!] });
-    // The base: all the first bone's.
-    expect(at(0)).toEqual({ bones: [0, 0], weights: [1, 0] });
-    // 0.3 is past the second joint's middle (s = 1.2): mostly bone 1, some of bone 0.
-    expect(at(1).bones).toEqual([1, 0]);
-    expect(at(1).weights[0]).toBeGreaterThan(0.5);
-    expect(at(1).weights[0]).toBeLessThan(1);
-    // Right on a joint (s = 2): half and half.
-    expect(at(2).bones).toEqual([2, 1]);
-    expect(at(2).weights[0]).toBeCloseTo(0.5, 5);
-    // Past a segment's middle: all its own.
-    expect(at(3).weights).toEqual([1, 0]);
-    // The tip and beyond (clamped), and behind the base: the last and the first bone.
-    expect(at(4).bones[0]).toBe(3);
-    expect(at(5).bones[0]).toBe(3);
-    expect(at(6)).toEqual({ bones: [0, 0], weights: [1, 0] });
-    // The two unused slots stay empty, and every vertex's weights add to 1.
+  it('gives each vertex wholly to the bone of its stretch, so each part moves as one piece', () => {
+    const positions = [0, 0, 0, 0, 0.2, 0, 0, 0.35, 0, 0, 0.5, 0, 0, 0.9, 0, 0, 1.4, 0, 0, -0.2, 0];
+    const { joints, weights } = armWeights(positions, UP, [0.35, 0.7]);
+    const bones = Array.from({ length: 7 }, (_, i) => joints[i * 4]);
+    // Base stretch, then from each joint on (a vertex right at a joint goes with the part past it).
+    expect(bones).toEqual([0, 0, 1, 1, 2, 2, 0]);
     for (let i = 0; i < 7; i += 1) {
-      expect(weights[i * 4]! + weights[i * 4 + 1]!).toBeCloseTo(1, 6);
-      expect(weights[i * 4 + 2]).toBe(0);
-      expect(weights[i * 4 + 3]).toBe(0);
+      expect(weights[i * 4]).toBe(1);
+      expect([weights[i * 4 + 1], weights[i * 4 + 2], weights[i * 4 + 3]]).toEqual([0, 0, 0]);
     }
   });
 
   it('survives an axis with no length', () => {
-    const { joints } = armWeights([0, 0, 0], { base: { x: 0, y: 0, z: 0 }, tip: { x: 0, y: 0, z: 0 } });
+    const { joints } = armWeights([0, 0, 0], { base: { x: 0, y: 0, z: 0 }, tip: { x: 0, y: 0, z: 0 } }, [0.5]);
     expect(joints[0]).toBe(0);
+  });
+});
+
+describe('clearOf', () => {
+  const torso = { min: { x: -0.2, y: 0.3, z: -0.12 }, max: { x: 0.2, y: 0.8, z: 0.14 } };
+  const head = { min: { x: -0.19, y: 0.8, z: -0.15 }, max: { x: 0.19, y: 1.1, z: 0.15 } };
+  it('is clear outside every box by the margin, and not inside or within it', () => {
+    expect(clearOf({ x: 0, y: 1.3, z: 0 }, [torso, head], 0.05)).toBe(true);
+    expect(clearOf({ x: 0, y: 0.5, z: -0.3 }, [torso, head], 0.05)).toBe(true);
+    expect(clearOf({ x: 0, y: 0.5, z: 0 }, [torso, head], 0.05)).toBe(false);
+    expect(clearOf({ x: 0, y: 1, z: 0 }, [torso, head], 0.05)).toBe(false);
+    // Just outside the torso's back, but within the margin.
+    expect(clearOf({ x: 0, y: 0.5, z: -0.15 }, [torso], 0.05)).toBe(false);
+    expect(clearOf({ x: 0, y: 0.5, z: -0.15 }, [torso], 0)).toBe(true);
+    // Each side of each box counts.
+    for (const p of [{ x: -0.5, y: 0.5, z: 0 }, { x: 0.5, y: 0.5, z: 0 }, { x: 0, y: 0, z: 0 }, { x: 0, y: 0.5, z: 0.5 }]) expect(clearOf(p, [torso], 0.01)).toBe(true);
+    expect(clearOf({ x: 0, y: 0, z: 0 }, [], 1)).toBe(true);
   });
 });
 
@@ -122,6 +180,22 @@ describe('stepArmLook', () => {
     // A pick lasts holdMin–holdMax seconds: in 30 s, several picks.
     expect(goals.size).toBeGreaterThanOrEqual(Math.floor(30 / ARM.holdMax));
     expect(goals.size).toBeLessThanOrEqual(Math.ceil(30 / ARM.holdMin) + 1);
+  });
+
+  it('never wanders a way that would reach through the robot, and holds its rest direction when every way would', () => {
+    const rest = { x: 0, y: 1, z: 0 };
+    // Nothing toward −Z (where the robot is, say).
+    const blocked = (dir: { z: number }): boolean => dir.z < 0;
+    const state = createArmLook(13);
+    let t = 0;
+    for (let i = 0; i < 60 * 30; i += 1) {
+      t += 1 / 60;
+      stepArmLook(state, input({ t, rest, blocked }));
+      expect(state.goal!.z).toBeGreaterThanOrEqual(base.z - 1e-9);
+    }
+    const stuck = createArmLook(13);
+    stepArmLook(stuck, input({ t: 1, rest, blocked: () => true }));
+    expect(stuck.goal).toEqual({ x: base.x, y: base.y + 0.6, z: base.z });
   });
 
   it('looks at someone near, following them as they move, and lets them go once they leave', () => {

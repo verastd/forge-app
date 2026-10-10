@@ -31,6 +31,7 @@ import * as THREE from 'three';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 import {
   BACK_ANCHOR,
+  BACK_PANEL,
   FACE_PANEL,
   HEAD_ANCHOR,
   HEAD_FIT,
@@ -47,7 +48,7 @@ import {
   robotPose,
   rotateAbout,
 } from '@forge/lobby';
-import type { ArmAim, ArmsPose, AvatarColors, AvatarFinish, Blinker, FlightArea, MotionInput, MotionPose, RoofGrid, Vec3 } from '@forge/lobby';
+import type { ArmAim, ArmBox, ArmsPose, AvatarColors, AvatarFinish, Blinker, FlightArea, MotionInput, MotionPose, RoofGrid, Vec3 } from '@forge/lobby';
 import { AVATAR_CHEST_BLENDS } from '@forge/shared';
 import type { AvatarCape, AvatarChestBlend, AvatarHead } from '@forge/shared';
 
@@ -623,6 +624,9 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
   let backObject: THREE.Object3D | null = null;
   /** The back model's own rig while it moves like an arm. */
   let backArm: BackArm | null = null;
+  const gaze = new THREE.Quaternion();
+  const gazeParent = new THREE.Quaternion();
+  const gazeBind = new THREE.Quaternion();
   let backMaterials: THREE.Material[] = [];
   /** The back model's bounding box in its own file's frame (a spout is a fraction of it). */
   const backFileBox = new THREE.Box3();
@@ -931,6 +935,38 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
     );
   };
 
+  /**
+   * What an arm on its back keeps out of, in the body's own frame: its torso
+   * (the back plate to its chest, shoulder to shoulder, hips to neck), and its
+   * head: what it wears there (a head, an accessory), measured as it is now,
+   * or its own.
+   */
+  const keepOut = (): ArmBox[] => {
+    const torso: ArmBox = {
+      min: { x: -BACK_PANEL.shoulders, y: BACK_PANEL.minY - 0.12, z: BACK_PANEL.z },
+      max: { x: BACK_PANEL.shoulders, y: HEAD_ANCHOR.y, z: -BACK_PANEL.z + 0.02 },
+    };
+    const worn = [headObject, accessoryObject].filter((object): object is THREE.Object3D => object !== null);
+    if (worn.length === 0) {
+      const half = HEAD_FIT.headWidth / 2;
+      return [torso, { min: { x: -half, y: HEAD_ANCHOR.y, z: -half }, max: { x: half, y: HEAD_ANCHOR.y + 0.3, z: half } }];
+    }
+    model.updateWorldMatrix(true, false);
+    const toBody = new THREE.Matrix4().copy(model.matrixWorld).invert();
+    const head = new THREE.Box3();
+    const corner = new THREE.Vector3();
+    for (const object of worn) {
+      const box = new THREE.Box3().setFromObject(object);
+      if (box.isEmpty()) continue;
+      for (let i = 0; i < 8; i += 1) {
+        corner.set(i & 1 ? box.max.x : box.min.x, i & 2 ? box.max.y : box.min.y, i & 4 ? box.max.z : box.min.z);
+        head.expandByPoint(corner.applyMatrix4(toBody));
+      }
+    }
+    if (head.isEmpty()) return [torso];
+    return [torso, { min: { x: head.min.x, y: head.min.y, z: head.min.z }, max: { x: head.max.x, y: head.max.y, z: head.max.z } }];
+  };
+
   const placeBack = (back: AvatarHead): void => {
     if (!backObject) return;
     turnPivot(backPivot, back.placement);
@@ -939,7 +975,7 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
     // An arm: rigged where it now sits (mounted at the back slot), or let go when it no longer moves.
     if (back.placement.motion === 'arm' && !backArm) {
       root.updateMatrixWorld(true);
-      backArm = createBackArm(backObject, backSlot.getWorldPosition(new THREE.Vector3()), seed);
+      backArm = createBackArm(backObject, backSlot.getWorldPosition(new THREE.Vector3()), seed, { body: model, boxes: keepOut });
     } else if (back.placement.motion !== 'arm' && backArm) {
       backArm.dispose();
       backArm = null;
@@ -1350,7 +1386,17 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
       flame.position.y = -0.04 - 0.1 * p.thrust;
       flameMaterial.opacity = 0.35 + 0.55 * p.thrust;
       cape?.update(frame);
-      backArm?.update(frame.t, frame.dt, frame.people ?? [], frame.armStill ?? frame.reducedMotion);
+      if (backArm) {
+        // How far its eyes are turned from rest (the head bone's turn, in the cave): the arm's camera faces the same way.
+        gaze.identity();
+        const head = rest.head;
+        if (head?.bone.parent) {
+          head.bone.parent.updateWorldMatrix(true, false);
+          head.bone.parent.getWorldQuaternion(gazeParent);
+          gaze.copy(gazeParent).multiply(head.bone.quaternion).multiply(gazeBind.copy(head.bind).invert()).multiply(gazeParent.invert());
+        }
+        backArm.update(frame.t, frame.dt, frame.people ?? [], frame.armStill ?? frame.reducedMotion, gaze);
+      }
       clip?.want(viewer, chestPlays({ viewerDistance: frame.chestDistance ?? frame.viewerDistance, reducedMotion: frame.reducedMotion }));
       if (flyer && flight) flyer.fly(flight.area, flight.grid, frame.t, flyerStart, frame.reducedMotion);
       return p;

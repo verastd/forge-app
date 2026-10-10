@@ -1,7 +1,9 @@
 /**
  * Something that flies over a worn head, forever: a helicopter doing
  * figure-8s just above the model's top (its rooftops, for a head with a city
- * on it), with a searchlight on what's below.
+ * on it), with a searchlight on what's below: always on the model itself
+ * (the figure-8 is over the part of the top that's there, not its bounding
+ * box, and a pool that would fall on thin air moves to the nearest roof).
  *
  * The renderer measures the model's top once, as a coarse grid of heights
  * (`RoofGrid`, the head frame, metres); from that this says where the
@@ -23,9 +25,9 @@ export const FLYER = Object.freeze({
   /** How much of the top's width and depth the figure-8 covers. */
   spread: 0.7,
   /** The helicopter's length, times the top's larger side, and its least and most, metres. */
-  size: 0.25,
-  minSize: 0.04,
-  maxSize: 0.16,
+  size: 0.1875,
+  minSize: 0.03,
+  maxSize: 0.12,
   /** How far above the tallest roof it cruises: at least this, metres, or this many of its own lengths. */
   clearance: 0.04,
   clearanceLengths: 1.1,
@@ -103,10 +105,13 @@ export function flightArea(grid: RoofGrid): FlightArea | null {
   const depth = z1 - z0;
   if (!finite(x0, z0, x1, z1, grid.top) || width <= 0 || depth <= 0) return null;
   const size = Math.min(FLYER.maxSize, Math.max(FLYER.minSize, FLYER.size * Math.max(width, depth)));
+  // Over what's there: the cells something was measured in (all of it, when nothing was).
+  const filled = occupied(grid);
+  const [ox0, oz0, ox1, oz1] = filled ?? [x0, z0, x1, z1];
   return {
-    center: [(x0 + x1) / 2, (z0 + z1) / 2],
-    halfX: (width / 2) * FLYER.spread,
-    halfZ: (depth / 2) * FLYER.spread,
+    center: [(ox0 + ox1) / 2, (oz0 + oz1) / 2],
+    halfX: ((ox1 - ox0) / 2) * FLYER.spread,
+    halfZ: ((oz1 - oz0) / 2) * FLYER.spread,
     cruise: tallest(grid) + Math.max(FLYER.clearance, size * FLYER.clearanceLengths),
     size,
   };
@@ -159,8 +164,7 @@ export function flightPose(area: FlightArea, grid: RoofGrid, t: number, phase = 
   const across = area.halfX * FLYER.sweep * Math.sin((TAU * time) / FLYER.sweepPeriod + start);
   const fx = Math.sin(yaw);
   const fz = Math.cos(yaw);
-  const sx = clamp(here.x + fx * ahead + fz * across, grid.min[0], grid.max[0]);
-  const sz = clamp(here.z + fz * ahead - fx * across, grid.min[1], grid.max[1]);
+  const [sx, sz] = onRoof(grid, clamp(here.x + fx * ahead + fz * across, grid.min[0], grid.max[0]), clamp(here.z + fz * ahead - fx * across, grid.min[1], grid.max[1]));
   return {
     position: [here.x, y, here.z],
     yaw,
@@ -172,6 +176,62 @@ export function flightPose(area: FlightArea, grid: RoofGrid, t: number, phase = 
 
 function clamp(v: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, v));
+}
+
+const measured = (h: number | null | undefined): h is number => h !== null && h !== undefined && Number.isFinite(h);
+
+/** The cell (column, row) that (x, z) falls in, and that cell's middle. */
+function cellAt(grid: RoofGrid, x: number, z: number): { col: number; row: number } {
+  const col = clamp(Math.floor(((x - grid.min[0]) / (grid.max[0] - grid.min[0] || 1)) * grid.cols), 0, grid.cols - 1);
+  const row = clamp(Math.floor(((z - grid.min[1]) / (grid.max[1] - grid.min[1] || 1)) * grid.rows), 0, grid.rows - 1);
+  return { col, row };
+}
+function middleOf(grid: RoofGrid, col: number, row: number): [number, number] {
+  return [
+    grid.min[0] + ((col + 0.5) / grid.cols) * (grid.max[0] - grid.min[0]),
+    grid.min[1] + ((row + 0.5) / grid.rows) * (grid.max[1] - grid.min[1]),
+  ];
+}
+
+/** The extent (x0, z0, x1, z1) of the cells something was measured in; null when none was. */
+function occupied(grid: RoofGrid): [number, number, number, number] | null {
+  let found: [number, number, number, number] | null = null;
+  const cw = (grid.max[0] - grid.min[0]) / Math.max(1, grid.cols);
+  const ch = (grid.max[1] - grid.min[1]) / Math.max(1, grid.rows);
+  for (let row = 0; row < grid.rows; row += 1) {
+    for (let col = 0; col < grid.cols; col += 1) {
+      if (!measured(grid.heights[row * grid.cols + col])) continue;
+      const [x, z] = middleOf(grid, col, row);
+      found = found
+        ? [Math.min(found[0], x - cw / 2), Math.min(found[1], z - ch / 2), Math.max(found[2], x + cw / 2), Math.max(found[3], z + ch / 2)]
+        : [x - cw / 2, z - ch / 2, x + cw / 2, z + ch / 2];
+    }
+  }
+  return found;
+}
+
+/**
+ * (x, z) if there's roof under it; else the middle of the nearest cell that
+ * has some (so the searchlight never lands on thin air). With nothing
+ * measured anywhere, (x, z) as it is.
+ */
+function onRoof(grid: RoofGrid, x: number, z: number): [number, number] {
+  const { col, row } = cellAt(grid, x, z);
+  if (measured(grid.heights[row * grid.cols + col])) return [x, z];
+  let best: [number, number] | null = null;
+  let bestDistance = Infinity;
+  for (let r = 0; r < grid.rows; r += 1) {
+    for (let c = 0; c < grid.cols; c += 1) {
+      if (!measured(grid.heights[r * grid.cols + c])) continue;
+      const [mx, mz] = middleOf(grid, c, r);
+      const d = Math.hypot(mx - x, mz - z);
+      if (d < bestDistance) {
+        bestDistance = d;
+        best = [mx, mz];
+      }
+    }
+  }
+  return best ?? [x, z];
 }
 
 /**

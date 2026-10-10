@@ -18,7 +18,7 @@ describe('flightArea', () => {
     expect(area.center).toEqual([0, 0]);
     expect(area.halfX).toBeCloseTo(0.2 * FLYER.spread);
     expect(area.halfZ).toBeCloseTo(0.15 * FLYER.spread);
-    expect(area.size).toBeCloseTo(0.1);
+    expect(area.size).toBeCloseTo(0.075);
     expect(area.cruise).toBeGreaterThanOrEqual(0.45 + FLYER.clearance);
   });
 
@@ -27,6 +27,15 @@ describe('flightArea', () => {
     expect(tiny.size).toBe(FLYER.minSize);
     const huge = flightArea({ ...city(), min: [-5, -5], max: [5, 5] })!;
     expect(huge.size).toBe(FLYER.maxSize);
+  });
+
+  it('flies over the part of the top that is there, not its whole box', () => {
+    // Only the left half (columns 0 and 1) has anything in it.
+    const half = { ...city(), heights: city().heights.map((h, i) => (i % 4 < 2 ? h : null)) };
+    const area = flightArea(half)!;
+    expect(area.center[0]).toBeCloseTo(-0.1);
+    expect(area.halfX).toBeCloseTo(0.1 * FLYER.spread);
+    expect(area.halfZ).toBeCloseTo(0.15 * FLYER.spread);
   });
 
   it('with nothing measured, cruises above the model’s top', () => {
@@ -101,6 +110,22 @@ describe('flightPose', () => {
       expect(spot[2]).toBeLessThanOrEqual(grid.max[1]);
       expect(spot[1]).toBeCloseTo(roofAt(grid, spot[0], spot[2]));
     }
+  });
+
+  it('never shines on thin air: a pool that would land where nothing is moves to the nearest roof', () => {
+    // A ring: everything measured but the middle two cells (a hole in the top).
+    const ring = { ...city(), heights: city().heights.map((h, i) => (i === 5 || i === 6 ? null : h)) };
+    const ringArea = flightArea(ring)!;
+    for (let t = 0; t < 20; t += 0.25) {
+      const { spot } = flightPose(ringArea, ring, t, 0.5);
+      const col = Math.min(3, Math.floor(((spot[0] + 0.2) / 0.4) * 4));
+      const row = Math.min(2, Math.floor(((spot[2] + 0.15) / 0.3) * 3));
+      expect(ring.heights[row * 4 + col]).not.toBeNull();
+    }
+    // With nothing measured anywhere, it shines where it would have.
+    const empty = { ...city(), heights: new Array(12).fill(null) };
+    const { spot } = flightPose(flightArea(empty)!, empty, 1);
+    expect(Number.isFinite(spot[0]) && Number.isFinite(spot[2])).toBe(true);
   });
 
   it('starts where its phase says, and copes with nonsense times', () => {
