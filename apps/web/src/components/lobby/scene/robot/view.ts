@@ -48,6 +48,7 @@ import {
   rotateAbout,
 } from '@forge/lobby';
 import type { ArmAim, ArmsPose, AvatarColors, AvatarFinish, Blinker, FlightArea, MotionInput, MotionPose, RoofGrid } from '@forge/lobby';
+import { AVATAR_CHEST_GLOW_DEFAULT } from '@forge/shared';
 import type { AvatarCape, AvatarHead } from '@forge/shared';
 
 import type { ChestClip, RobotAssets, RobotBody } from './assets';
@@ -94,6 +95,8 @@ export interface RobotLook {
   back?: AvatarHead | null;
   /** The built-in cape, its two colours; absent or null: none. */
   cape?: AvatarCape | null;
+  /** How much an uploaded chestplate glows (0–1); absent or null: AVATAR_CHEST_GLOW_DEFAULT. */
+  chestGlow?: number | null;
 }
 
 /** A look's identity, to tell when it changed. */
@@ -118,6 +121,7 @@ export function lookKey(look: RobotLook): string {
     look.cape ? `${look.cape.outer}${look.cape.lining}` : '',
     look.chest ?? '',
     look.chestType ?? '',
+    look.chestGlow ?? '',
   ].join('|');
 }
 
@@ -1054,6 +1058,7 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
     look = next;
     paint(uniforms, next.colors);
     finish(material, uniforms, next.finish);
+    uniforms.uChestGlow.value = next.chestGlow ?? AVATAR_CHEST_GLOW_DEFAULT;
     const eyeColors = [next.colors.eye, next.colors.eyeRight ?? next.colors.eye];
     eyeMaterials.forEach((each, i) => each.color.set(eyeColors[i]!).multiplyScalar(1.6));
     haloMaterials.forEach((each, i) => each.color.set(eyeColors[i]!));

@@ -1093,6 +1093,11 @@ class AvatarCape(BaseModel):
     lining: _HexColor
 
 
+#: How much an uploaded chestplate glows when a robot has no setting of its own.
+AVATAR_CHEST_GLOW_DEFAULT: Final = 0.4
+_ChestGlow = Annotated[float, Field(ge=0, le=1, allow_inf_nan=False)]
+
+
 class Avatar(BaseModel):
     memberId: _AvatarMemberId
     colors: AvatarColors
@@ -1108,6 +1113,8 @@ class Avatar(BaseModel):
     back: _AvatarHeadId | None = None
     #: ...or the built-in cape.
     cape: AvatarCape | None = None
+    #: How much an uploaded chestplate glows, 0 (printed on) to 1 (a lit screen); None: default.
+    chestGlow: _ChestGlow | None = None
     updatedAt: str
 
 
@@ -1202,6 +1209,7 @@ class AvatarUpdate(BaseModel):
     #: At most one of `back` and `cape` (refused with 400 one_back).
     back: _AvatarHeadId | None = None
     cape: AvatarCape | None = None
+    chestGlow: _ChestGlow | None = None
 
 
 class AvatarChestUpload(BaseModel):

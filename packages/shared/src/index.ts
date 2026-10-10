@@ -1266,6 +1266,8 @@ export type AvatarChestVideoType = (typeof AVATAR_CHEST_VIDEO_TYPES)[number];
 export const AVATAR_CHEST_MEDIA_TYPES = [...AVATAR_CHEST_TYPES, ...AVATAR_CHEST_VIDEO_TYPES] as const;
 export type AvatarChestMediaType = (typeof AVATAR_CHEST_MEDIA_TYPES)[number];
 /** The most a chestplate clip may weigh, decoded: its base64 stays under a 4.5 MB request. */
+/** How much an uploaded chestplate glows when a robot has no setting of its own: a little, so it reads as lit, not blown out. */
+export const AVATAR_CHEST_GLOW_DEFAULT = 0.4;
 export const AVATAR_CHEST_VIDEO_MAX_BYTES = 3 * 1024 * 1024;
 /** The two empties a replacing head may carry to place the shared blinking eyes. */
 export const AVATAR_EYE_NODES = ['EyeL', 'EyeR'] as const;
@@ -1332,6 +1334,8 @@ export const AvatarSchema = z.object({
   back: z.string().regex(AVATAR_HEAD_ID).optional(),
   /** …or the built-in cape. Absent both: nothing on its back. */
   cape: AvatarCapeSchema.optional(),
+  /** How much an uploaded chestplate (image or clip) glows, 0 (printed on) to 1 (a lit screen). Absent: AVATAR_CHEST_GLOW_DEFAULT. */
+  chestGlow: z.number().min(0).max(1).optional(),
   updatedAt: z.string(),
 });
 export type Avatar = z.infer<typeof AvatarSchema>;
@@ -1480,6 +1484,8 @@ export const AvatarUpdateSchema = z.object({
   /** At most one of `back` and `cape` (the API refuses both). */
   back: z.string().regex(AVATAR_HEAD_ID).optional(),
   cape: AvatarCapeSchema.optional(),
+  /** How much an uploaded chestplate glows (0–1); absent: the default. */
+  chestGlow: z.number().min(0).max(1).optional(),
 });
 export type AvatarUpdate = z.infer<typeof AvatarUpdateSchema>;
 
