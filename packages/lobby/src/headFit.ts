@@ -46,6 +46,8 @@ export interface HeadPlacement {
   flyer?: 'helicopter' | null;
   /** What a back model makes for its wearer (bricks: they're the cave's brick maker). */
   emitter?: 'bricks' | null;
+  /** Where a brick-making back model's ramp is: fractions (0–1) of its file's bounding box. */
+  spout?: [number, number, number] | null;
 }
 
 export interface HeadScreen {

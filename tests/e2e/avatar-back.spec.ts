@@ -241,11 +241,30 @@ test.describe('what a robot wears on its back', () => {
     await makes.check();
     await expect(page.getByText(/is the Lego bot: they make building bricks/)).toBeVisible();
 
+    // Where new bricks come out: guessed (low on the middle of its back) until the ramp is marked with a click.
+    const ramp = page.locator('[data-ramp]');
+    await expect(ramp).toHaveAttribute('data-ramp', 'guessed');
+    await expect(ramp.getByText('Not marked: new bricks drop from low on the middle of its back.')).toBeVisible();
+    const mark = page.getByRole('button', { name: 'Mark the ramp' });
+    await mark.click();
+    await expect(mark).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByRole('status').filter({ hasText: 'Click the ramp (or chute) new bricks drop out of.' })).toBeVisible();
+    await expect(page.locator('[data-fitter] [data-preview]')).toHaveAttribute('data-preview', 'ready');
+    const stage = page.locator('[data-fitter] canvas');
+    const box = (await stage.boundingBox())!;
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height * 0.4);
+    await expect(ramp).toHaveAttribute('data-ramp', 'marked');
+    await expect(page.getByText('Ramp marked: new bricks drop out there.')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Mark the ramp again' })).toHaveAttribute('aria-pressed', 'false');
+
     await page.getByRole('button', { name: 'Add to library' }).click();
     await expect(page.getByRole('button', { name: 'Uploading…' })).toBeVisible();
     await expect.poll(() => sent).not.toBeNull();
     expect(sent!.fit).toBe('back');
     expect(sent!.placement!.emitter).toBe('bricks');
+    const spout = (sent!.placement as { spout?: number[] }).spout!;
+    expect(spout).toHaveLength(3);
+    for (const fraction of spout) expect(fraction).toBeGreaterThanOrEqual(0), expect(fraction).toBeLessThanOrEqual(1);
     upload.release(200, { ...PACK, id: 'backpack', name: 'Backpack', fit: 'back', placement: sent!.placement });
     await expect(page.locator('li', { hasText: 'Backpack' }).getByText('Makes bricks', { exact: true })).toBeVisible();
   });

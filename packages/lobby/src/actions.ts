@@ -45,8 +45,12 @@ export type LobbyAction =
    * new. A notice, not a behaviour: the API holds the bricks and has the last
    * word, so it has no BEHAVIORS entry (the catalog's intents are pinned to the
    * four above by tests/acceptance/issue-48).
+   *
+   * `made`: the brick the sender's backpack just made (everyone shows it
+   * dropping out of their ramp); `burst`: where (x, z, metres) a blueprint
+   * the sender built went (a burst of little bricks from their ramp).
    */
-  | { kind: 'bricks'; rev: number };
+  | { kind: 'bricks'; rev: number; made?: string; burst?: { x: number; z: number } };
 
 export type LobbyActionKind = LobbyAction['kind'];
 
@@ -73,7 +77,13 @@ export function encodeAction(action: LobbyAction): string {
     case 'catch':
       return JSON.stringify({ v: ACTION_VERSION, k: 'catch', by: action.thrower, c: action.caught });
     case 'bricks':
-      return JSON.stringify({ v: ACTION_VERSION, k: 'bricks', r: action.rev });
+      return JSON.stringify({
+        v: ACTION_VERSION,
+        k: 'bricks',
+        r: action.rev,
+        ...(action.made === undefined ? {} : { m: action.made }),
+        ...(action.burst === undefined ? {} : { b: [cm(action.burst.x), cm(action.burst.z)] }),
+      });
   }
 }
 
@@ -127,10 +137,20 @@ export function parseAction(raw: unknown): LobbyAction | null {
       return { kind: 'catch', thrower: by, caught: c };
     }
     case 'bricks': {
-      if (!hasKeys(message, ['v', 'k', 'r'])) return null;
-      const { r } = message;
+      const keys = ['v', 'k', 'r', ...(Object.hasOwn(message, 'm') ? ['m'] : []), ...(Object.hasOwn(message, 'b') ? ['b'] : [])];
+      if (!hasKeys(message, keys)) return null;
+      const { r, m, b } = message;
       if (typeof r !== 'number' || !Number.isSafeInteger(r) || r < 0) return null;
-      return { kind: 'bricks', rev: r };
+      const action: { kind: 'bricks'; rev: number; made?: string; burst?: { x: number; z: number } } = { kind: 'bricks', rev: r };
+      if (m !== undefined) {
+        if (typeof m !== 'string' || !/^[0-9a-f]{12}$/.test(m)) return null;
+        action.made = m;
+      }
+      if (b !== undefined) {
+        if (!Array.isArray(b) || b.length !== 2 || !b.every((n) => typeof n === 'number' && Number.isFinite(n) && Math.abs(n) <= 40)) return null;
+        action.burst = { x: b[0] as number, z: b[1] as number };
+      }
+      return action;
     }
     default:
       return null;

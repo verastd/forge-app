@@ -1140,6 +1140,8 @@ class AvatarHeadScreen(BaseModel):
     size: tuple[_ScreenSide, _ScreenSide]
 
 
+_Fraction = Annotated[float, Field(ge=0, le=1, allow_inf_nan=False)]
+
 #: What may fly over a head.
 AvatarHeadFlyer = Literal["helicopter"]
 
@@ -1182,6 +1184,9 @@ class AvatarHeadPlacement(BaseModel):
     flyer: AvatarHeadFlyer | None = None
     #: What a back model makes for its wearer (bricks); None: nothing. Back models only.
     emitter: AvatarHeadEmitter | None = None
+    #: Where a brick-making back model's ramp is: a fraction (0-1) of the model file's
+    #: bounding box along x, y and z. None: guessed, low on the model's back.
+    spout: tuple[_Fraction, _Fraction, _Fraction] | None = None
 
 
 #: A head worn as its file says.
@@ -1337,13 +1342,6 @@ class BrickStandIn(BaseModel):
     on: StrictBool
 
 
-class BrickMake(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    shape: BrickShapeId
-    color: BrickColorId
-
-
 class BrickPlace(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -1351,6 +1349,15 @@ class BrickPlace(BaseModel):
     y: _BrickCoord
     z: _BrickCoord
     rot: _BrickRot
+
+
+class BrickMake(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    shape: BrickShapeId
+    color: BrickColorId
+    #: Where it drops to on the floor, loose (out of the backpack's ramp); None: into the hand.
+    at: BrickPlace | None = None
 
 
 #: The most bricks one blueprint builds.

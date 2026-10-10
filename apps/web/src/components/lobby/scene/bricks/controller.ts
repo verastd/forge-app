@@ -5,7 +5,10 @@
  * word on every write.
  *
  * - Only the Lego bot (whoever wears the brick-making backpack: the API says,
- *   `GET me`) makes bricks (B, of the shape 1–9 and colour C / Shift+C picked)
+ *   `GET me`) makes bricks (B, of the shape 1–9 and colour C / Shift+C picked:
+ *   each drops out of the backpack's ramp, drops.ts, and lands loose on the
+ *   floor behind them, for anyone to pick up; a blueprint build sends a burst
+ *   of little bricks from the ramp toward it; everyone sees both)
  *   and removes them (X), or a whole blueprint build at once (Shift+X, then
  *   Shift+X again to confirm: the build is outlined until it's confirmed, or
  *   for TAKE_DOWN_ARMED_MS).
@@ -35,6 +38,7 @@ import {
   brickProblem,
   brickShape,
   brickUnderRay,
+  burstTargets,
   floorSpot,
   nextRot,
   parseBlueprint,
@@ -50,6 +54,7 @@ import { ROBOT_SCALE } from '../robot/view';
 import type { RobotView } from '../robot/view';
 import { BrickRefusal, createBrickClient } from './client';
 import type { BrickClient } from './client';
+import { createDropLayer } from './drops';
 import { brickColour, brickMatrix, brickMaterial, createBrickLayer, createGhostLayer, createLoneBrick } from './meshes';
 import type { DrawnBrick } from './meshes';
 
@@ -157,6 +162,13 @@ const REFRESH_MS = 20_000;
 const RETRY_MS = 5_000;
 /** Bricks further than this beyond your reach (m) are left out of aiming. */
 const NEAR_MARGIN = 3;
+/** How far behind the ramp a new brick lands (metres). */
+const DROP_REACH = 1.0;
+/** A build's burst: how wide its little bricks spread (metres) and their colours. */
+const BURST_RADIUS = 1.2;
+const BURST_COLORS = ['red', 'yellow', 'blue', 'green', 'white', 'orange'] as const;
+/** How long someone else's new brick may take to be read before it just appears (ms). */
+const ARRIVING_MS = 5_000;
 
 interface Placed extends DrawnBrick {
   id: string;
@@ -261,11 +273,15 @@ export function createBricks(
 
   let subscribed: PresenceFeed | null = null;
   let unsubscribe: (() => void) | null = null;
-  const hear = (_from: string, action: LobbyAction): void => {
-    if (action.kind === 'bricks' && (rev === null || action.rev > rev)) void read();
+  const hear = (from: string, action: LobbyAction): void => {
+    if (action.kind !== 'bricks') return;
+    // Someone else's new brick drops out of their ramp once it's read; their build's burst, now.
+    if (action.made) arriving.set(action.made, { from, at: performance.now() });
+    if (action.burst) burstFrom(rampOf(frame?.robotOf(from) ?? null), action.burst, action.rev);
+    if (rev === null || action.rev > rev) void read();
   };
-  const ping = (change: { rev: number }): void => {
-    feed()?.sendAction({ kind: 'bricks', rev: change.rev });
+  const ping = (change: { rev: number }, extra: { made?: string; burst?: { x: number; z: number } } = {}): void => {
+    feed()?.sendAction({ kind: 'bricks', rev: change.rev, ...extra });
   };
 
   // ---------- what you hold, and what you point at ----------
@@ -281,7 +297,9 @@ export function createBricks(
   let nearFrom = new THREE.Vector3(Infinity, 0, 0);
   const rebuild = (): void => {
     placed = [];
-    for (const brick of bricks.values()) if (!brick.holder) placed.push({ id: brick.id, color: brick.color, ...atOf(brick) });
+    for (const brick of bricks.values()) {
+      if (!brick.holder && !drops.dropping(brick.id)) placed.push({ id: brick.id, color: brick.color, ...atOf(brick) });
+    }
     layer.set(placed);
     nearFrom.set(Infinity, 0, 0);
   };
@@ -300,6 +318,41 @@ export function createBricks(
   };
 
   const layer = createBrickLayer(scene, envMap);
+  const drops = createDropLayer(scene, envMap);
+  /** Bricks someone else made, waiting to be read so they can drop out of that someone's ramp: id → who, since when. */
+  const arriving = new Map<string, { from: string; at: number }>();
+
+  /** Whether to skip the drops and bursts (the visitor asked for less motion). */
+  const still = (): boolean => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  /**
+   * A robot's ramp (where it marked it on its back model, or low on its back),
+   * pointing out of its back, level. Null without a robot to drop from.
+   */
+  const rampOf = (robot: RobotView | null): { from: THREE.Vector3; dir: THREE.Vector3 } | null => {
+    const from = new THREE.Vector3();
+    const dir = new THREE.Vector3();
+    if (!robot?.spout(from, dir)) return null;
+    dir.y = 0;
+    if (dir.lengthSq() < 1e-6) dir.set(0, 0, 1);
+    dir.normalize();
+    return { from, dir };
+  };
+  /** Your own ramp, or (in first person, with no robot drawn) just behind and below your eye. */
+  const myRamp = (): { from: THREE.Vector3; dir: THREE.Vector3 } | null => {
+    if (!frame) return null;
+    const own = rampOf(frame.selfRobot);
+    if (own) return own;
+    const dir = new THREE.Vector3(-Math.sin(frame.yaw), 0, Math.cos(frame.yaw));
+    return { from: frame.eye.clone().addScaledVector(dir, 0.3).setY(Math.max(0.3, frame.eye.y - 0.7)), dir };
+  };
+  const dropFrom = (brick: Brick, ramp: { from: THREE.Vector3; dir: THREE.Vector3 } | null): void => {
+    if (!ramp || still()) return;
+    drops.drop({ id: brick.id, color: brick.color, ...atOf(brick) }, ramp.from, ramp.dir);
+  };
+  const burstFrom = (ramp: { from: THREE.Vector3; dir: THREE.Vector3 } | null, at: { x: number; z: number }, seed: number): void => {
+    if (!ramp || still()) return;
+    drops.burst(ramp.from, ramp.dir, burstTargets({ x: at.x, y: 0.05, z: at.z }, BURST_RADIUS, seed), BURST_COLORS);
+  };
   const ghostMaterial = new THREE.MeshBasicMaterial({ color: GHOST_FITS, transparent: true, opacity: 0.42, depthWrite: false });
   let ghost: THREE.Group | null = null;
   let ghostShape = '';
@@ -550,6 +603,7 @@ export function createBricks(
     run: () => Promise<BrickChange>,
     done: (change: BrickChange) => string | null,
     undo?: () => void,
+    pingExtra?: (change: BrickChange) => { made?: string },
   ): Promise<void> => {
     busy = kind;
     try {
@@ -560,7 +614,7 @@ export function createBricks(
       changed = true;
       const text = done(change);
       if (text) events.onEvent(text);
-      ping(change);
+      ping(change, pingExtra?.(change));
       // Catch up on anything else that changed meanwhile.
       void read();
     } catch (error) {
@@ -700,11 +754,30 @@ export function createBricks(
           return;
         }
         const made = BRICK_SHAPES[shape]!;
-        rot = 0;
+        const ramp = myRamp();
+        if (!ramp) return;
+        // Out of the ramp, onto the floor a metre behind you (the nearest free spot there).
+        const land = ramp.from.clone().addScaledVector(ramp.dir, DROP_REACH);
+        const spot = floorSpot(made.id, 0, land.x, land.z, placed);
+        if (!spot) {
+          events.onEvent('No room on the floor behind you: find a clearer spot.');
+          return;
+        }
+        const tint = BRICK_COLORS[color]!;
         void write(
           'making',
-          () => client.make({ shape: made.id as BrickShapeId, color: BRICK_COLORS[color]!.id as BrickColorId }),
-          () => `${BRICK_COLORS[color]!.label} ${made.label} made · E to place, Q to drop`,
+          () =>
+            client.make({
+              shape: made.id as BrickShapeId,
+              color: tint.id as BrickColorId,
+              at: { x: spot.x, y: spot.y, z: spot.z, rot: spot.rot },
+            }),
+          (change) => {
+            if (change.brick) dropFrom(change.brick, ramp);
+            return `${tint.label} ${made.label} made · it’s on the floor behind you`;
+          },
+          undefined,
+          (change) => (change.brick ? { made: change.brick.id } : {}),
         );
         return;
       }
@@ -743,7 +816,16 @@ export function createBricks(
             .then((built) => {
               if (disposed) return;
               events.onEvent(`Built ${name}: ${built.built.toLocaleString('en')} bricks`);
-              ping(built);
+              // A burst of little bricks from your ramp toward the middle of the build.
+              const middle = { x: 0, z: 0 };
+              for (const piece of pieces) {
+                const box = brickBox({ ...piece, rot: piece.rot as BrickRot });
+                middle.x += (box.min[0] + box.max[0]) / 2 / pieces.length;
+                middle.z += (box.min[2] + box.max[2]) / 2 / pieces.length;
+              }
+              // From your own ramp (or, in first person, just behind and below your eye).
+              burstFrom(myRamp(), middle, built.rev);
+              ping(built, { burst: middle });
               planKey = '';
               void read();
             })
@@ -922,6 +1004,16 @@ export function createBricks(
 
     update(f) {
       frame = f;
+      // Someone else's new brick, read: it drops out of their ramp (or, gone quiet, just appears).
+      for (const [id, { from, at }] of arriving) {
+        const brick = bricks.get(id);
+        if (brick) {
+          arriving.delete(id);
+          if (!brick.holder) dropFrom(brick, rampOf(f.robotOf(from)));
+          changed = true;
+        } else if (performance.now() - at > ARRIVING_MS) arriving.delete(id);
+      }
+      if (drops.update(performance.now() / 1000)) changed = true;
       const current = feed();
       if (current !== subscribed) {
         unsubscribe?.();
@@ -953,6 +1045,7 @@ export function createBricks(
       reading?.abort();
       unsubscribe?.();
       layer.dispose();
+      drops.dispose();
       ghosts.dispose();
       if (ghost) scene.remove(ghost);
       ghostMaterial.dispose();

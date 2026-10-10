@@ -289,23 +289,40 @@ def _change(db: StateDB, rev: int, brick_id: str) -> BrickChange:
 
 
 def make(db: StateDB, user: Identity, body: BrickMake, now: datetime) -> BrickChange:
-    """A new brick in the maker's hand. 403 not_the_maker, 409 hands_full / brick_limit."""
+    """A new brick: dropped loose on the floor at `body.at` (out of the backpack's ramp), or
+    into the maker's hand. 403 not_the_maker; 409 hands_full (into the hand), brick_limit,
+    wont_fit (where it drops)."""
     member_id = _member(user)
     with db.transaction():
         _lapse(db, now)
         _require_maker(db, user)
-        _hands_free(db, member_id)
+        if body.at is None:
+            _hands_free(db, member_id)
         count = db.query_one("SELECT COUNT(*) AS n FROM lobby_bricks WHERE gone = 0")
         if count is not None and count["n"] >= rules.LIMIT:
             raise ApiError(409, {"error": "brick_limit", "limit": rules.LIMIT})
+        at = body.at
+        if at is not None:
+            spot = rules.At(body.shape, at.x, at.y, at.z, at.rot)
+            problem = rules.problem(spot, _placed(db))
+            if problem is not None:
+                raise ApiError(409, {"error": "wont_fit", "problem": problem})
         brick_id = secrets.token_hex(6)
         rev = _bump(db)
         stamp = members_service.to_db(now)
-        db.execute(
-            "INSERT INTO lobby_bricks (id, shape, color, x, y, z, rot, holder, held_at, "
-            "has_home, gone, rev, updated_at) VALUES (?, ?, ?, 0, 0, 0, 0, ?, ?, 0, 0, ?, ?)",
-            (brick_id, body.shape, body.color, member_id, stamp, rev, stamp),
-        )
+        if at is None:
+            db.execute(
+                "INSERT INTO lobby_bricks (id, shape, color, x, y, z, rot, holder, held_at, "
+                "has_home, gone, rev, updated_at) VALUES (?, ?, ?, 0, 0, 0, 0, ?, ?, 0, 0, ?, ?)",
+                (brick_id, body.shape, body.color, member_id, stamp, rev, stamp),
+            )
+        else:
+            db.execute(
+                "INSERT INTO lobby_bricks (id, shape, color, x, y, z, rot, holder, held_at, "
+                "has_home, gone, rev, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, 1, 0, ?, ?)",
+                (brick_id, body.shape, body.color, at.x, at.y, at.z, at.rot, rev, stamp),
+            )
         return _change(db, rev, brick_id)
 
 

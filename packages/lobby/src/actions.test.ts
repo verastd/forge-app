@@ -26,6 +26,9 @@ describe('encodeAction / parseAction', () => {
       { kind: 'catch', thrower: 'gh:7', caught: false },
       { kind: 'bricks', rev: 0 },
       { kind: 'bricks', rev: 4182 },
+      { kind: 'bricks', rev: 7, made: '0123456789ab' },
+      { kind: 'bricks', rev: 8, burst: { x: 1.25, z: -3.5 } },
+      { kind: 'bricks', rev: 9, made: 'abcdefabcdef', burst: { x: 0, z: 0 } },
     ];
     for (const action of actions) expect(parseAction(encodeAction(action))).toEqual(action);
   });
@@ -65,6 +68,13 @@ describe('encodeAction / parseAction', () => {
     expect(parseAction(json({ ...good, d: [0, -1, 0] }))).toBeNull();
     expect(parseAction(json({ ...good, d: 'here' }))).toBeNull();
     expect(parseAction(json({ ...good, extra: true }))).toBeNull();
+  });
+
+  it('rejects a bricks ping with a bad made brick or burst', () => {
+    expect(parseAction(json({ v: 1, k: 'bricks', r: 1, m: 'nope' }))).toBeNull();
+    expect(parseAction(json({ v: 1, k: 'bricks', r: 1, b: [1] }))).toBeNull();
+    expect(parseAction(json({ v: 1, k: 'bricks', r: 1, b: [1, 99] }))).toBeNull();
+    expect(parseAction(json({ v: 1, k: 'bricks', r: 1, b: 'here' }))).toBeNull();
   });
 
   it('rejects a bricks ping without a whole, non-negative revision', () => {

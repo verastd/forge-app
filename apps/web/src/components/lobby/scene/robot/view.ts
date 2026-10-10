@@ -130,8 +130,8 @@ export function lookKey(look: RobotLook): string {
 /** A head's placement, to tell when only that changed. */
 function placementKey(head: AvatarHead | null): string {
   if (!head) return '';
-  const { scale, offset, eyes, eyeAngles, angles, eyeScale, screen, flyer } = head.placement;
-  return JSON.stringify([scale, offset, eyes ?? null, eyeAngles ?? null, angles ?? null, eyeScale ?? null, screen ?? null, flyer ?? null]);
+  const { scale, offset, eyes, eyeAngles, angles, eyeScale, screen, flyer, spout } = head.placement;
+  return JSON.stringify([scale, offset, eyes ?? null, eyeAngles ?? null, angles ?? null, eyeScale ?? null, screen ?? null, flyer ?? null, spout ?? null]);
 }
 
 /** Where `node` sits in `ancestor`'s frame (ancestor's own transform left out). */
@@ -186,7 +186,13 @@ export interface RobotView {
    * the model, or else on the face screen's plane (what an eye hole shows),
    * in the head frame and in the file's own frame. Null with no head worn.
    */
-  pickHead(raycaster: THREE.Raycaster, target?: 'head' | 'accessory'): HeadPick | null;
+  pickHead(raycaster: THREE.Raycaster, target?: 'head' | 'accessory' | 'back'): HeadPick | null;
+  /**
+   * Where the back model's ramp is now, in the cave (into `at`), and which way
+   * a brick comes out of it (into `dir`, unit length): the spot its fit marks,
+   * else low on the middle of its back. False with no back model worn.
+   */
+  spout(at: THREE.Vector3, dir: THREE.Vector3): boolean;
   dispose(): void;
 }
 
@@ -610,6 +616,8 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
   // What it wears on its back: a library model, or the cape.
   let backObject: THREE.Object3D | null = null;
   let backMaterials: THREE.Material[] = [];
+  /** The back model's bounding box in its own file's frame (a spout is a fraction of it). */
+  const backFileBox = new THREE.Box3();
   let pendingBack: string | null = null;
   let backRetryAt: number | null = null;
   let cape: CapeView | null = null;
@@ -939,6 +947,8 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
         const { object, materials } = cloneModel(gltf.scene, () => undefined);
         backObject = object;
         backMaterials = materials;
+        object.updateMatrixWorld(true);
+        backFileBox.setFromObject(object);
         tint(backMaterials);
         backPivot.add(object);
         placeBack(look.back?.sha256 === back.sha256 ? look.back : back);
@@ -1108,7 +1118,57 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
 
   setLook(initial);
 
-  const pickHead = (raycaster: THREE.Raycaster, target: 'head' | 'accessory' = 'head'): HeadPick | null => {
+  const pickBack = (raycaster: THREE.Raycaster): HeadPick | null => {
+    if (!backObject || backFileBox.isEmpty()) return null;
+    root.updateMatrixWorld(true);
+    const hit = raycaster.intersectObject(backObject, true)[0];
+    if (!hit) return null;
+    const inSlot = backSlot.worldToLocal(hit.point.clone());
+    const inFile = backObject.worldToLocal(hit.point.clone());
+    const size = backFileBox.getSize(new THREE.Vector3());
+    const fraction = (v: number, min: number, span: number): number => (span > 0 ? Math.min(1, Math.max(0, (v - min) / span)) : 0.5);
+    const round = (v: number): number => Math.round(v * 10_000) / 10_000 + 0;
+    return {
+      head: [round(inSlot.x), round(inSlot.y), round(inSlot.z)],
+      // For the back, a spot's place in the file is its fraction of the file's bounding box.
+      file: [
+        round(fraction(inFile.x, backFileBox.min.x, size.x)),
+        round(fraction(inFile.y, backFileBox.min.y, size.y)),
+        round(fraction(inFile.z, backFileBox.min.z, size.z)),
+      ],
+      onModel: true,
+      normal: null,
+    };
+  };
+
+  const slotCorner = new THREE.Vector3();
+  const spout = (at: THREE.Vector3, dir: THREE.Vector3): boolean => {
+    if (!backObject || backFileBox.isEmpty()) return false;
+    backObject.updateWorldMatrix(true, false);
+    const marked = look.back?.placement.spout;
+    if (marked) {
+      const size = backFileBox.getSize(new THREE.Vector3());
+      at.set(backFileBox.min.x + marked[0] * size.x, backFileBox.min.y + marked[1] * size.y, backFileBox.min.z + marked[2] * size.z);
+      backObject.localToWorld(at);
+    } else {
+      // Unmarked: low on the middle of its back, where the box is furthest behind the robot.
+      backSlot.updateWorldMatrix(true, false);
+      const toSlot = new THREE.Matrix4().copy(backSlot.matrixWorld).invert().multiply(backObject.matrixWorld);
+      const box = new THREE.Box3();
+      for (let i = 0; i < 8; i += 1) {
+        slotCorner.set(i & 1 ? backFileBox.max.x : backFileBox.min.x, i & 2 ? backFileBox.max.y : backFileBox.min.y, i & 4 ? backFileBox.max.z : backFileBox.min.z);
+        box.expandByPoint(slotCorner.applyMatrix4(toSlot));
+      }
+      at.set((box.min.x + box.max.x) / 2, box.min.y + (box.max.y - box.min.y) * 0.12, box.min.z);
+      backSlot.localToWorld(at);
+    }
+    // Out of the back: the slot's −Z, in the cave.
+    dir.set(0, 0, -1).transformDirection(backSlot.matrixWorld);
+    return true;
+  };
+
+  const pickHead = (raycaster: THREE.Raycaster, target: 'head' | 'accessory' | 'back' = 'head'): HeadPick | null => {
+    if (target === 'back') return pickBack(raycaster);
     const head = target === 'head' ? look.head : (look.accessory ?? null);
     const object = target === 'head' ? headObject : accessoryObject;
     if (!head || !object) return null;
@@ -1208,6 +1268,7 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
     root,
     hand,
     pickHead,
+    spout,
     get look() {
       return look;
     },
