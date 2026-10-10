@@ -183,6 +183,8 @@ export function stepArmLook(state: ArmLook, input: ArmLookInput): Vec3 | null {
     state.aim = null;
     state.goal = null;
     state.watching = null;
+    // Moving again, it picks something new straight away.
+    state.until = -Infinity;
     return null;
   }
   const near = (i: number): boolean => i < input.people.length && length(sub(input.people[i]!, input.base)) <= ARM.lookRange;

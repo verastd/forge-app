@@ -165,6 +165,8 @@ export interface RobotFrame extends Omit<MotionInput, 'phase'> {
   act?: RobotAct;
   /** Whom a back model that moves like an arm may look at: everyone else's eyes, in the cave. Absent: nobody. */
   people?: readonly Vec3[];
+  /** Whether a back model that moves like an arm holds still; absent: as `reducedMotion` says. */
+  armStill?: boolean;
 }
 
 export interface RobotView {
@@ -1348,7 +1350,7 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
       flame.position.y = -0.04 - 0.1 * p.thrust;
       flameMaterial.opacity = 0.35 + 0.55 * p.thrust;
       cape?.update(frame);
-      backArm?.update(frame.t, frame.dt, frame.people ?? [], frame.reducedMotion);
+      backArm?.update(frame.t, frame.dt, frame.people ?? [], frame.armStill ?? frame.reducedMotion);
       clip?.want(viewer, chestPlays({ viewerDistance: frame.chestDistance ?? frame.viewerDistance, reducedMotion: frame.reducedMotion }));
       if (flyer && flight) flyer.fly(flight.area, flight.grid, frame.t, flyerStart, frame.reducedMotion);
       return p;
