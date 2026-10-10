@@ -49,6 +49,8 @@ import { CAVE_PALETTE, shaderColor } from './palette';
 import { createPeers } from './peers';
 import { createBricks } from './bricks/controller';
 import type { BrickCommand, BrickState, Builder, Bricks } from './bricks/controller';
+import { createMachines } from './machines/controller';
+import type { MachineCommand, MachineState, Machines } from './machines/controller';
 import { createPlay } from './play';
 import type { Play, PlayState } from './play';
 import { createRobotAssets } from './robot/assets';
@@ -286,6 +288,8 @@ export interface CaveOptions {
   onPlayEvent?(text: string): void;
   /** Building with bricks (with avatars on): the build, your brick and your aim, whenever that changes. */
   onBricks?(state: BrickState): void;
+  /** The mechanic's machines (with avatars on): the cave's machines, his library and his aim, whenever that changes. */
+  onMachines?(state: MachineState): void;
   /** Who you are to the bricks, from your session, at the start. */
   builder?: Builder;
   /** The presence feed, read every frame; null while there is none. */
@@ -314,6 +318,8 @@ export interface Cave {
   wave(): void;
   /** A building command (as its key does). */
   brick(command: BrickCommand): void;
+  /** One of the mechanic's commands (as its key does). */
+  machine(command: MachineCommand): void;
   /** The camera now, clamped into the cave. */
   pose(): CameraState;
   dispose(): void;
@@ -522,10 +528,35 @@ export function createCave(canvas: HTMLCanvasElement, opts: CaveOptions): Cave {
           opts.onBricks?.(state);
         },
         onEvent: (text) => opts.onPlayEvent?.(text),
+        onRoleChange: () => machines?.recheck(),
       }, robotAssets?.envMap ?? null)
     : null;
   if (bricks) bricks.setBuilder(opts.builder ?? 'signed-out');
+  // The mechanic's machines, with avatars on: the same for the shell (and the tests).
+  const machines: Machines | null = opts.avatars
+    ? createMachines(scene, camera, opts.feed, {
+        onState: (state) => {
+          root.dataset.machines = String(state.count);
+          root.dataset.machineSync = state.sync;
+          root.dataset.machineAccess = state.access;
+          root.dataset.mechanic = state.mechanic ? 'yes' : 'no';
+          root.dataset.machineBusy = state.busy ?? '';
+          root.dataset.machineChosen = state.chosen?.load ?? '';
+          root.dataset.machineFits = state.chosen?.aim ? (state.chosen.aim.fits ? 'yes' : 'no') : '';
+          root.dataset.machineTarget = state.target?.id ?? '';
+          root.dataset.machineTakeDown = state.takeDown ? 'armed' : '';
+          root.dataset.machineAssembling = state.assembling ? 'on' : '';
+          root.dataset.machineLoading = String(state.loadingModels);
+          opts.onMachines?.(state);
+        },
+        onEvent: (text) => opts.onPlayEvent?.(text),
+        onRoleChange: () => bricks?.recheck(),
+      }, robotAssets?.envMap ?? null)
+    : null;
+  if (machines) machines.setBuilder(opts.builder ?? 'signed-out');
   const brickKey = (code: string, shift: boolean): void => {
+    // The mechanic's keys first, when they're his (a blueprint out, or a machine to take down).
+    if (machines?.key(code, shift)) return;
     if (!bricks) return;
     if (code.startsWith('Digit')) bricks.command({ kind: 'shape', index: Number(code.slice(5)) - 1 });
     else if (code === 'KeyB') bricks.command({ kind: 'make' });
@@ -876,6 +907,13 @@ export function createCave(canvas: HTMLCanvasElement, opts: CaveOptions): Cave {
         selfRobot: robotShown ? peers.selfRobot() : null,
         robotOf: (id) => peers.robotOf(id),
       });
+      machines?.update({
+        eye: motion.pos,
+        selfRobot: robotShown ? peers.selfRobot() : null,
+        robotOf: (id) => peers.robotOf(id),
+        bricks: () => bricks?.placed() ?? [],
+        reducedMotion,
+      });
       if (selfNow !== selfState) {
         selfState = selfNow;
         root.dataset.self = selfNow;
@@ -992,7 +1030,10 @@ export function createCave(canvas: HTMLCanvasElement, opts: CaveOptions): Cave {
       if (next.reducedMotion !== undefined) {
         reducedMotion = next.reducedMotion;
       }
-      if (next.builder !== undefined) bricks?.setBuilder(next.builder);
+      if (next.builder !== undefined) {
+        bricks?.setBuilder(next.builder);
+        machines?.setBuilder(next.builder);
+      }
     },
     setView(next) {
       view = allowedView(next);
@@ -1010,6 +1051,9 @@ export function createCave(canvas: HTMLCanvasElement, opts: CaveOptions): Cave {
     brick(command) {
       bricks?.command(command);
     },
+    machine(command) {
+      machines?.command(command);
+    },
     pose,
     dispose() {
       if (disposed) {
@@ -1023,6 +1067,7 @@ export function createCave(canvas: HTMLCanvasElement, opts: CaveOptions): Cave {
       controls.dispose();
       play?.dispose();
       bricks?.dispose();
+      machines?.dispose();
       peers.dispose();
       delete root.dataset.ball;
       delete root.dataset.wave;

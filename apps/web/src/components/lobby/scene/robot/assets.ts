@@ -45,6 +45,9 @@ function loader(): GLTFLoader {
   return new GLTFLoader().register(imageTexturesPlugin);
 }
 
+/** A GLTFLoader that reads embedded images the way the CSP allows (for machines' blueprints too). */
+export const gltfLoader = loader;
+
 /** Loads and segments the body. Rejects if the asset isn't the robot it expects. */
 export async function loadBody(url = ROBOT_URL): Promise<RobotBody> {
   const gltf = await loader().loadAsync(url);

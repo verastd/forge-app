@@ -53,7 +53,8 @@ export interface ControlsOptions {
   /** G: wave. */
   onWave?(): void;
   /**
-   * The building keys: B, C (Shift+C backwards), X (Shift+X a whole build), E, R, Q and 1–9, by
+   * The building keys: B, C (Shift+C backwards), X (Shift+X a whole build), E, R, Q, + and − (the
+   * mechanic's blueprint size) and 1–9, by
    * `KeyboardEvent.code`. Only while building is in the cave.
    */
   onBrickKey?(code: string, shift: boolean): void;
@@ -67,6 +68,9 @@ export const BRICK_KEYS: ReadonlySet<string> = new Set([
   'KeyE',
   'KeyR',
   'KeyQ',
+  // The mechanic sizes his blueprint with + and −.
+  'Equal',
+  'Minus',
   ...Array.from({ length: 9 }, (_, i) => `Digit${i + 1}`),
 ]);
 

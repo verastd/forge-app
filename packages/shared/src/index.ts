@@ -1404,8 +1404,12 @@ export type AvatarHeadScreen = z.infer<typeof AvatarHeadScreenSchema>;
 export const AVATAR_HEAD_FLYERS = ['helicopter'] as const;
 export type AvatarHeadFlyer = (typeof AVATAR_HEAD_FLYERS)[number];
 
-/** What a back model makes (`placement.emitter`): building bricks, for the robot wearing it. */
-export const AVATAR_HEAD_EMITTERS = ['bricks'] as const;
+/**
+ * What a back model makes (`placement.emitter`), for the robot wearing it:
+ * `bricks` (the Lego bot) or `machines` (the mechanic, who builds engines
+ * from blueprints).
+ */
+export const AVATAR_HEAD_EMITTERS = ['bricks', 'machines'] as const;
 export type AvatarHeadEmitter = (typeof AVATAR_HEAD_EMITTERS)[number];
 
 /** How a back model moves on its own (`placement.motion`): `arm` bends it like an arm, bouncing around and looking at people with its tip. */
@@ -1458,12 +1462,13 @@ export const AvatarHeadPlacementSchema = z.object({
   flyer: z.enum(AVATAR_HEAD_FLYERS).nullish(),
   /**
    * What a back model makes for whoever wears it on their back: `bricks`
-   * makes them the cave's brick maker (only a model fitted for the back may
-   * have one). Absent: nothing.
+   * makes them the cave's brick maker, `machines` its mechanic (only a model
+   * fitted for the back may have one). Absent: nothing.
    */
   emitter: z.enum(AVATAR_HEAD_EMITTERS).nullish(),
   /**
-   * Where a brick-making back model's ramp is, as a fraction of the model
+   * Where a brick- or machine-making back model's ramp is (where bricks drop
+   * out, or machine parts fly out), as a fraction of the model
    * file's own bounding box along x, y and z (0–1 each), so it stays put
    * however the model is fitted. Absent: guessed, low on the model's back.
    */
@@ -1730,6 +1735,148 @@ export const BrickTakenDownSchema = z.object({
   removed: z.number().int().min(1),
 });
 export type BrickTakenDown = z.infer<typeof BrickTakenDownSchema>;
+
+// ---------------------------------------------------------------------------
+// Machines in the Apps lobby (behind `apps_lobby`), mirrored in apps/api
+// models.py: the mechanic (the robot wearing a back model that makes
+// machines) builds 3D models from a library of blueprints (binary glTF), and
+// they stay in the cave for everyone. Where one may go is @forge/lobby's
+// machine.ts (and apps/api services/machine_rules.py): x and z in metres from
+// the cave's middle, on the floor.
+// ---------------------------------------------------------------------------
+
+export const MACHINE_ID = /^[0-9a-f]{12}$/;
+export const MACHINE_NAME_MAX = 60;
+/** The most a blueprint may weigh (a binary glTF, sent in chunks). */
+export const MACHINE_BLUEPRINT_MAX_BYTES = 24 * 1024 * 1024;
+/** One upload chunk, decoded (its base64 stays under a 4.5 MB request), and one download chunk. */
+export const MACHINE_CHUNK_BYTES = 3 * 1024 * 1024;
+/** The most parts a blueprint is split into. */
+export const MACHINE_PARTS_MAX = 400;
+/** Quarter-of-a-turn steps a machine may be turned in: 24 (15° each). */
+export const MACHINE_TURNS = 24;
+export const MACHINE_SCALE_MIN = 0.5;
+export const MACHINE_SCALE_MAX = 2;
+/** A blueprint's size along x, y and z, in its own units (the lobby scales it). */
+const machineSize = z.tuple([z.number().positive().max(1e6), z.number().positive().max(1e6), z.number().positive().max(1e6)]);
+const machineCoord = z.number().min(-100).max(100);
+const SHA256 = /^[0-9a-f]{64}$/;
+
+/** A blueprint in the mechanic's library. */
+export const MachineBlueprintSchema = z.object({
+  id: z.string().regex(MACHINE_ID),
+  name: z.string().min(1).max(MACHINE_NAME_MAX),
+  /** Its file (`GET /api/lobby/machines/assets/{sha256}/{n}`, MACHINE_CHUNK_BYTES at a time). */
+  sha256: z.string().regex(SHA256),
+  bytes: z.number().int().min(1).max(MACHINE_BLUEPRINT_MAX_BYTES),
+  parts: z.number().int().min(1).max(MACHINE_PARTS_MAX),
+  size: machineSize,
+  uploadedBy: z.string().regex(AVATAR_MEMBER_ID),
+  createdAt: z.string(),
+});
+export type MachineBlueprint = z.infer<typeof MachineBlueprintSchema>;
+
+/** `GET /api/lobby/machines/blueprints`: the library, newest first. */
+export const MachineBlueprintListSchema = z.object({
+  blueprints: z.array(MachineBlueprintSchema),
+});
+export type MachineBlueprintList = z.infer<typeof MachineBlueprintListSchema>;
+
+/**
+ * `POST /api/lobby/machines/blueprints` (the mechanic): starts an upload. The
+ * file then goes up in MACHINE_CHUNK_BYTES chunks and is checked whole
+ * (its length and sha256 must match) when it's finished.
+ */
+export const MachineUploadStartSchema = z.object({
+  name: z.string().min(1).max(MACHINE_NAME_MAX),
+  bytes: z.number().int().min(1).max(MACHINE_BLUEPRINT_MAX_BYTES),
+  sha256: z.string().regex(SHA256),
+  parts: z.number().int().min(1).max(MACHINE_PARTS_MAX),
+  size: machineSize,
+});
+export type MachineUploadStart = z.infer<typeof MachineUploadStartSchema>;
+
+/** An upload's id, and how many chunks of what size it takes. */
+export const MachineUploadSchema = z.object({
+  id: z.string().regex(MACHINE_ID),
+  chunkBytes: z.number().int().min(1),
+  chunks: z.number().int().min(1),
+});
+export type MachineUpload = z.infer<typeof MachineUploadSchema>;
+
+/** `PUT /api/lobby/machines/blueprints/{id}/chunks/{n}`: one chunk, base64. */
+export const MachineChunkSchema = z.object({
+  data: z.string().min(1),
+});
+export type MachineChunk = z.infer<typeof MachineChunkSchema>;
+
+/** A machine in the cave: a blueprint built at (x, z), turned `turn` × 15°, `scale` times its usual size. */
+export const MachineSchema = z.object({
+  id: z.string().regex(MACHINE_ID),
+  blueprint: z.string().regex(MACHINE_ID),
+  name: z.string().min(1).max(MACHINE_NAME_MAX),
+  sha256: z.string().regex(SHA256),
+  bytes: z.number().int().min(1).max(MACHINE_BLUEPRINT_MAX_BYTES),
+  parts: z.number().int().min(1).max(MACHINE_PARTS_MAX),
+  size: machineSize,
+  x: machineCoord,
+  z: machineCoord,
+  turn: z.number().int().min(0).max(MACHINE_TURNS - 1),
+  scale: z.number().min(MACHINE_SCALE_MIN).max(MACHINE_SCALE_MAX),
+  builtBy: z.string().regex(AVATAR_MEMBER_ID),
+  /** When the mechanic built it: its parts fly in from then on, the same for everyone. */
+  builtAt: z.string(),
+  updatedAt: z.string(),
+});
+export type Machine = z.infer<typeof MachineSchema>;
+
+/**
+ * `GET /api/lobby/machines?since=<rev>`: every machine (`full`), or what
+ * changed since `since`, the revision they bring you to, and the server's
+ * clock (so a build plays in step for everyone).
+ */
+export const MachineListSchema = z.object({
+  rev: z.number().int().min(0),
+  full: z.boolean(),
+  machines: z.array(MachineSchema),
+  gone: z.array(z.string().regex(MACHINE_ID)),
+  now: z.string(),
+});
+export type MachineList = z.infer<typeof MachineListSchema>;
+
+/** `GET /api/lobby/machines/me` (signed in): whether you're the mechanic. */
+export const MachineMeSchema = z.object({
+  memberId: z.string().regex(AVATAR_MEMBER_ID),
+  mechanic: z.boolean(),
+  /** An admin may take over the mechanic's powers to test them… */
+  canStandIn: z.boolean(),
+  /** …and has ("Be the mechanic"; it stops "Be the Lego bot"). */
+  standIn: z.boolean(),
+});
+export type MachineMe = z.infer<typeof MachineMeSchema>;
+
+/** `PUT /api/lobby/machines/me/stand-in` (admins). */
+export const MachineStandInSchema = z.object({
+  on: z.boolean(),
+});
+export type MachineStandIn = z.infer<typeof MachineStandInSchema>;
+
+/** `POST /api/lobby/machines` (the mechanic): build a blueprint here. */
+export const MachineBuildSchema = z.object({
+  blueprint: z.string().regex(MACHINE_ID),
+  x: machineCoord,
+  z: machineCoord,
+  turn: z.number().int().min(0).max(MACHINE_TURNS - 1),
+  scale: z.number().min(MACHINE_SCALE_MIN).max(MACHINE_SCALE_MAX),
+});
+export type MachineBuild = z.infer<typeof MachineBuildSchema>;
+
+/** A write's answer: the machine as it now is (absent once taken down) and the revision. */
+export const MachineChangeSchema = z.object({
+  rev: z.number().int().min(0),
+  machine: MachineSchema.optional(),
+});
+export type MachineChange = z.infer<typeof MachineChangeSchema>;
 
 // ---------------------------------------------------------------------------
 // The rail registry and the brief, mirrored in apps/api (services/rails.py,

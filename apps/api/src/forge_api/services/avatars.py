@@ -497,15 +497,24 @@ def _check_emitter(fit: str, placement: AvatarHeadPlacement | None) -> None:
         raise ApiError(400, {"error": "motion_back_only", "fields": ["placement.motion"]})
 
 
-def is_brick_maker(db: StateDB, member_id: str) -> bool:
-    """Whether `member_id`'s robot wears a back model that makes bricks."""
+def _makes(db: StateDB, member_id: str, emitter: str) -> bool:
     row = db.query_one(
         "SELECT 1 FROM avatars_member_backs b "
         "JOIN avatars_head_emitters e ON e.head_id = b.head_id "
-        "WHERE b.member_id = ? AND e.emitter = 'bricks'",
-        (member_id,),
+        "WHERE b.member_id = ? AND e.emitter = ?",
+        (member_id, emitter),
     )
     return row is not None
+
+
+def is_brick_maker(db: StateDB, member_id: str) -> bool:
+    """Whether `member_id`'s robot wears a back model that makes bricks."""
+    return _makes(db, member_id, "bricks")
+
+
+def is_machine_maker(db: StateDB, member_id: str) -> bool:
+    """Whether `member_id`'s robot wears a back model that makes machines (the mechanic)."""
+    return _makes(db, member_id, "machines")
 
 
 def _store_placement(db: StateDB, head_id: str, placement: AvatarHeadPlacement | None) -> None:

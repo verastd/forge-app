@@ -33,6 +33,7 @@ from forge_api.routers import (
     health,
     ledger,
     lobby_bricks,
+    lobby_machines,
     mcp,
     members,
     notifications,
@@ -281,3 +282,4 @@ app.include_router(proposals.router)
 app.include_router(notifications.router)
 app.include_router(avatars.router)
 app.include_router(lobby_bricks.router)
+app.include_router(lobby_machines.router)

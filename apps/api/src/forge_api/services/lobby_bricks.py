@@ -34,6 +34,7 @@ from forge_api.models import (
 )
 from forge_api.services import avatars as avatars_service
 from forge_api.services import brick_rules as rules
+from forge_api.services import lobby_machines as _machines  # noqa: F401  (its stand-ins table)
 from forge_api.services import members as members_service
 from forge_api.services.errors import ApiError
 from forge_api.services.identity import Identity, is_admin
@@ -264,6 +265,8 @@ def stand_in(db: StateDB, user: Identity, on: bool, now: datetime) -> BrickMe:
                 "ON CONFLICT (member_id) DO NOTHING",
                 (_member(user), members_service.to_db(now)),
             )
+            # One role at a time: being the Lego bot stops being the mechanic.
+            db.execute("DELETE FROM lobby_machines_stand_ins WHERE member_id = ?", (_member(user),))
         else:
             db.execute("DELETE FROM lobby_bricks_stand_ins WHERE member_id = ?", (_member(user),))
         return me(db, user)

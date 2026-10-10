@@ -50,7 +50,13 @@ export type LobbyAction =
    * dropping out of their ramp); `burst`: where (x, z, metres) a blueprint
    * the sender built went (a burst of little bricks from their ramp).
    */
-  | { kind: 'bricks'; rev: number; made?: string; burst?: { x: number; z: number } };
+  | { kind: 'bricks'; rev: number; made?: string; burst?: { x: number; z: number } }
+  /**
+   * The cave's machines changed (the API's word, at revision `rev`): fetch
+   * what's new (a new machine plays its build from when it was built). A
+   * notice like `bricks`, with no BEHAVIORS entry.
+   */
+  | { kind: 'machines'; rev: number };
 
 export type LobbyActionKind = LobbyAction['kind'];
 
@@ -84,6 +90,8 @@ export function encodeAction(action: LobbyAction): string {
         ...(action.made === undefined ? {} : { m: action.made }),
         ...(action.burst === undefined ? {} : { b: [cm(action.burst.x), cm(action.burst.z)] }),
       });
+    case 'machines':
+      return JSON.stringify({ v: ACTION_VERSION, k: 'machines', r: action.rev });
   }
 }
 
@@ -151,6 +159,12 @@ export function parseAction(raw: unknown): LobbyAction | null {
         action.burst = { x: b[0] as number, z: b[1] as number };
       }
       return action;
+    }
+    case 'machines': {
+      if (!hasKeys(message, ['v', 'k', 'r'])) return null;
+      const { r } = message;
+      if (typeof r !== 'number' || !Number.isSafeInteger(r) || r < 0) return null;
+      return { kind: 'machines', rev: r };
     }
     default:
       return null;

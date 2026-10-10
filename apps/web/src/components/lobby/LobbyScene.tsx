@@ -29,6 +29,7 @@ import type { Hit } from './scene/controls';
 import type { SelfRobotState } from './scene/peers';
 import type { PlayState } from './scene/play';
 import type { BrickCommand, BrickState, Builder } from './scene/bricks/controller';
+import type { MachineCommand, MachineState } from './scene/machines/controller';
 
 /** Everything the scene tells the shell. */
 export interface SceneEvents {
@@ -50,6 +51,8 @@ export interface SceneEvents {
   onPlayEvent(text: string): void;
   /** Building with bricks: the build, your brick, your aim. */
   onBricks(state: BrickState): void;
+  /** The mechanic's machines: the cave's machines, his library, his aim. */
+  onMachines(state: MachineState): void;
 }
 
 export interface LobbySceneProps {
@@ -71,6 +74,8 @@ export interface LobbySceneProps {
   builder: Builder;
   /** The latest building button pressed (a new `id` for each press). */
   brickPress: { id: number; command: BrickCommand } | null;
+  /** The latest mechanic's button pressed (a new `id` for each press). */
+  machinePress: { id: number; command: MachineCommand } | null;
   feed: RefObject<PresenceFeed | null>;
   /** The shell's HUD elements, read once when the scene mounts. */
   hud(): Omit<CaveHud, 'people'> | null;
@@ -95,6 +100,7 @@ export default function LobbyScene({
   wavePress,
   builder,
   brickPress,
+  machinePress,
   feed,
   hud,
   events,
@@ -143,6 +149,10 @@ export default function LobbyScene({
   }, [brickPress]);
 
   useEffect(() => {
+    if (machinePress) caveRef.current?.machine(machinePress.command);
+  }, [machinePress]);
+
+  useEffect(() => {
     const host = hostRef.current;
     const people = peopleRef.current;
     const elements = hud();
@@ -167,6 +177,7 @@ export default function LobbyScene({
         onPlay: (state) => eventsRef.current.onPlay(state),
         onPlayEvent: (text) => eventsRef.current.onPlayEvent(text),
         onBricks: (state) => eventsRef.current.onBricks(state),
+        onMachines: (state) => eventsRef.current.onMachines(state),
         builder: builderRef.current,
         feed: () => feed.current,
         hud: { ...elements, people },

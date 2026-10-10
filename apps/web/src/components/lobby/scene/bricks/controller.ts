@@ -147,11 +147,17 @@ export interface BrickEvents {
   onState(state: BrickState): void;
   /** Something to say: "Brick made", "Taken: someone got it first". */
   onEvent(text: string): void;
+  /** Being the Lego bot changed which role the API gives you (the mechanic's tools should ask again). */
+  onRoleChange?(): void;
 }
 
 export interface Bricks {
   command(command: BrickCommand): void;
   setBuilder(builder: Builder): void;
+  /** Asks the API again who you are (after "Be the mechanic" changed it). */
+  recheck(): void;
+  /** The placed bricks (what a machine can't stand on). */
+  placed(): readonly BrickAt[];
   update(frame: BrickFrame): void;
   dispose(): void;
 }
@@ -660,6 +666,7 @@ export function createBricks(
             canStandIn = me.canStandIn;
             standIn = me.standIn;
             events.onEvent(me.standIn ? 'You’re the Lego bot now (testing): B makes a brick' : 'Back to yourself');
+            events.onRoleChange?.();
           })
           .catch((error: unknown) => {
             if (disposed) return;
@@ -1001,6 +1008,12 @@ export function createBricks(
       changed = true;
       if (next === 'member') void whoAmI();
     },
+
+    recheck() {
+      if (builder === 'member') void whoAmI().then(() => (changed = true));
+    },
+
+    placed: () => placed,
 
     update(f) {
       frame = f;
