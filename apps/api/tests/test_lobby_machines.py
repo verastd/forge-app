@@ -405,3 +405,92 @@ def test_the_rules_mirror_the_lobby() -> None:
     brick = brick_rules.At("brick-1x1", 5, 0, -10, 0)
     assert rules.problem(spot, [], [brick]) == "bricks"
     assert machines_service.FLAG == "apps_lobby"
+
+
+def test_a_brick_cannot_go_inside_a_machine(
+    client: TestClient, mechanic: dict[str, str], admin_headers: dict[str, str]
+) -> None:
+    blueprint_id = uploaded(client, mechanic)
+    # 0.8 wide, 0.6 tall and 1.2 deep, on the floor at the middle.
+    assert build(client, mechanic, blueprint_id).status_code == 200
+    client.put("/api/lobby/bricks/me/stand-in", headers=admin_headers, json={"on": True})
+    inside = {"shape": "brick-1x1", "color": "red", "at": {"x": 0, "y": 0, "z": 0, "rot": 0}}
+    refused = client.post("/api/lobby/bricks", headers=admin_headers, json=inside)
+    assert refused.status_code == 409
+    assert refused.json() == {"error": "wont_fit", "problem": "machine"}
+    # Beside it, fine; then moved inside, refused.
+    beside = {"shape": "brick-1x1", "color": "red", "at": {"x": 5, "y": 0, "z": 0, "rot": 0}}
+    made = client.post("/api/lobby/bricks", headers=admin_headers, json=beside)
+    assert made.status_code == 200, made.json()
+    brick_id = made.json()["brick"]["id"]
+    assert (
+        client.put(f"/api/lobby/bricks/{brick_id}/pick", headers=admin_headers).status_code == 200
+    )
+    moved = client.put(
+        f"/api/lobby/bricks/{brick_id}/place",
+        headers=admin_headers,
+        json={"x": 1, "y": 0, "z": 1, "rot": 0},
+    )
+    assert moved.json() == {"error": "wont_fit", "problem": "machine"}
+    # A blueprint through it, refused at the brick that's inside.
+    built = client.post(
+        "/api/lobby/bricks/build",
+        headers=admin_headers,
+        json={
+            "name": "Wall",
+            "bricks": [
+                {"shape": "brick-1x1", "color": "red", "x": 10, "y": 0, "z": 0, "rot": 0},
+                {"shape": "brick-1x1", "color": "red", "x": -1, "y": 0, "z": 0, "rot": 0},
+            ],
+        },
+    )
+    assert built.json() == {"error": "wont_fit", "problem": "machine", "index": 1}
+
+
+def test_a_brick_above_a_machine_is_clear_of_it() -> None:
+    spot = rules.Spot((2.0, 1.5, 3.0), 0.0, 0.0, 0, 1.0)
+    # The machine is 0.6 m tall: 7.5 plates. A brick from plate 8 up is above it.
+    assert rules.brick_blocked(brick_rules.At("brick-1x1", 0, 7, 0, 0), [spot])
+    assert not rules.brick_blocked(brick_rules.At("brick-1x1", 0, 8, 0, 0), [spot])
+    assert not rules.brick_blocked(brick_rules.At("brick-1x1", 10, 0, 0, 0), [spot])
+
+
+def test_an_admin_wearing_a_maker_still_has_one_role_at_a_time(
+    client: TestClient, admin_headers: dict[str, str]
+) -> None:
+    # The admin wears the engine: the mechanic.
+    body = {"name": "engine", "fit": "back", "data": b64(glb()), "placement": ENGINE_BACK}
+    body["owner"] = "gh:1002"
+    assert (
+        client.put("/api/avatars/heads/engine", headers=admin_headers, json=body).status_code == 200
+    )
+    dressed = client.put(
+        "/api/avatars/members/gh:1002",
+        headers=admin_headers,
+        json={"colors": COLORS, "back": "engine"},
+    )
+    assert dressed.status_code == 200
+    assert client.get("/api/lobby/machines/me", headers=admin_headers).json()["mechanic"] is True
+    # Standing in as the Lego bot, he isn't the mechanic too.
+    client.put("/api/lobby/bricks/me/stand-in", headers=admin_headers, json={"on": True})
+    assert client.get("/api/lobby/machines/me", headers=admin_headers).json()["mechanic"] is False
+    assert client.get("/api/lobby/bricks/me", headers=admin_headers).json()["maker"] is True
+    # And the other way round: wearing the backpack, standing in as the mechanic.
+    pack = {
+        "name": "pack",
+        "fit": "back",
+        "data": b64(glb()),
+        "placement": {**ENGINE_BACK, "emitter": "bricks"},
+        "owner": "gh:1002",
+    }
+    assert (
+        client.put("/api/avatars/heads/pack", headers=admin_headers, json=pack).status_code == 200
+    )
+    client.put(
+        "/api/avatars/members/gh:1002",
+        headers=admin_headers,
+        json={"colors": COLORS, "back": "pack"},
+    )
+    client.put("/api/lobby/machines/me/stand-in", headers=admin_headers, json={"on": True})
+    assert client.get("/api/lobby/bricks/me", headers=admin_headers).json()["maker"] is False
+    assert client.get("/api/lobby/machines/me", headers=admin_headers).json()["mechanic"] is True

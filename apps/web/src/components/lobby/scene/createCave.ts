@@ -40,7 +40,7 @@
 
 import * as THREE from 'three';
 import { THIRD_PERSON, WALL, boomOffset, chaseCamera, clampCamera, collideBodies, normalizeYaw, slotPose } from '@forge/lobby';
-import type { AppEntry, CameraState, CameraView } from '@forge/lobby';
+import type { AppEntry, CameraState, CameraView, MachineSpot } from '@forge/lobby';
 
 import type { PeerState, PresenceFeed, SelfState } from '../presence/types';
 import { createControls, createPicker } from './controls';
@@ -324,6 +324,8 @@ export interface Cave {
   pose(): CameraState;
   dispose(): void;
 }
+
+const NO_MACHINES: readonly MachineSpot[] = [];
 
 const fixed = (value: number): string => {
   const text = value.toFixed(2);
@@ -906,6 +908,7 @@ export function createCave(canvas: HTMLCanvasElement, opts: CaveOptions): Cave {
         yaw: normalizeYaw(motion.yaw),
         selfRobot: robotShown ? peers.selfRobot() : null,
         robotOf: (id) => peers.robotOf(id),
+        machines: () => machines?.spots() ?? NO_MACHINES,
       });
       machines?.update({
         eye: motion.pos,

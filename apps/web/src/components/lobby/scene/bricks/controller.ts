@@ -37,6 +37,7 @@ import {
   brickFrozen,
   brickProblem,
   brickShape,
+  brickInMachine,
   brickUnderRay,
   burstTargets,
   floorSpot,
@@ -46,7 +47,7 @@ import {
   skippedText,
   turnBlueprint,
 } from '@forge/lobby';
-import type { Blueprint, BlueprintBrick, BrickAt, BrickRot, LobbyAction, Ray } from '@forge/lobby';
+import type { Blueprint, BlueprintBrick, BrickAt, BrickProblem, BrickRot, LobbyAction, MachineSpot, Ray } from '@forge/lobby';
 import type { Brick, BrickChange, BrickColorId, BrickList, BrickShapeId } from '@forge/shared';
 
 import type { PresenceFeed } from '../../presence/types';
@@ -141,6 +142,8 @@ export interface BrickFrame {
   yaw: number;
   selfRobot: RobotView | null;
   robotOf(id: string): RobotView | null;
+  /** The machines standing in the cave (a brick can't go inside one); the same array until they change. */
+  machines?(): readonly MachineSpot[];
 }
 
 export interface BrickEvents {
@@ -406,6 +409,8 @@ export function createBricks(
   let planned: BlueprintBrick[] | null = null;
   let plannedAim: BlueprintAim | null = null;
   let planKey = '';
+  /** The machines the plan was checked against. */
+  let planMachines: readonly MachineSpot[] = [];
 
   const aimBlueprint = (r: Ray, reach: number): void => {
     if (!blueprint) return;
@@ -420,8 +425,10 @@ export function createBricks(
     }
     const [sx, sz] = blueprint.size;
     const corner = { x: spot.x - Math.floor(sx / 2), y: 0, z: spot.z - Math.floor(sz / 2) };
+    const machines = frame?.machines?.() ?? [];
     const key = `${corner.x},${corner.y},${corner.z}|${blueprint.bricks.length}|${blueprint.size.join()}|${rev ?? ''}|${placed.length}`;
-    if (key === planKey) return;
+    if (key === planKey && machines === planMachines) return;
+    planMachines = machines;
     planKey = key;
     planned = placeBlueprint(blueprint, corner.x, corner.y, corner.z);
     // Only the cave's bricks around it can be in its way.
@@ -433,7 +440,9 @@ export function createBricks(
       const box = brickBox(brick);
       return box.max[0] / BRICK.stud >= minX && box.min[0] / BRICK.stud <= maxX && box.max[2] / BRICK.stud >= minZ && box.min[2] / BRICK.stud <= maxZ;
     });
-    const problems = blueprintProblems(planned, around);
+    const problems = blueprintProblems(planned, around).map((problem, i) =>
+      problem ?? (brickInMachine(planned![i]!, machines) ? ('machine' as BrickProblem) : null),
+    );
     const blocked = problems.filter((problem) => problem !== null);
     const first = blocked[0];
     plannedAim = { fits: blocked.length === 0, blocked: blocked.length, why: first ? BRICK_PROBLEM_TEXT[first] : null };
@@ -462,7 +471,7 @@ export function createBricks(
     if (held && busy === null) {
       aimed = aimBrick(r, held.shape, rot, candidates, reach);
       if (aimed) {
-        const problem = brickProblem(aimed, candidates);
+        const problem = brickProblem(aimed, candidates) ?? (brickInMachine(aimed, frame?.machines?.() ?? []) ? 'machine' : null);
         aim = { fits: problem === null, why: problem === null ? null : BRICK_PROBLEM_TEXT[problem] };
       }
     } else if (!held) {

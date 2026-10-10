@@ -21,7 +21,7 @@
  */
 
 import type { Vec3 } from './attenuation.js';
-import { BRICK, brickCells, rayBox } from './bricks.js';
+import { BRICK, brickBox, brickCells, rayBox } from './bricks.js';
 import type { BrickAt, Ray } from './bricks.js';
 
 export const MACHINE = Object.freeze({
@@ -120,6 +120,18 @@ export function machineProblem(spot: MachineSpot, others: readonly MachineSpot[]
     }
   }
   return null;
+}
+
+/** Whether a brick would stand inside a machine: over its footprint, below its top (mirrored by machine_rules.brick_blocked). */
+export function brickInMachine(brick: BrickAt, machines: readonly MachineSpot[]): boolean {
+  const box = brickBox(brick);
+  return machines.some((machine) => {
+    if (box.min[1] >= machineExtent(machine.size, machine.scale)[1] - SLACK) return false;
+    const footprint = machineFootprint(machine);
+    return brickCells(brick).some(([cx, cz]) =>
+      overlap(footprint, { minX: cx * BRICK.stud, maxX: (cx + 1) * BRICK.stud, minZ: cz * BRICK.stud, maxZ: (cz + 1) * BRICK.stud }),
+    );
+  });
 }
 
 /** Where a ray meets the floor within reach, or null (looking up, or too far). */

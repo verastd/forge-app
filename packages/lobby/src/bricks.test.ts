@@ -99,7 +99,7 @@ describe('brickProblem', () => {
     expect(brickProblem(at('brick-1x1', 0.5, 0, 0), [])).toBe('outside');
     expect(brickProblem(at('nope', 0, 0, 0), [])).toBe('shape');
     expect(brickProblem({ ...floor, rot: 5 as 0 }, [])).toBe('shape');
-    for (const problem of ['shape', 'outside', 'overlap', 'floating'] as const) expect(BRICK_PROBLEM_TEXT[problem]).toBeTruthy();
+    for (const problem of ['shape', 'outside', 'overlap', 'floating', 'machine'] as const) expect(BRICK_PROBLEM_TEXT[problem]).toBeTruthy();
   });
 });
 

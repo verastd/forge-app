@@ -220,16 +220,33 @@ def list_machines(db: StateDB, since: int | None, now: datetime) -> MachineList:
 
 
 def _standing_in(db: StateDB, user: Identity) -> bool:
-    row = db.query_one(
-        "SELECT 1 FROM lobby_machines_stand_ins WHERE member_id = ?", (_member(user),)
-    )
-    return row is not None
+    return standing_in_as_mechanic(db, _member(user))
 
 
 def _is_mechanic(db: StateDB, user: Identity) -> bool:
+    """The mechanic: wearing the machine-making back model, or an admin testing as him. One
+    role at a time: an admin standing in as the Lego bot isn't the mechanic, whatever he wears."""
+    if is_admin(user) and standing_in_as_lego_bot(db, _member(user)):
+        return False
     if avatars_service.is_machine_maker(db, _member(user)):
         return True
     return is_admin(user) and _standing_in(db, user)
+
+
+def standing_in_as_lego_bot(db: StateDB, member_id: str) -> bool:
+    row = db.query_one("SELECT 1 FROM lobby_bricks_stand_ins WHERE member_id = ?", (member_id,))
+    return row is not None
+
+
+def standing_in_as_mechanic(db: StateDB, member_id: str) -> bool:
+    row = db.query_one("SELECT 1 FROM lobby_machines_stand_ins WHERE member_id = ?", (member_id,))
+    return row is not None
+
+
+def standing(db: StateDB) -> list[rules.Spot]:
+    """Every machine in the cave, where it stands (a brick can't go inside one)."""
+    rows = db.query_all(f"{_MACHINE_SELECT} WHERE m.gone = 0")
+    return [_spot(r) for r in rows]
 
 
 def me(db: StateDB, user: Identity) -> MachineMe:

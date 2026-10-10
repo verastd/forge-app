@@ -152,6 +152,8 @@ export interface Machines {
   setBuilder(builder: Builder): void;
   /** Asks the API again who you are (after "Be the Lego bot" changed it). */
   recheck(): void;
+  /** Where every machine stands (a brick can't go inside one): the same array until they change. */
+  spots(): readonly MachineSpot[];
   update(frame: MachineFrame): void;
   dispose(): void;
 }
@@ -503,6 +505,8 @@ export function createMachines(
   let aimed: { x: number; z: number } | null = null;
   let aim: { fits: boolean; why: string | null } | null = null;
   let aimKey = '';
+  /** The bricks the aim was checked against (the cave's layer hands over a new array whenever they change). */
+  let aimBricks: readonly BrickAt[] | null = null;
   let target: Machine | null = null;
   let armed: { id: string; at: number } | null = null;
 
@@ -562,11 +566,13 @@ export function createMachines(
     }
     // On a 5 cm grid, so the ghost doesn't shiver and the rules run only when it moves.
     aimed = { x: round(floor.x, 0.05), z: round(floor.z, 0.05) };
-    const key = `${aimed.x},${aimed.z}|${chosen.turn}|${chosen.scale}|${rev ?? ''}|${frame?.bricks().length ?? 0}`;
-    if (key === aimKey) return;
+    const bricks = frame?.bricks() ?? [];
+    const key = `${aimed.x},${aimed.z}|${chosen.turn}|${chosen.scale}|${rev ?? ''}`;
+    if (key === aimKey && bricks === aimBricks) return;
     aimKey = key;
+    aimBricks = bricks;
     const spot: MachineSpot = { size: chosen.blueprint.size, x: aimed.x, z: aimed.z, turn: chosen.turn, scale: chosen.scale };
-    const problem = machineProblem(spot, [...machines.values()].map(spotOf), frame?.bricks() ?? []);
+    const problem = machineProblem(spot, [...machines.values()].map(spotOf), bricks);
     aim = { fits: problem === null, why: problem === null ? null : MACHINE_PROBLEM_TEXT[problem] };
   };
 
@@ -904,6 +910,10 @@ export function createMachines(
 
   // ---------- the shell's view ----------
 
+  /** Where the machines stand, for the bricks: kept until the machines change. */
+  let spotList: readonly MachineSpot[] = [];
+  let spotsRev: number | null = -1;
+  let spotsCount = -1;
   let shown = '';
   const assembling = (now: number): MachineState['assembling'] => {
     let best: Drawn | null = null;
@@ -987,6 +997,15 @@ export function createMachines(
 
     recheck() {
       if (builder === 'member') void whoAmI();
+    },
+
+    spots() {
+      if (spotsRev !== rev || spotsCount !== machines.size) {
+        spotsRev = rev;
+        spotsCount = machines.size;
+        spotList = [...machines.values()].map(spotOf);
+      }
+      return spotList;
     },
 
     update(f) {

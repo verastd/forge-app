@@ -4,6 +4,7 @@ import {
   MACHINE,
   MACHINE_PROBLEM_TEXT,
   aimFloor,
+  brickInMachine,
   buildOrder,
   buildTime,
   machineAngle,
@@ -87,6 +88,16 @@ describe('where a machine may stand (mirrored by apps/api machine_rules.py)', ()
     expect(machineProblem(engine, [], [{ shape: 'brick-1x1', x: 5, y: 0, z: -10, rot: 0 }])).toBe('bricks');
     expect(machineProblem(engine, [], [{ shape: 'brick-1x1', x: 50, y: 0, z: 50, rot: 0 }])).toBeNull();
     expect(MACHINE_PROBLEM_TEXT.bricks).toMatch(/Bricks/);
+  });
+});
+
+describe('bricks and machines', () => {
+  it('keeps a brick out of a machine, but not above it (mirrored by machine_rules.brick_blocked)', () => {
+    const spot = { ...engine, x: 0, z: 0 };
+    expect(brickInMachine({ shape: 'brick-1x1', x: 0, y: 7, z: 0, rot: 0 }, [spot])).toBe(true);
+    expect(brickInMachine({ shape: 'brick-1x1', x: 0, y: 8, z: 0, rot: 0 }, [spot])).toBe(false);
+    expect(brickInMachine({ shape: 'brick-1x1', x: 10, y: 0, z: 0, rot: 0 }, [spot])).toBe(false);
+    expect(brickInMachine({ shape: 'brick-1x1', x: 0, y: 0, z: 0, rot: 0 }, [])).toBe(false);
   });
 });
 

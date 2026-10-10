@@ -93,3 +93,17 @@ def problem(spot: Spot, others: Sequence[Spot], bricks: Sequence[brick_rules.At]
     if any(_overlap(box, cell) for cell in _brick_boxes(bricks)):
         return "bricks"
     return None
+
+
+def brick_blocked(brick: brick_rules.At, spots: Sequence[Spot]) -> bool:
+    """Whether a brick would stand inside a machine: over its footprint, below its top."""
+    stud = brick_rules.STUD
+    bottom = brick.y * brick_rules.PLATE
+    for spot in spots:
+        if bottom >= extent(spot.size, spot.scale)[1] - _SLACK:
+            continue
+        box = footprint(spot)
+        for cx, cz in brick_rules.cells(brick):
+            if _overlap(box, Box(cx * stud, (cx + 1) * stud, cz * stud, (cz + 1) * stud)):
+                return True
+    return False

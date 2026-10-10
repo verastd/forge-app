@@ -34,7 +34,8 @@ from forge_api.models import (
 )
 from forge_api.services import avatars as avatars_service
 from forge_api.services import brick_rules as rules
-from forge_api.services import lobby_machines as _machines  # noqa: F401  (its stand-ins table)
+from forge_api.services import lobby_machines as machines_service
+from forge_api.services import machine_rules
 from forge_api.services import members as members_service
 from forge_api.services.errors import ApiError
 from forge_api.services.identity import Identity, is_admin
@@ -235,7 +236,10 @@ def _standing_in(db: StateDB, user: Identity) -> bool:
 
 
 def _is_maker(db: StateDB, user: Identity) -> bool:
-    """The brick maker: wearing the brick-making backpack, or an admin testing as it."""
+    """The brick maker: wearing the brick-making backpack, or an admin testing as it. One role
+    at a time: an admin standing in as the mechanic isn't the Lego bot, whatever he wears."""
+    if is_admin(user) and machines_service.standing_in_as_mechanic(db, _member(user)):
+        return False
     if avatars_service.is_brick_maker(db, _member(user)):
         return True
     return is_admin(user) and _standing_in(db, user)
@@ -270,6 +274,14 @@ def stand_in(db: StateDB, user: Identity, on: bool, now: datetime) -> BrickMe:
         else:
             db.execute("DELETE FROM lobby_bricks_stand_ins WHERE member_id = ?", (_member(user),))
         return me(db, user)
+
+
+def _problem(db: StateDB, brick: rules.At, placed: list[rules.At]) -> rules.Problem | None:
+    """Why a brick can't go there: the brick rules, or a machine standing there."""
+    problem = rules.problem(brick, placed)
+    if problem is None and machine_rules.brick_blocked(brick, machines_service.standing(db)):
+        return "machine"
+    return problem
 
 
 def _require_maker(db: StateDB, user: Identity) -> None:
@@ -307,7 +319,7 @@ def make(db: StateDB, user: Identity, body: BrickMake, now: datetime) -> BrickCh
         at = body.at
         if at is not None:
             spot = rules.At(body.shape, at.x, at.y, at.z, at.rot)
-            problem = rules.problem(spot, _placed(db))
+            problem = _problem(db, spot, _placed(db))
             if problem is not None:
                 raise ApiError(409, {"error": "wont_fit", "problem": problem})
         brick_id = secrets.token_hex(6)
@@ -344,6 +356,11 @@ def build(db: StateDB, user: Identity, body: BrickBuild, now: datetime) -> Brick
             )
         pieces = [rules.At(p.shape, p.x, p.y, p.z, p.rot) for p in body.bricks]
         problems = rules.blueprint_problems(pieces, _placed(db))
+        spots = machines_service.standing(db)
+        problems = [
+            p or ("machine" if machine_rules.brick_blocked(piece, spots) else None)
+            for p, piece in zip(problems, pieces, strict=True)
+        ]
         for index, problem in enumerate(problems):
             if problem is not None:
                 raise ApiError(409, {"error": "wont_fit", "problem": problem, "index": index})
@@ -397,7 +414,7 @@ def place(
         if row["holder"] != member_id:
             raise ApiError(409, {"error": "not_holding"})
         at = rules.At(row["shape"], body.x, body.y, body.z, body.rot)
-        problem = rules.problem(at, _placed(db, but=brick_id))
+        problem = _problem(db, at, _placed(db, but=brick_id))
         if problem is not None:
             raise ApiError(409, {"error": "wont_fit", "problem": problem})
         rev = _move(db, brick_id, at, None, now)
