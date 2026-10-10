@@ -84,10 +84,15 @@ describe('a block', () => {
 
 /** A face 1 × 1 seen from the front, in tenths; the cells `sunk` set back to z = 0.5. */
 function face(sunk: (x: number, y: number) => boolean, size = 10): number[] {
+  return relief((x, y) => (sunk(x, y) ? 0.5 : 1), size);
+}
+
+/** A face 1 × 1 seen from the front, in tenths, each cell at its own depth. */
+function relief(depthAt: (x: number, y: number) => number, size = 10): number[] {
   const out: number[] = [];
   for (let i = 0; i < size; i += 1) {
     for (let j = 0; j < size; j += 1) {
-      const z = sunk(i, j) ? 0.5 : 1;
+      const z = depthAt(i, j);
       const [x0, x1, y0, y1] = [i / size, (i + 1) / size, j / size, (j + 1) / size];
       out.push(x0, y0, z, x1, y0, z, x1, y1, z, x0, y0, z, x1, y1, z, x0, y1, z);
     }
@@ -105,6 +110,22 @@ describe('finding the mouth', () => {
     expect(mouth!.center[2]).toBe(1);
     expect(mouth!.size[0]).toBeCloseTo(0.5, 1);
     expect(mouth!.size[1]).toBeCloseTo(0.2, 1);
+  });
+
+  it('measures the face at the hollow’s own walls, so a nose above it isn’t taken for the face', () => {
+    // The mouth (y 0.1 to 0.3) under a nose sticking well out (y 0.4 to 0.6).
+    const nosed = relief((x, y) => (x >= 2 && x < 7 && y >= 1 && y < 3 ? 0.5 : x >= 3 && x < 6 && y >= 4 && y < 6 ? 1.6 : 1));
+    const mouth = mouthRecess(nosed, [0.45, 0.2, 0.5]);
+    expect(mouth).not.toBeNull();
+    expect(mouth!.center[2]).toBe(1);
+    expect(mouth!.size[0]).toBeCloseTo(0.5, 1);
+    expect(mouth!.size[1]).toBeCloseTo(0.2, 1);
+    // Lips that slope up to the face all round: each wall is its top, not where it starts to rise.
+    const sloped = relief((x, y) => {
+      const out = Math.max(32 - x, x - 111, 16 - y, y - 47, 0);
+      return out === 0 ? 0.5 : Math.min(1, 0.55 + 0.15 * out);
+    }, 160);
+    expect(mouthRecess(sloped, [0.45, 0.2, 0.5])!.center[2]).toBe(1);
   });
 
   it('finds nothing on a flat face, in the open air, or in a "hollow" that’s most of the model', () => {

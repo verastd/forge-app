@@ -159,7 +159,7 @@ export function blockFrame(age: number, from: Vec3, forward: Vec3, shot: BlockSh
  * The mouth's opening on a model, from a click inside it (the model's own
  * frame, its front facing +z; `triangles` flat, nine numbers each). Seen from
  * the front, the hollow the click is in: everything around it sunk well
- * behind the face round about. Its middle (at the face's depth) and its width
+ * behind the hollow's own walls. Its middle (at the face's depth) and its width
  * and height; null when the click isn't in a hollow.
  */
 export function mouthRecess(triangles: ArrayLike<number>, at: Readonly<[number, number, number]>): { center: [number, number, number]; size: [number, number] } | null {
@@ -211,14 +211,39 @@ export function mouthRecess(triangles: ArrayLike<number>, at: Readonly<[number, 
   const cy = Math.min(H - 1, Math.max(0, Math.floor((at[1] - minY) / cell)));
   const start = depth[cy * W + cx]!;
   if (start === -Infinity) return null;
-  // The face round about: the front-most surface within a fifth of the model of the click.
-  const reach = Math.round(cells / 5);
-  let face = -Infinity;
-  for (let y = Math.max(0, cy - reach); y <= Math.min(H - 1, cy + reach); y += 1) {
-    for (let x = Math.max(0, cx - reach); x <= Math.min(W - 1, cx + reach); x += 1) face = Math.max(face, depth[y * W + x]!);
+  // The face round about: the hollow's own walls, the first surface well in front of the click
+  // going left, right, up and down (within half the model), climbed to their top. Their
+  // middle depth, so a nose or brow beyond one wall isn't taken for the face.
+  const reach = Math.round(cells / 2);
+  const rise = span / 20;
+  const walls: number[] = [];
+  for (const [dx, dy] of [
+    [-1, 0],
+    [1, 0],
+    [0, -1],
+    [0, 1],
+  ] as const) {
+    for (let step = 1; step <= reach; step += 1) {
+      const x = cx + dx * step;
+      const y = cy + dy * step;
+      if (x < 0 || y < 0 || x >= W || y >= H) break;
+      let wall = depth[y * W + x]!;
+      if (wall - start < rise) continue;
+      // Up a sloped lip to its top, a step or two on.
+      for (let more = 1; more <= 2; more += 1) {
+        const nx = x + dx * more;
+        const ny = y + dy * more;
+        if (nx < 0 || ny < 0 || nx >= W || ny >= H || depth[ny * W + nx]! <= wall) break;
+        wall = depth[ny * W + nx]!;
+      }
+      walls.push(wall);
+      break;
+    }
   }
-  // A hollow is sunk at least a twentieth of the model behind the face.
-  if (face - start < span / 20) return null;
+  // A hollow is walled in on at least two sides.
+  if (walls.length < 2) return null;
+  walls.sort((a, b) => a - b);
+  const face = walls[Math.floor((walls.length - 1) / 2)]!;
   const sunk = start + (face - start) / 2;
   // Everything joined to the click that's sunk behind halfway to the face.
   const seen = new Uint8Array(W * H);
