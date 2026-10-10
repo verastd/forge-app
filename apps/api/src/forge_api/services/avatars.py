@@ -34,6 +34,7 @@ from forge_api.models import (
     AVATAR_PLACEMENT_AS_IS,
     Avatar,
     AvatarAccess,
+    AvatarCape,
     AvatarChestUpload,
     AvatarColors,
     AvatarHead,
@@ -110,6 +111,14 @@ register_schema(
             member_id TEXT PRIMARY KEY REFERENCES avatars_members (member_id),
             eye_right TEXT,
             finish TEXT
+        )""",
+        # What a robot wears on its back: a library model (fit `back`) or the built-in cape
+        # (its two colours). No row: nothing.
+        """CREATE TABLE IF NOT EXISTS avatars_member_backs (
+            member_id TEXT PRIMARY KEY REFERENCES avatars_members (member_id),
+            head_id TEXT REFERENCES avatars_heads (id),
+            cape_outer TEXT,
+            cape_lining TEXT
         )""",
         # Who a head was made for: only they can wear it. No row: nobody yet.
         """CREATE TABLE IF NOT EXISTS avatars_head_owners (
@@ -372,6 +381,12 @@ def _avatar(row: dict[str, Any]) -> Avatar:
         accessory=row["x_accessory"],
         chest=row["chest_sha256"],
         finish=row["l_finish"],
+        back=row["b_back"],
+        cape=(
+            AvatarCape(outer=row["b_cape_outer"], lining=row["b_cape_lining"])
+            if row["b_cape_outer"] is not None
+            else None
+        ),
         updatedAt=members_service.from_db(row["updated_at"]).isoformat(),
     )
 
@@ -461,6 +476,10 @@ def _store_owner(db: StateDB, head_id: str, owner: str | None) -> None:
         "DELETE FROM avatars_member_accessories WHERE head_id = ? AND member_id IS NOT ?",
         (head_id, owner),
     )
+    db.execute(
+        "DELETE FROM avatars_member_backs WHERE head_id = ? AND member_id IS NOT ?",
+        (head_id, owner),
+    )
 
 
 def _head_row(db: StateDB, head_id: str) -> dict[str, Any] | None:
@@ -469,10 +488,12 @@ def _head_row(db: StateDB, head_id: str) -> dict[str, Any] | None:
 
 #: A dressed robot with its face accessory, right eye and finish (NULL when it has none).
 _MEMBER_SELECT: Final = (
-    "SELECT m.*, x.head_id AS x_accessory, l.eye_right AS l_eye_right, l.finish AS l_finish "
+    "SELECT m.*, x.head_id AS x_accessory, l.eye_right AS l_eye_right, l.finish AS l_finish, "
+    "b.head_id AS b_back, b.cape_outer AS b_cape_outer, b.cape_lining AS b_cape_lining "
     "FROM avatars_members m "
     "LEFT JOIN avatars_member_accessories x ON x.member_id = m.member_id "
-    "LEFT JOIN avatars_member_looks l ON l.member_id = m.member_id"
+    "LEFT JOIN avatars_member_looks l ON l.member_id = m.member_id "
+    "LEFT JOIN avatars_member_backs b ON b.member_id = m.member_id"
 )
 
 
@@ -505,10 +526,14 @@ def list_members(db: StateDB) -> AvatarMemberList:
 
 
 def set_avatar(db: StateDB, member_id: str, update: AvatarUpdate, now: datetime) -> Avatar:
-    """Paints a member's robot and picks its head (none: its own) and its face accessory
-    (none: none), worn over that head. Keeps its chestplate."""
+    """Paints a member's robot and picks its head (none: its own), its face accessory
+    (none: none), worn over that head, and what it wears on its back (a model or the cape,
+    not both). Keeps its chestplate."""
+    if update.back is not None and update.cape is not None:
+        raise ApiError(400, {"error": "one_back", "fields": ["back", "cape"]})
     with db.transaction():
-        for field, wanted in (("head", update.head), ("accessory", update.accessory)):
+        slots = (("head", update.head), ("accessory", update.accessory), ("back", update.back))
+        for field, wanted in slots:
             if wanted is None:
                 continue
             head = _head_row(db, wanted)
@@ -519,6 +544,10 @@ def set_avatar(db: StateDB, member_id: str, update: AvatarUpdate, now: datetime)
                 raise ApiError(400, {"error": "head_not_theirs", "fields": [field]})
             if field == "accessory" and head["fit"] != "accessory":
                 raise ApiError(400, {"error": "not_an_accessory", "fields": [field]})
+            # A back model is only for the back, and only a back model goes there.
+            if (field == "back") != (head["fit"] == "back"):
+                error = "not_a_back" if field == "back" else "back_model"
+                raise ApiError(400, {"error": error, "fields": [field]})
         c = update.colors
         db.execute(
             "INSERT INTO avatars_members "
@@ -533,6 +562,19 @@ def set_avatar(db: StateDB, member_id: str, update: AvatarUpdate, now: datetime)
             db.execute(
                 "INSERT INTO avatars_member_accessories (member_id, head_id) VALUES (?, ?)",
                 (member_id, update.accessory),
+            )
+        db.execute("DELETE FROM avatars_member_backs WHERE member_id = ?", (member_id,))
+        if update.back is not None or update.cape is not None:
+            cape = update.cape
+            db.execute(
+                "INSERT INTO avatars_member_backs (member_id, head_id, cape_outer, cape_lining) "
+                "VALUES (?, ?, ?, ?)",
+                (
+                    member_id,
+                    update.back,
+                    cape.outer if cape else None,
+                    cape.lining if cape else None,
+                ),
             )
         # Paint is the default: kept as no finish at all, so every painted robot reads the same.
         finish = None if update.finish == "paint" else update.finish
@@ -553,6 +595,7 @@ def reset_avatar(db: StateDB, member_id: str) -> None:
         row = _avatar_row(db, member_id)
         db.execute("DELETE FROM avatars_member_accessories WHERE member_id = ?", (member_id,))
         db.execute("DELETE FROM avatars_member_looks WHERE member_id = ?", (member_id,))
+        db.execute("DELETE FROM avatars_member_backs WHERE member_id = ?", (member_id,))
         db.execute("DELETE FROM avatars_members WHERE member_id = ?", (member_id,))
         _drop_unused_assets(db, [row["chest_sha256"] if row else None])
 
@@ -661,6 +704,7 @@ def delete_head(db: StateDB, head_id: str) -> None:
             raise ApiError(404, {"error": "head_not_found"})
         db.execute("UPDATE avatars_members SET head_id = NULL WHERE head_id = ?", (head_id,))
         db.execute("DELETE FROM avatars_member_accessories WHERE head_id = ?", (head_id,))
+        db.execute("DELETE FROM avatars_member_backs WHERE head_id = ?", (head_id,))
         db.execute("DELETE FROM avatars_head_placements WHERE head_id = ?", (head_id,))
         db.execute("DELETE FROM avatars_head_eye_angles WHERE head_id = ?", (head_id,))
         db.execute("DELETE FROM avatars_head_eye_looks WHERE head_id = ?", (head_id,))

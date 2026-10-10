@@ -51,7 +51,8 @@ export interface HeadScreen {
   size: [number, number];
 }
 
-export type HeadFitKind = 'replace' | 'accessory';
+/** How a library model is worn: replacing the head, over the face, or on the back (back frame: BACK_ANCHOR). */
+export type HeadFitKind = 'replace' | 'accessory' | 'back';
 
 export const HEAD_FIT = Object.freeze({
   /** A replacing head's lower band (ears and all) is this wide, metres: the robot's own head. */
@@ -91,6 +92,9 @@ export const HEAD_FIT = Object.freeze({
   eyeLift: 0.004,
   /** A face accessory is this wide, metres: most of the face screen. */
   faceWidth: 0.25,
+  /** A back model's first fit: within this wide and this tall, metres, its front on the back plate. */
+  backWidth: 0.46,
+  backHeight: 0.5,
   /** The limits AvatarHeadPlacement takes. */
   minScale: 0.01,
   maxScale: 10,
@@ -156,6 +160,15 @@ export function autoPlacement(
     if (aims.length === 0) return { scale, offset, eyes };
     const mean = (k: 0 | 1): number => aims.reduce((sum, aim) => sum + aim[k], 0) / aims.length;
     return { scale, offset, eyes, eyeAngles: clampAngles([0, mean(0), mean(1)]) };
+  }
+  if (kind === 'back') {
+    // In the back frame (BACK_ANCHOR): centred between the shoulder blades, within the back's
+    // reach, its front (+Z, toward the robot) against the back plate.
+    const [x0, x1] = spread(points.map((p) => p[0]));
+    const [, z1] = spread(points.map((p) => p[2]));
+    const scale = clampScale(Math.min(HEAD_FIT.backWidth / Math.max(x1 - x0, 1e-9), HEAD_FIT.backHeight / Math.max(top - bottom, 1e-9)));
+    const offset = clampPoint([-scale * ((x0 + x1) / 2), -scale * ((bottom + top) / 2), -0.002 - scale * z1]);
+    return { scale, offset };
   }
   const [x0, x1] = spread(points.map((p) => p[0]));
   const [z0] = spread(points.map((p) => p[2]));

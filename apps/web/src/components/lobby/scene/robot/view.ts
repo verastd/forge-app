@@ -30,6 +30,7 @@
 import * as THREE from 'three';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 import {
+  BACK_ANCHOR,
   FACE_PANEL,
   HEAD_ANCHOR,
   HEAD_FIT,
@@ -46,9 +47,11 @@ import {
   rotateAbout,
 } from '@forge/lobby';
 import type { ArmAim, ArmsPose, AvatarColors, AvatarFinish, Blinker, FlightArea, MotionInput, MotionPose, RoofGrid } from '@forge/lobby';
-import type { AvatarHead } from '@forge/shared';
+import type { AvatarCape, AvatarHead } from '@forge/shared';
 
 import type { RobotAssets, RobotBody } from './assets';
+import { createCape } from './cape';
+import type { CapeView } from './cape';
 import { createHelicopter } from './helicopter';
 import type { Helicopter } from './helicopter';
 import { JOINT_COLOR, createBodyMaterial, finish, paint } from './material';
@@ -84,6 +87,10 @@ export interface RobotLook {
   chest: string | null;
   /** What the armour is made of; absent or null: paint. */
   finish?: AvatarFinish | null;
+  /** A library model worn on the back (fit `back`); absent or null: none. */
+  back?: AvatarHead | null;
+  /** The built-in cape, its two colours; absent or null: none. */
+  cape?: AvatarCape | null;
 }
 
 /** A look's identity, to tell when it changed. */
@@ -103,6 +110,9 @@ export function lookKey(look: RobotLook): string {
     placementKey(look.head),
     accessory?.sha256 ?? '',
     placementKey(accessory),
+    look.back?.sha256 ?? '',
+    placementKey(look.back ?? null),
+    look.cape ? `${look.cape.outer}${look.cape.lining}` : '',
     look.chest ?? '',
   ].join('|');
 }
@@ -521,6 +531,27 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
   accessoryPivot.name = 'accessory-pivot';
   slot.add(accessoryPivot);
 
+  // The back slot: a frame on the spine that is the model's own frame at BACK_ANCHOR in the bind
+  // pose (between the shoulder blades, on the back plate), so what's worn there follows the torso.
+  const backSlot = new THREE.Group();
+  backSlot.name = 'back-slot';
+  backSlot.matrixAutoUpdate = false;
+  if (bones.spine) {
+    const modelInverse = new THREE.Matrix4().copy(model.matrixWorld).invert();
+    const spineInModel = new THREE.Matrix4().multiplyMatrices(modelInverse, bones.spine.matrixWorld);
+    backSlot.matrix
+      .copy(spineInModel)
+      .invert()
+      .multiply(new THREE.Matrix4().makeTranslation(BACK_ANCHOR.x, BACK_ANCHOR.y, BACK_ANCHOR.z));
+    bones.spine.add(backSlot);
+  } else {
+    backSlot.matrix.makeTranslation(BACK_ANCHOR.x, BACK_ANCHOR.y, BACK_ANCHOR.z);
+    model.add(backSlot);
+  }
+  const backPivot = new THREE.Group();
+  backPivot.name = 'back-pivot';
+  backSlot.add(backPivot);
+
   const screen = new THREE.Mesh(sharedScreenGeometry(), screenMaterial);
   screen.name = 'face-screen';
   screen.visible = false;
@@ -564,6 +595,12 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
   let accessoryMaterials: THREE.Material[] = [];
   let pendingAccessory: string | null = null;
   let accessoryRetryAt: number | null = null;
+  // What it wears on its back: a library model, or the cape.
+  let backObject: THREE.Object3D | null = null;
+  let backMaterials: THREE.Material[] = [];
+  let pendingBack: string | null = null;
+  let backRetryAt: number | null = null;
+  let cape: CapeView | null = null;
   let pendingChest: string | null = null;
   /** When to try a failed head or chest image again (performance.now() ms), or null. */
   let headRetryAt: number | null = null;
@@ -587,6 +624,7 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
   const tintHead = (): void => {
     tint(headMaterials);
     tint(accessoryMaterials);
+    tint(backMaterials);
   };
 
   /**
@@ -861,6 +899,58 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
     );
   };
 
+  const placeBack = (back: AvatarHead): void => {
+    if (!backObject) return;
+    turnPivot(backPivot, back.placement);
+    backObject.scale.setScalar(back.placement.scale);
+    backObject.position.set(0, 0, 0);
+  };
+
+  const dropBack = (): void => {
+    if (!backObject) return;
+    backObject.removeFromParent();
+    for (const each of backMaterials) each.dispose();
+    backObject = null;
+    backMaterials = [];
+  };
+
+  const wearBack = (back: AvatarHead): void => {
+    pendingBack = back.sha256;
+    assets.head(back.sha256).then(
+      (gltf) => {
+        if (disposed || pendingBack !== back.sha256) return;
+        pendingBack = null;
+        dropBack();
+        const { object, materials } = cloneModel(gltf.scene, () => undefined);
+        backObject = object;
+        backMaterials = materials;
+        tint(backMaterials);
+        backPivot.add(object);
+        placeBack(look.back?.sha256 === back.sha256 ? look.back : back);
+      },
+      () => {
+        // It didn't load: nothing on its back for now, tried again in a while.
+        if (disposed || pendingBack !== back.sha256) return;
+        pendingBack = null;
+        backRetryAt = performance.now() + RETRY_MS;
+      },
+    );
+  };
+
+  /** Puts the cape on in these colours, or takes it off. */
+  const wearCape = (colors: AvatarCape | null): void => {
+    if (!colors) {
+      cape?.dispose();
+      cape = null;
+      return;
+    }
+    if (!cape) {
+      cape = createCape(assets.envMap);
+      backSlot.add(cape.mesh);
+    }
+    cape.setColors(colors.outer, colors.lining);
+  };
+
   const wearHead = (head: AvatarHead): void => {
     pendingHead = head.sha256;
     assets.head(head.sha256).then(
@@ -945,8 +1035,9 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
       pendingHead = null;
       headRetryAt = null;
       dropHead();
-      // A kept accessory takes the new colours and finish now, not when (or if) a head loads.
+      // A kept accessory (and back model) takes the new colours and finish now, not when (or if) a head loads.
       tint(accessoryMaterials);
+      tint(backMaterials);
       if (next.head) wearHead(next.head);
     } else {
       tintHead();
@@ -962,6 +1053,17 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
     } else if (after && placementKey(before) !== placementKey(after)) {
       placeAccessory(after);
     }
+    const backBefore = previous.back ?? null;
+    const backAfter = next.back ?? null;
+    if (first || backBefore?.sha256 !== backAfter?.sha256) {
+      pendingBack = null;
+      backRetryAt = null;
+      dropBack();
+      if (backAfter) wearBack(backAfter);
+    } else if (backAfter && placementKey(backBefore) !== placementKey(backAfter)) {
+      placeBack(backAfter);
+    }
+    wearCape(next.cape ?? null);
     const emblemChanged = !next.chest && (previous.name !== next.name || previous.colors.accent !== next.colors.accent || previous.colors.eye !== next.colors.eye);
     if (first || previous.chest !== next.chest || emblemChanged) {
       chestRetryAt = null;
@@ -1078,15 +1180,19 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
       return flyer !== null;
     },
     get state() {
-      return pendingHead !== null || pendingAccessory !== null || pendingChest !== null || holding ? 'loading' : 'ready';
+      return pendingHead !== null || pendingAccessory !== null || pendingBack !== null || pendingChest !== null || holding ? 'loading' : 'ready';
     },
     setLook,
     holdChest(loading) {
       holding = loading;
     },
     update(frame) {
-      if (headRetryAt !== null || accessoryRetryAt !== null || chestRetryAt !== null) {
+      if (headRetryAt !== null || accessoryRetryAt !== null || backRetryAt !== null || chestRetryAt !== null) {
         const now = performance.now();
+        if (backRetryAt !== null && now >= backRetryAt) {
+          backRetryAt = null;
+          if (look.back) wearBack(look.back);
+        }
         if (accessoryRetryAt !== null && now >= accessoryRetryAt) {
           accessoryRetryAt = null;
           if (look.accessory) wearAccessory(look.accessory);
@@ -1128,6 +1234,7 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
       flame.scale.set(0.18 + 0.1 * p.thrust, (0.22 + 0.45 * p.thrust) * flicker, 1);
       flame.position.y = -0.04 - 0.1 * p.thrust;
       flameMaterial.opacity = 0.35 + 0.55 * p.thrust;
+      cape?.update(frame);
       if (flyer && flight) flyer.fly(flight.area, flight.grid, frame.t, flyerStart, frame.reducedMotion);
       return p;
     },
@@ -1135,6 +1242,8 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
       disposed = true;
       dropHead();
       dropAccessory();
+      dropBack();
+      wearCape(null);
       root.removeFromParent();
       material.dispose();
       for (const each of [...eyeMaterials, ...haloMaterials]) each.dispose();

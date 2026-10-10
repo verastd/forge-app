@@ -1037,7 +1037,7 @@ AvatarChestType = Literal["image/png", "image/jpeg", "image/webp"]
 AVATAR_EYE_NODES: Final = ("EyeL", "EyeR")
 #: replace: the robot's own head is hidden; accessory: a face accessory worn over it (a
 #: mask, a visor, a helmet), the eyes staying where they always are.
-AvatarHeadFit = Literal["replace", "accessory"]
+AvatarHeadFit = Literal["replace", "accessory", "back"]
 #: What a robot's armour is made of (zod AVATAR_FINISHES); None on an avatar: paint.
 AvatarFinish = Literal["paint", "chrome", "ice"]
 AVATAR_PLACEMENT_SCALE_MIN: Final = 0.01
@@ -1079,6 +1079,15 @@ class AvatarColors(BaseModel):
     eyeRight: _HexColor | None = None
 
 
+class AvatarCape(BaseModel):
+    """A built-in cape on the robot's back: its outside and its lining."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    outer: _HexColor
+    lining: _HexColor
+
+
 class Avatar(BaseModel):
     memberId: _AvatarMemberId
     colors: AvatarColors
@@ -1088,6 +1097,10 @@ class Avatar(BaseModel):
     chest: _Sha256 | None = None
     #: What the armour is made of; None: paint.
     finish: AvatarFinish | None = None
+    #: On its back, at most one of: a library model (fit `back`)...
+    back: _AvatarHeadId | None = None
+    #: ...or the built-in cape.
+    cape: AvatarCape | None = None
     updatedAt: str
 
 
@@ -1174,6 +1187,9 @@ class AvatarUpdate(BaseModel):
     head: _AvatarHeadId | None = None
     accessory: _AvatarHeadId | None = None
     finish: AvatarFinish | None = None
+    #: At most one of `back` and `cape` (refused with 400 one_back).
+    back: _AvatarHeadId | None = None
+    cape: AvatarCape | None = None
 
 
 class AvatarChestUpload(BaseModel):

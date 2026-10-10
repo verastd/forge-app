@@ -1269,7 +1269,7 @@ export const AVATAR_EYE_NODES = ['EyeL', 'EyeR'] as const;
  * they always are, and whatever the accessory puts in front of them covers
  * them.
  */
-export const AVATAR_HEAD_FITS = ['replace', 'accessory'] as const;
+export const AVATAR_HEAD_FITS = ['replace', 'accessory', 'back'] as const;
 export type AvatarHeadFit = (typeof AVATAR_HEAD_FITS)[number];
 
 const hexColor = z.string().regex(/^#[0-9a-f]{6}$/);
@@ -1296,6 +1296,16 @@ export const AvatarColorsSchema = z.object({
 });
 export type AvatarColors = z.infer<typeof AvatarColorsSchema>;
 
+/** A built-in cape on the robot's back: its outside and its lining. */
+export const AvatarCapeSchema = z.object({
+  outer: hexColor,
+  lining: hexColor,
+});
+export type AvatarCape = z.infer<typeof AvatarCapeSchema>;
+
+/** The cape as it comes: opera black, lined in crimson. */
+export const AVATAR_CAPE_DEFAULT: Readonly<AvatarCape> = Object.freeze({ outer: '#111114', lining: '#9b1020' });
+
 /** One member's robot, as an admin set it. A member with none wears their default. */
 export const AvatarSchema = z.object({
   memberId: z.string().regex(AVATAR_MEMBER_ID),
@@ -1308,6 +1318,10 @@ export const AvatarSchema = z.object({
   chest: z.string().regex(AVATAR_SHA256).optional(),
   /** What the armour is made of; absent: paint. */
   finish: z.enum(AVATAR_FINISHES).optional(),
+  /** On its back, at most one of: a library model (a head whose fit is `back`)… */
+  back: z.string().regex(AVATAR_HEAD_ID).optional(),
+  /** …or the built-in cape. Absent both: nothing on its back. */
+  cape: AvatarCapeSchema.optional(),
   updatedAt: z.string(),
 });
 export type Avatar = z.infer<typeof AvatarSchema>;
@@ -1443,6 +1457,9 @@ export const AvatarUpdateSchema = z.object({
   head: z.string().regex(AVATAR_HEAD_ID).optional(),
   accessory: z.string().regex(AVATAR_HEAD_ID).optional(),
   finish: z.enum(AVATAR_FINISHES).optional(),
+  /** At most one of `back` and `cape` (the API refuses both). */
+  back: z.string().regex(AVATAR_HEAD_ID).optional(),
+  cape: AvatarCapeSchema.optional(),
 });
 export type AvatarUpdate = z.infer<typeof AvatarUpdateSchema>;
 

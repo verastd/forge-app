@@ -59,6 +59,20 @@ export const FACE_PANEL = Object.freeze({ minX: -0.138, maxX: 0.138, minY: 0.815
  */
 export const HEAD_ANCHOR = Object.freeze({ x: 0, y: 0.8, z: 0 });
 
+/**
+ * Where something worn on the back sits, in the body's bind pose: on the
+ * torso's back plate, between the shoulder blades (it follows the spine). A
+ * back model is modelled with its origin here (+Y up, facing +Z, its front
+ * against the back), and the cape hangs from just above it.
+ */
+export const BACK_ANCHOR = Object.freeze({ x: 0, y: 0.7, z: -0.116 });
+
+/** The torso's back plate (bind pose, metres) and the shoulders' reach either side of it. */
+export const BACK_PANEL = Object.freeze({ minX: -0.138, maxX: 0.138, minY: 0.479, maxY: 0.783, z: -0.116, shoulders: 0.2 });
+
+/** The hover pod below the torso: a round body this far across, from this low to this high (bind pose). */
+export const HOVER_POD = Object.freeze({ radius: 0.11, minY: 0.125, maxY: 0.405 });
+
 /** One part of the body and what it was classified as. */
 export interface Island {
   /** The island's vertices, ascending. */

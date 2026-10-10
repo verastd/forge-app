@@ -196,7 +196,7 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled, w
       setPreviewState('error');
       return undefined;
     }
-    preview.setFraming('head');
+    preview.setFraming(fitRef.current === 'back' ? 'back' : 'head');
     previewRef.current = preview;
     return () => {
       preview.dispose();
@@ -210,6 +210,10 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled, w
   // The fit as it is now, for a head that finishes loading after it was changed.
   const fitRef = useRef(fit);
   fitRef.current = fit;
+  // Fitting something for the back looks at the robot from behind; anything else, at its head.
+  useEffect(() => {
+    previewRef.current?.setFraming(fit === 'back' ? 'back' : 'head');
+  }, [fit]);
   const lastFit = useRef(fit);
 
   // Read and measure the head, then make the first guess (or take the saved placement).
@@ -298,7 +302,12 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled, w
       colors: wearerColors ?? defaultColors(FITTING_LOOK_ID),
       chest: null,
       finish: wearerFinish,
-      ...(worn ? { head: worn, accessory: fitted } : { head: fitted }),
+      // A back model on the wearer's back, under the head they have on; a face accessory over that head.
+      ...(fit === 'back'
+        ? { head: wearer?.head?.fit === 'replace' ? wearer.head : null, back: fitted }
+        : worn
+          ? { head: worn, accessory: fitted }
+          : { head: fitted }),
     };
     preview.setLook(look);
     // Colours by value: the page hands over a new object every render.
@@ -559,7 +568,7 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled, w
                 value={Math.max(-MODEL_ANGLE_RANGE, Math.min(MODEL_ANGLE_RANGE, value))}
                 onChange={onModelAngle(control.index, control.sign)}
                 disabled={locked}
-                aria-label={`${control.label}, ${fit === 'replace' ? 'whole head' : 'whole accessory'}`}
+                aria-label={`${control.label}, ${fit === 'replace' ? 'whole head' : fit === 'back' ? 'whole model' : 'whole accessory'}`}
                 aria-valuetext={words}
               />
             </label>
@@ -687,7 +696,7 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled, w
               );
             })}
           </div>
-        ) : (
+        ) : fit === 'back' ? null : (
           <div className={styles.fitRow}>
             <button type="button" className={`btn btn-sm ${picking === 'hole' ? 'btn-primary' : 'btn-ghost'}`} aria-pressed={picking === 'hole'} onClick={() => setPicking(picking === 'hole' ? null : 'hole')} disabled={locked}>
               Line up an eye hole
@@ -695,18 +704,20 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled, w
           </div>
         )}
 
-        <label className={`${styles.radio} ${styles.fitFull}`}>
-          <input type="checkbox" checked={placement?.flyer === 'helicopter'} onChange={onFlyer} disabled={locked} />
-          <span>
-            Helicopter over the top
-            <br />
-            <span className={styles.hint}>
-              {placement?.flyer === 'helicopter'
-                ? 'Flies figure-8s just above the model’s top, its searchlight on whatever’s below. Everyone wearing this head gets it.'
-                : 'Off: nothing flies over this head.'}
+        {fit !== 'back' && (
+          <label className={`${styles.radio} ${styles.fitFull}`}>
+            <input type="checkbox" checked={placement?.flyer === 'helicopter'} onChange={onFlyer} disabled={locked} />
+            <span>
+              Helicopter over the top
+              <br />
+              <span className={styles.hint}>
+                {placement?.flyer === 'helicopter'
+                  ? 'Flies figure-8s just above the model’s top, its searchlight on whatever’s below. Everyone wearing this head gets it.'
+                  : 'Off: nothing flies over this head.'}
+              </span>
             </span>
-          </span>
-        </label>
+          </label>
+        )}
 
         <div className={styles.fitRow}>
           {picking && (
