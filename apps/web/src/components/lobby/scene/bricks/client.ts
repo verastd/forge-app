@@ -6,8 +6,8 @@
 
 import { BRICK, BRICK_PROBLEM_TEXT } from '@forge/lobby';
 import type { BrickProblem } from '@forge/lobby';
-import { BrickBuiltSchema, BrickChangeSchema, BrickListSchema, BrickMeSchema } from '@forge/shared';
-import type { BrickBuild, BrickBuilt, BrickChange, BrickList, BrickMake, BrickMe, BrickPlace } from '@forge/shared';
+import { BrickBuiltSchema, BrickChangeSchema, BrickListSchema, BrickMeSchema, BrickTakenDownSchema } from '@forge/shared';
+import type { BrickBuild, BrickBuilt, BrickChange, BrickList, BrickMake, BrickMe, BrickPlace, BrickTakenDown } from '@forge/shared';
 
 export const BRICKS_URL = '/bff/lobby/bricks';
 
@@ -47,6 +47,8 @@ export function refusalText(status: number, code: string, problem: BrickProblem 
       return 'Only admins can take over the Lego bot.';
     case 'brick_not_found':
       return 'That brick is gone.';
+    case 'build_not_found':
+      return 'That build is already gone.';
     case 'unauthenticated':
       return 'Sign in with GitHub to build.';
     case 'practice_session':
@@ -68,6 +70,8 @@ export interface BrickClient {
   remove(id: string): Promise<BrickChange>;
   /** The brick maker: a blueprint built where it's placed, all at once. */
   build(body: BrickBuild): Promise<BrickBuilt>;
+  /** The brick maker: a whole blueprint build taken away at once. */
+  takeDown(buildId: string): Promise<BrickTakenDown>;
   /** Admins: be the brick maker for testing, or stop. */
   standIn(on: boolean): Promise<BrickMe>;
 }
@@ -116,6 +120,7 @@ export function createBrickClient(fetchImpl: typeof fetch = (...args) => fetch(.
     remove: (id) => call(fetchImpl, `/${id}`, { method: 'DELETE' }, change),
     build: (body) =>
       call(fetchImpl, '/build', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(body) }, (b) => BrickBuiltSchema.safeParse(b)),
+    takeDown: (buildId) => call(fetchImpl, `/builds/${buildId}`, { method: 'DELETE' }, (b) => BrickTakenDownSchema.safeParse(b)),
     standIn: (on) =>
       call(fetchImpl, '/me/stand-in', { method: 'PUT', headers: JSON_HEADERS, body: JSON.stringify({ on }) }, (body) =>
         BrickMeSchema.safeParse(body),

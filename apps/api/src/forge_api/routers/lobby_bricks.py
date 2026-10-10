@@ -7,8 +7,9 @@
   bricks), `PUT /api/lobby/bricks/me/stand-in` (admins only: "Be the Lego bot", for
   testing), `PUT /api/lobby/bricks/{id}/pick` and `.../{id}/place`.
 - The brick maker only (checked on every call): `POST /api/lobby/bricks` (make one),
-  `POST /api/lobby/bricks/build` (a blueprint, all at once) and
-  `DELETE /api/lobby/bricks/{id}` (take one away).
+  `POST /api/lobby/bricks/build` (a blueprint, all at once),
+  `DELETE /api/lobby/bricks/{id}` (take one away) and
+  `DELETE /api/lobby/bricks/builds/{buildId}` (take a whole blueprint build away).
 """
 
 import re
@@ -26,6 +27,7 @@ from forge_api.models import (
     BrickMe,
     BrickPlace,
     BrickStandIn,
+    BrickTakenDown,
 )
 from forge_api.routers.members import Db, Member, Now, body_doc, json_body, read_capped
 from forge_api.services import flags as flags_service
@@ -47,6 +49,15 @@ def _brick_id(brickId: str) -> str:
 
 
 BrickId = Annotated[str, Depends(_brick_id)]
+
+
+def _build_id(buildId: str) -> str:
+    if re.fullmatch(BRICK_ID, buildId) is None:
+        raise ApiError(404, {"error": "build_not_found"})
+    return buildId
+
+
+BuildId = Annotated[str, Depends(_build_id)]
 
 
 def _member_id(user: Identity) -> str:
@@ -136,6 +147,12 @@ def place_brick(
     body: Annotated[BrickPlace, Depends(json_body(BrickPlace))],
 ) -> BrickChange:
     return bricks_service.place(db, _member_id(user), brick_id, body, now)
+
+
+@router.delete("/builds/{buildId}", response_model=BrickTakenDown)
+def delete_build(user: Member, db: Db, now: Now, build_id: BuildId) -> BrickTakenDown:
+    """The brick maker takes a whole blueprint build out of the cave, all at once."""
+    return bricks_service.take_down(db, user, build_id, now)
 
 
 @router.delete("/{brickId}", response_model=BrickChange, response_model_exclude_none=True)

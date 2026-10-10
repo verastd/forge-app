@@ -30,6 +30,7 @@ from forge_api.models import (
     BrickMake,
     BrickMe,
     BrickPlace,
+    BrickTakenDown,
 )
 from forge_api.services import avatars as avatars_service
 from forge_api.services import brick_rules as rules
@@ -75,7 +76,20 @@ register_schema(
             key TEXT PRIMARY KEY,
             value INTEGER NOT NULL
         )""",
+        # Which blueprint build a brick came from (a row per brick of a build, kept while
+        # the brick is: it goes with its tombstone), so the whole build comes down at once.
+        """CREATE TABLE IF NOT EXISTS lobby_bricks_builds (
+            brick_id TEXT PRIMARY KEY,
+            build_id TEXT NOT NULL
+        )""",
+        "CREATE INDEX IF NOT EXISTS lobby_bricks_builds_build ON lobby_bricks_builds (build_id)",
     ],
+)
+
+#: Every brick with the build it came from (b_build: NULL for a brick made by hand).
+_BRICK_SELECT: Final = (
+    "SELECT k.*, b.build_id AS b_build FROM lobby_bricks k "
+    "LEFT JOIN lobby_bricks_builds b ON b.brick_id = k.id"
 )
 
 
@@ -108,6 +122,7 @@ def _brick(row: dict[str, Any]) -> Brick:
         z=row["z"],
         rot=row["rot"],
         holder=row["holder"],
+        build=row.get("b_build"),
         updatedAt=members_service.from_db(row["updated_at"]).isoformat(),
     )
 
@@ -184,6 +199,9 @@ def _purge(db: StateDB, now: datetime) -> None:
     if old is None or old["rev"] is None:
         return
     db.execute("DELETE FROM lobby_bricks WHERE gone = 1 AND updated_at < ?", (cutoff,))
+    db.execute(
+        "DELETE FROM lobby_bricks_builds WHERE brick_id NOT IN (SELECT id FROM lobby_bricks)"
+    )
     _set_meta(db, "floor", max(_meta(db, "floor"), int(old["rev"])))
 
 
@@ -192,11 +210,12 @@ def list_bricks(db: StateDB, since: int | None, now: datetime) -> BrickList:
     with db.transaction():
         _lapse(db, now)
         _purge(db, now)
+        _tag_old_builds(db)
         rev = _meta(db, "rev")
         if since is None or since < _meta(db, "floor") or since > rev:
-            rows = db.query_all("SELECT * FROM lobby_bricks WHERE gone = 0 ORDER BY rev")
+            rows = db.query_all(f"{_BRICK_SELECT} WHERE k.gone = 0 ORDER BY k.rev")
             return BrickList(rev=rev, full=True, bricks=[_brick(r) for r in rows], gone=[])
-        rows = db.query_all("SELECT * FROM lobby_bricks WHERE rev > ? ORDER BY rev", (since,))
+        rows = db.query_all(f"{_BRICK_SELECT} WHERE k.rev > ? ORDER BY k.rev", (since,))
     return BrickList(
         rev=rev,
         full=False,
@@ -265,7 +284,7 @@ def _hands_free(db: StateDB, member_id: str, but: str | None = None) -> None:
 
 
 def _change(db: StateDB, rev: int, brick_id: str) -> BrickChange:
-    row = db.query_one("SELECT * FROM lobby_bricks WHERE id = ? AND gone = 0", (brick_id,))
+    row = db.query_one(f"{_BRICK_SELECT} WHERE k.id = ? AND k.gone = 0", (brick_id,))
     return BrickChange(rev=rev, brick=_brick(row) if row else None)
 
 
@@ -310,15 +329,21 @@ def build(db: StateDB, user: Identity, body: BrickBuild, now: datetime) -> Brick
                 raise ApiError(409, {"error": "wont_fit", "problem": problem, "index": index})
         rev = _bump(db)
         stamp = members_service.to_db(now)
+        build_id = secrets.token_hex(6)
+        ids = [secrets.token_hex(6) for _ in body.bricks]
         db.executemany(
             "INSERT INTO lobby_bricks (id, shape, color, x, y, z, rot, holder, held_at, "
             "has_home, gone, rev, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, 1, 0, ?, ?)",
             [
-                (secrets.token_hex(6), p.shape, p.color, p.x, p.y, p.z, p.rot, rev, stamp)
-                for p in body.bricks
+                (brick_id, p.shape, p.color, p.x, p.y, p.z, p.rot, rev, stamp)
+                for brick_id, p in zip(ids, body.bricks, strict=True)
             ],
         )
-        return BrickBuilt(rev=rev, built=len(body.bricks))
+        db.executemany(
+            "INSERT INTO lobby_bricks_builds (brick_id, build_id) VALUES (?, ?)",
+            [(brick_id, build_id) for brick_id in ids],
+        )
+        return BrickBuilt(rev=rev, built=len(body.bricks), build=build_id)
 
 
 def pick(db: StateDB, user: Identity, brick_id: str, now: datetime) -> BrickChange:
@@ -366,3 +391,41 @@ def remove(db: StateDB, user: Identity, brick_id: str, now: datetime) -> BrickCh
         _row(db, brick_id)
         rev = _take_away(db, brick_id, now)
         return BrickChange(rev=rev)
+
+
+def _tag_old_builds(db: StateDB) -> None:
+    """Once: tags the builds made before builds were tagged. A build wrote all its bricks
+    under one revision, and nothing else writes two bricks under one, so the bricks still
+    sharing a revision are a build (one moved since has its own revision: it's left out)."""
+    if _meta(db, "builds_tagged"):
+        return
+    db.execute(
+        "INSERT OR IGNORE INTO lobby_bricks_builds (brick_id, build_id) "
+        "SELECT id, printf('%012x', rev) FROM lobby_bricks WHERE gone = 0 AND rev IN "
+        "(SELECT rev FROM lobby_bricks WHERE gone = 0 GROUP BY rev HAVING COUNT(*) > 1)"
+    )
+    _set_meta(db, "builds_tagged", 1)
+
+
+def take_down(db: StateDB, user: Identity, build_id: str, now: datetime) -> BrickTakenDown:
+    """Takes a whole blueprint build out of the cave, every brick of it (placed, moved or
+    in someone's hand), under one revision (the maker only). 403 not_the_maker;
+    404 build_not_found (none of it is left)."""
+    with db.transaction():
+        _require_maker(db, user)
+        _tag_old_builds(db)
+        rows = db.query_all(
+            "SELECT k.id FROM lobby_bricks k JOIN lobby_bricks_builds b ON b.brick_id = k.id "
+            "WHERE b.build_id = ? AND k.gone = 0",
+            (build_id,),
+        )
+        if not rows:
+            raise ApiError(404, {"error": "build_not_found"})
+        rev = _bump(db)
+        stamp = members_service.to_db(now)
+        db.executemany(
+            "UPDATE lobby_bricks SET gone = 1, holder = NULL, held_at = NULL, rev = ?, "
+            "updated_at = ? WHERE id = ?",
+            [(rev, stamp, row["id"]) for row in rows],
+        )
+        return BrickTakenDown(rev=rev, removed=len(rows))

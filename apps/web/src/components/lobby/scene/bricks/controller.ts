@@ -6,7 +6,9 @@
  *
  * - Only the Lego bot (whoever wears the brick-making backpack: the API says,
  *   `GET me`) makes bricks (B, of the shape 1–9 and colour C / Shift+C picked)
- *   and removes them (X).
+ *   and removes them (X), or a whole blueprint build at once (Shift+X, then
+ *   Shift+X again to confirm: the build is outlined until it's confirmed, or
+ *   for TAKE_DOWN_ARMED_MS).
  * - Anyone signed in picks up a loose brick they point at (E), turns it (R),
  *   and places it where the ghost shows (E again: green fits, red says why
  *   not), or drops it on the floor in front of them (Q). A brick something is
@@ -51,10 +53,22 @@ import type { BrickClient } from './client';
 import { brickColour, brickMatrix, brickMaterial, createBrickLayer, createGhostLayer, createLoneBrick } from './meshes';
 import type { DrawnBrick } from './meshes';
 
+/** How long "take down this build?" waits for its confirmation. */
+export const TAKE_DOWN_ARMED_MS = 10_000;
+
 /** Who you are to the bricks: what the shell knows of your session. */
 export type Builder = 'member' | 'signed-out' | 'practice';
 
-export type BrickBusy = 'making' | 'picking' | 'placing' | 'dropping' | 'removing' | 'switching' | 'reading' | 'building';
+export type BrickBusy =
+  | 'making'
+  | 'picking'
+  | 'placing'
+  | 'dropping'
+  | 'removing'
+  | 'taking-down'
+  | 'switching'
+  | 'reading'
+  | 'building';
 
 export interface BrickState {
   /** The build: loading it, shown, or failed to load (and trying again). */
@@ -76,8 +90,12 @@ export interface BrickState {
   held: string | null;
   /** Holding: whether it fits where it's aimed, and why not. Null when it isn't aimed anywhere. */
   aim: { fits: boolean; why: string | null } | null;
-  /** Not holding: the brick you're pointing at and what you can do with it. */
-  target: { label: string; can: 'pick' | 'frozen' } | null;
+  /** Not holding: the brick you're pointing at, what you can do with it, and how many bricks its blueprint build has (null: made by hand). */
+  target: { label: string; can: 'pick' | 'frozen'; build: number | null } | null;
+  /** Holding a brick of a blueprint build: how many bricks the build has (null: not holding one). */
+  heldBuild: number | null;
+  /** The Lego bot asked to take down a whole build: how many bricks, waiting for them to confirm. */
+  takeDown: { count: number } | null;
   /**
    * The Lego bot's blueprint, while one is out: its name, how many bricks,
    * what was left out of it, and where it's aimed (whether it all fits, how
@@ -102,6 +120,9 @@ export type BrickCommand =
   | { kind: 'rotate' }
   | { kind: 'drop' }
   | { kind: 'remove' }
+  /** The Lego bot takes down the whole blueprint build the brick it points at (or holds) came from: once to ask, again to confirm. */
+  | { kind: 'take-down' }
+  | { kind: 'cancel-take-down' }
   | { kind: 'retry' }
   | { kind: 'stand-in'; on: boolean }
   /** The Lego bot reads a blueprint (an LDraw file) to build. */
@@ -289,6 +310,16 @@ export function createBricks(
   outline.visible = false;
   outline.renderOrder = 2;
   scene.add(outline);
+  /** Around a whole build while its take-down waits for a confirmation. */
+  const buildOutline = new THREE.LineSegments(
+    new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 1)),
+    new THREE.LineBasicMaterial({ color: 0xff5a4f, transparent: true, opacity: 0.95, depthTest: false }),
+  );
+  buildOutline.visible = false;
+  buildOutline.renderOrder = 2;
+  scene.add(buildOutline);
+  /** The build waiting to be taken down, and since when. */
+  let armed: { build: string; at: number } | null = null;
 
   /** Bricks drawn in someone's hand: brick id → its mesh. */
   const inHand = new Map<string, { group: THREE.Group; material: THREE.MeshStandardMaterial; shape: string; color: string }>();
@@ -402,6 +433,32 @@ export function createBricks(
     brickMatrix(aimed, ghost.matrix);
     ghost.matrixWorldNeedsUpdate = true;
     ghostMaterial.color.copy(aim.fits ? GHOST_FITS : GHOST_BLOCKED);
+  };
+
+  /** The bricks of a build, placed or held. */
+  const ofBuild = (build: string): Brick[] => [...bricks.values()].filter((brick) => brick.build === build);
+
+  /** How many bricks a build has left (null: not from a build). */
+  const buildSize = (build: string | undefined): number | null => (build ? ofBuild(build).length : null);
+
+  const drawBuildOutline = (): void => {
+    const of = armed ? ofBuild(armed.build).filter((brick) => !brick.holder) : [];
+    if (of.length === 0) {
+      buildOutline.visible = false;
+      return;
+    }
+    const min = [Infinity, Infinity, Infinity];
+    const max = [-Infinity, -Infinity, -Infinity];
+    for (const brick of of) {
+      const box = brickBox(atOf(brick));
+      for (let i = 0; i < 3; i++) {
+        min[i] = Math.min(min[i]!, box.min[i]!);
+        max[i] = Math.max(max[i]!, box.max[i]!);
+      }
+    }
+    buildOutline.visible = true;
+    buildOutline.position.set((min[0]! + max[0]!) / 2, (min[1]! + max[1]!) / 2, (min[2]! + max[2]!) / 2);
+    buildOutline.scale.set(max[0]! - min[0]! + 0.04, max[1]! - min[1]! + 0.04, max[2]! - min[2]! + 0.04);
   };
 
   const drawOutline = (): void => {
@@ -750,6 +807,54 @@ export function createBricks(
         placeAt(held, spot, 'dropping');
         return;
       }
+      case 'cancel-take-down': {
+        if (armed) {
+          armed = null;
+          changed = true;
+        }
+        return;
+      }
+      case 'take-down': {
+        if (!makerOnly() || !ready()) return;
+        // Asked already: this is the confirmation, wherever they point now.
+        const build = armed?.build ?? (mine() ?? (target ? bricks.get(target.id) : undefined))?.build ?? null;
+        if (!build) {
+          events.onEvent('Point at a brick of a blueprint build to take the whole build down.');
+          return;
+        }
+        const of = ofBuild(build);
+        if (!armed) {
+          armed = { build, at: performance.now() };
+          changed = true;
+          events.onEvent(`Take down all ${of.length.toLocaleString('en')} bricks of this build? Shift+X again to confirm.`);
+          return;
+        }
+        armed = null;
+        const before = of.map((brick) => ({ ...brick }));
+        // It all goes at once; back if the API says no.
+        for (const brick of of) bricks.delete(brick.id);
+        busy = 'taking-down';
+        changed = true;
+        client
+          .takeDown(build)
+          .then((gone) => {
+            if (disposed) return;
+            events.onEvent(`Took down a build: ${gone.removed.toLocaleString('en')} brick${gone.removed === 1 ? '' : 's'}`);
+            ping(gone);
+          })
+          .catch((error: unknown) => {
+            if (disposed) return;
+            for (const brick of before) bricks.set(brick.id, brick);
+            events.onEvent(error instanceof BrickRefusal ? error.message : 'Couldn’t take it down: try again.');
+          })
+          .finally(() => {
+            if (disposed) return;
+            busy = null;
+            changed = true;
+            void read();
+          });
+        return;
+      }
       case 'remove': {
         if (!makerOnly() || !ready()) return;
         const victim = mine() ?? (target ? bricks.get(target.id) ?? null : null);
@@ -788,7 +893,12 @@ export function createBricks(
       busy,
       held: held ? held.shape : null,
       aim: held ? aim : null,
-      target: held || !target ? null : { label: shapeLabel(target.shape), can: target.can },
+      target:
+        held || !target
+          ? null
+          : { label: shapeLabel(target.shape), can: target.can, build: buildSize(bricks.get(target.id)?.build) },
+      heldBuild: held ? buildSize(held.build) : null,
+      takeDown: armed ? { count: ofBuild(armed.build).length } : null,
       blueprint: blueprint
         ? { name: blueprint.name, bricks: blueprint.bricks.length, skipped: skippedText(blueprint), aim: plannedAim }
         : null,
@@ -822,9 +932,11 @@ export function createBricks(
         changed = false;
         rebuild();
       }
+      if (armed && (performance.now() - armed.at > TAKE_DOWN_ARMED_MS || ofBuild(armed.build).length === 0)) armed = null;
       look();
       drawGhost();
       drawOutline();
+      drawBuildOutline();
       drawHeld(f);
 
       const next = state();
@@ -847,6 +959,9 @@ export function createBricks(
       scene.remove(outline);
       outline.geometry.dispose();
       (outline.material as THREE.Material).dispose();
+      scene.remove(buildOutline);
+      buildOutline.geometry.dispose();
+      (buildOutline.material as THREE.Material).dispose();
       for (const entry of inHand.values()) {
         entry.group.removeFromParent();
         entry.material.dispose();

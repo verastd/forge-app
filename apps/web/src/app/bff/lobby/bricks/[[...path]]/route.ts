@@ -3,7 +3,7 @@
  * reads the cave's bricks from `GET /bff/lobby/bricks?since=<rev>` (always
  * forwarded as nobody, so the practice account sees the build too), and builds with the rest as the signed-in
  * GitHub member: `GET me` says who you are and whether you make bricks, the brick maker makes (`POST`) and takes away (`DELETE
- * {id}`), anyone picks up (`PUT {id}/pick`) and places (`PUT {id}/place`).
+ * {id}`, or a whole blueprint build: `DELETE builds/{id}`), anyone picks up (`PUT {id}/pick`) and places (`PUT {id}/place`).
  * Who is the brick maker is the API's to decide, never this file's.
  *
  * Forwarded to `${FORGE_API_URL}/api/lobby/bricks*` under
@@ -23,7 +23,7 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
 
 const BRICK = '[0-9a-f]{12}';
-const SEGMENT = new RegExp(`^(?:me|stand-in|build|pick|place|${BRICK})$`);
+const SEGMENT = new RegExp(`^(?:me|stand-in|build|builds|pick|place|${BRICK})$`);
 /** A whole blueprint: about 80 bytes a brick, up to the API's 1,000, and the JSON around them. */
 const BUILD_BODY_MAX = 192 * 1024;
 const SINCE = /^[0-9]{1,15}$/;
@@ -47,6 +47,8 @@ const ROUTES: readonly Route[] = [
   { method: 'PUT', path: new RegExp(`^${BRICK}/pick$`), identity: 'required' },
   { method: 'PUT', path: new RegExp(`^${BRICK}/place$`), identity: 'required' },
   { method: 'DELETE', path: new RegExp(`^${BRICK}$`), identity: 'required' },
+  // The brick maker takes a whole blueprint build away (the API checks who's asking).
+  { method: 'DELETE', path: new RegExp(`^builds/${BRICK}$`), identity: 'required' },
 ];
 
 interface Context {

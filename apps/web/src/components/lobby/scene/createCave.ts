@@ -515,6 +515,7 @@ export function createCave(canvas: HTMLCanvasElement, opts: CaveOptions): Cave {
           root.dataset.brickBusy = state.busy ?? '';
           root.dataset.aim = state.aim ? (state.aim.fits ? 'fits' : 'blocked') : '';
           root.dataset.brickTarget = state.target?.can ?? '';
+          root.dataset.brickTakeDown = state.takeDown ? String(state.takeDown.count) : '';
           root.dataset.brickStandIn = state.standIn ? 'on' : 'off';
           root.dataset.blueprint = state.blueprint ? 'out' : '';
           root.dataset.blueprintFits = state.blueprint?.aim ? (state.blueprint.aim.fits ? 'yes' : 'no') : '';
@@ -529,7 +530,7 @@ export function createCave(canvas: HTMLCanvasElement, opts: CaveOptions): Cave {
     if (code.startsWith('Digit')) bricks.command({ kind: 'shape', index: Number(code.slice(5)) - 1 });
     else if (code === 'KeyB') bricks.command({ kind: 'make' });
     else if (code === 'KeyC') bricks.command({ kind: 'color', step: shift ? -1 : 1 });
-    else if (code === 'KeyX') bricks.command({ kind: 'remove' });
+    else if (code === 'KeyX') bricks.command({ kind: shift ? 'take-down' : 'remove' });
     else if (code === 'KeyE') bricks.command({ kind: 'use' });
     else if (code === 'KeyR') bricks.command({ kind: 'rotate' });
     else if (code === 'KeyQ') bricks.command({ kind: 'drop' });
