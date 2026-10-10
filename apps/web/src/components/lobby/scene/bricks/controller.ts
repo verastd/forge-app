@@ -317,10 +317,10 @@ export function createBricks(
   let plannedAim: BlueprintAim | null = null;
   let planKey = '';
 
-  const aimBlueprint = (r: Ray, reach: number, candidates: readonly BrickAt[]): void => {
+  const aimBlueprint = (r: Ray, reach: number): void => {
     if (!blueprint) return;
-    // Where a 1×1 would go is where the blueprint's middle goes: on the floor, or on top of what it hits.
-    const spot = aimBrick(r, 'brick-1x1', 0, candidates, reach);
+    // A blueprint always goes on the floor, its middle where the aim meets the floor (through any bricks in the way).
+    const spot = aimBrick(r, 'brick-1x1', 0, [], reach);
     if (!spot) {
       if (planKey !== '') ghosts.hide();
       planKey = '';
@@ -329,7 +329,7 @@ export function createBricks(
       return;
     }
     const [sx, sz] = blueprint.size;
-    const corner = { x: spot.x - Math.floor(sx / 2), y: spot.y, z: spot.z - Math.floor(sz / 2) };
+    const corner = { x: spot.x - Math.floor(sx / 2), y: 0, z: spot.z - Math.floor(sz / 2) };
     const key = `${corner.x},${corner.y},${corner.z}|${blueprint.bricks.length}|${blueprint.size.join()}|${rev ?? ''}|${placed.length}`;
     if (key === planKey) return;
     planKey = key;
@@ -366,7 +366,7 @@ export function createBricks(
     aim = null;
     target = null;
     if (blueprint) {
-      if (busy === null) aimBlueprint(r, reach, candidates);
+      if (busy === null) aimBlueprint(r, reach);
       return;
     }
     if (held && busy === null) {
@@ -670,7 +670,7 @@ export function createBricks(
         if (blueprint) {
           if (!makerOnly()) return;
           if (!planned || !plannedAim) {
-            events.onEvent('Aim at the floor (or a build) to place the blueprint.');
+            events.onEvent('Aim at the floor to place the blueprint.');
             return;
           }
           if (!plannedAim.fits) {

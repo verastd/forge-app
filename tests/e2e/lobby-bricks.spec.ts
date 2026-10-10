@@ -366,6 +366,21 @@ test.describe('building with bricks', () => {
     await expect(lobbyRoot(page)).toHaveAttribute('data-blueprint', 'out');
   });
 
+  test('a blueprint with bricks in the air (their support a part we skip) still goes down on the floor and builds', async ({ page, context, baseURL }) => {
+    await signInAs(context, baseURL ?? '', { sub: '4242', login: 'lego-bot' });
+    const cave = new Cave(true);
+    await enter(page, cave);
+    // A 2×4 on the floor, a 1×6 we don't make on it, and a 2×2 on that: the 2×2 rests on nothing we build.
+    const gappy = ['0 Name: Gappy', '1 4 0 0 0 1 0 0 0 1 0 0 0 1 3001.dat', '1 15 0 -24 10 1 0 0 0 1 0 0 0 1 3009.dat', '1 1 0 -48 0 1 0 0 0 1 0 0 0 1 3003.dat'].join('\n');
+    await page.getByRole('group', { name: 'Blueprint' }).locator('input[type=file]').setInputFiles({ name: 'gappy.ldr', mimeType: 'text/plain', buffer: Buffer.from(gappy) });
+    await expect(lobbyRoot(page)).toHaveAttribute('data-blueprint-fits', 'yes');
+    await expect(note(page)).toContainText('It fits: E builds all 2 bricks');
+    await page.keyboard.press('KeyE');
+    await expect(toast(page, 'Built Gappy: 2 bricks')).toBeVisible();
+    const bricks = [...cave.bricks.values()];
+    expect(bricks.map((b) => b.y).sort((x, y) => x - y)).toEqual([0, 6]);
+  });
+
   test('only the Lego bot gets blueprints', async ({ page, context, baseURL }) => {
     await signInAs(context, baseURL ?? '', { sub: '4242', login: 'visitor' });
     await enter(page, new Cave(false));

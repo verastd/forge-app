@@ -144,10 +144,14 @@ describe('blueprintProblems', () => {
     expect(blueprintProblems(bridge, [])).toEqual([null, null, null]);
   });
 
-  it('refuses overlaps (its own and the cave’s), islands in the air, and bad bricks', () => {
+  it('needs no support: a brick whose support was a part we skipped stays where the model puts it', () => {
+    expect(blueprintProblems([at('brick-2x2', 0, 6, 0), at('brick-1x1', 0, 9, 0)], [])).toEqual([null, null]);
+    expect(blueprintProblems([at('brick-2x4', 0, 0, 0), at('brick-2x2', 10, 3, 10)], [])).toEqual([null, null]);
+  });
+
+  it('refuses overlaps (its own and the cave’s), and bad bricks', () => {
     expect(blueprintProblems([at('brick-2x2', 0, 0, 0), at('brick-2x2', 1, 0, 1)], [])).toEqual(['overlap', 'overlap']);
     expect(blueprintProblems([at('brick-1x1', 0, 0, 0)], [at('brick-2x2', 0, 0, 0)])).toEqual(['overlap']);
-    expect(blueprintProblems([at('brick-2x2', 0, 6, 0), at('brick-1x1', 0, 9, 0)], [])).toEqual(['floating', 'floating']);
     expect(blueprintProblems([at('nope', 0, 0, 0), at('brick-1x1', 500, 0, 0), at('brick-1x1', 0, -3, 0)], [])).toEqual([
       'shape',
       'outside',

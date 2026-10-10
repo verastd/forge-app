@@ -509,12 +509,13 @@ def test_a_build_fits_whole_or_not_at_all(client: TestClient, maker: dict[str, s
     clash = build(client, maker, *TOWER)
     assert clash.status_code == 409
     assert clash.json() == {"error": "wont_fit", "problem": "overlap", "index": 0}
-    island = build(client, maker, piece("brick-2x2", 0, 6, 0), piece("brick-1x1", 0, 9, 0))
-    assert island.json() == {"error": "wont_fit", "problem": "floating", "index": 0}
     far = build(client, maker, piece("brick-1x1", 200, 0, 0))
     assert far.json()["problem"] == "outside"
     # Nothing of a refused build was built.
     assert len(everything(client)["bricks"]) == 1
+    # A blueprint needs no support: bricks in the air (their support a part we skip) are built.
+    island = build(client, maker, piece("brick-2x2", 0, 6, 0), piece("brick-1x1", 0, 9, 0))
+    assert island.status_code == 200 and island.json()["built"] == 2
     # Resting on a placed brick is fine.
     assert build(client, maker, piece("brick-2x2", 10, 3, 10)).status_code == 200
 
@@ -566,7 +567,7 @@ def test_build_rules_mirror_the_lobby() -> None:
     ) == ["overlap"]
     assert rules.blueprint_problems(
         [at("brick-2x2", 0, 6, 0, 0), at("brick-1x1", 0, 9, 0, 0)], []
-    ) == ["floating", "floating"]
+    ) == [None, None]
     assert rules.blueprint_problems(
         [at("nope", 0, 0, 0, 0), at("brick-1x1", 500, 0, 0, 0), at("brick-1x1", 0, -3, 0, 0)], []
     ) == ["shape", "outside", "outside"]
