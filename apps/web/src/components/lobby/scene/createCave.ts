@@ -516,6 +516,8 @@ export function createCave(canvas: HTMLCanvasElement, opts: CaveOptions): Cave {
           root.dataset.aim = state.aim ? (state.aim.fits ? 'fits' : 'blocked') : '';
           root.dataset.brickTarget = state.target?.can ?? '';
           root.dataset.brickStandIn = state.standIn ? 'on' : 'off';
+          root.dataset.blueprint = state.blueprint ? 'out' : '';
+          root.dataset.blueprintFits = state.blueprint?.aim ? (state.blueprint.aim.fits ? 'yes' : 'no') : '';
           opts.onBricks?.(state);
         },
         onEvent: (text) => opts.onPlayEvent?.(text),

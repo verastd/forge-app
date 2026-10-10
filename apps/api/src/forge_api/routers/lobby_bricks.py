@@ -6,17 +6,20 @@
 - Signed in (`Member`): `GET /api/lobby/bricks/me` (who you are, and whether you make
   bricks), `PUT /api/lobby/bricks/me/stand-in` (admins only: "Be the Lego bot", for
   testing), `PUT /api/lobby/bricks/{id}/pick` and `.../{id}/place`.
-- The brick maker only (checked on every call): `POST /api/lobby/bricks` (make one) and
+- The brick maker only (checked on every call): `POST /api/lobby/bricks` (make one),
+  `POST /api/lobby/bricks/build` (a blueprint, all at once) and
   `DELETE /api/lobby/bricks/{id}` (take one away).
 """
 
 import re
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 
 from forge_api.models import (
     BRICK_ID,
+    BrickBuild,
+    BrickBuilt,
     BrickChange,
     BrickList,
     BrickMake,
@@ -24,9 +27,10 @@ from forge_api.models import (
     BrickPlace,
     BrickStandIn,
 )
-from forge_api.routers.members import Db, Member, Now, body_doc, json_body
+from forge_api.routers.members import Db, Member, Now, body_doc, json_body, read_capped
 from forge_api.services import flags as flags_service
 from forge_api.services import lobby_bricks as bricks_service
+from forge_api.services import proposals as proposals_service
 from forge_api.services.errors import ApiError
 from forge_api.services.identity import Identity
 
@@ -62,6 +66,29 @@ def list_bricks(db: Db, now: Now, since: Annotated[int | None, Query(ge=0)] = No
 @router.get("/me", response_model=BrickMe)
 def my_bricks(user: Member, db: Db) -> BrickMe:
     return bricks_service.me(db, user)
+
+
+#: Room for a whole blueprint: about 80 bytes a brick, and the JSON around them.
+BUILD_BODY_MAX = 192 * 1024
+
+
+async def _build_body(request: Request) -> BrickBuild:
+    return proposals_service.parse_request(await read_capped(request, BUILD_BODY_MAX), BrickBuild)
+
+
+@router.post(
+    "/build",
+    response_model=BrickBuilt,
+    openapi_extra=body_doc(BrickBuild),
+)
+def build_bricks(
+    user: Member,
+    db: Db,
+    now: Now,
+    body: Annotated[BrickBuild, Depends(_build_body)],
+) -> BrickBuilt:
+    """The brick maker builds a blueprint where it's placed, all at once."""
+    return bricks_service.build(db, user, body, now)
 
 
 @router.put("/me/stand-in", response_model=BrickMe, openapi_extra=body_doc(BrickStandIn))

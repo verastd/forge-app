@@ -20,8 +20,8 @@
  * API answers).
  */
 
-import { BRICK, BRICK_COLORS, BRICK_SHAPES } from '@forge/lobby';
-import { useId } from 'react';
+import { BLUEPRINT_MAX, BLUEPRINT_PARTS, BRICK, BRICK_COLORS, BRICK_SHAPES } from '@forge/lobby';
+import { useId, useRef } from 'react';
 
 import styles from './Lobby.module.css';
 import { Spinner } from './icons';
@@ -40,6 +40,7 @@ export const INITIAL_BRICKS: BrickState = {
   held: null,
   aim: null,
   target: null,
+  blueprint: null,
 };
 
 export interface BuildControlsProps {
@@ -65,6 +66,10 @@ function note(state: BrickState): string {
       return 'Removing it…';
     case 'switching':
       return 'Switching…';
+    case 'reading':
+      return 'Reading the blueprint…';
+    case 'building':
+      return `Building ${state.blueprint?.name ?? 'it'}: ${state.blueprint?.bricks.toLocaleString('en') ?? ''} bricks…`;
     case null:
       break;
   }
@@ -79,6 +84,12 @@ function note(state: BrickState): string {
       return 'Building isn’t available right now.';
     case 'member':
       break;
+  }
+  if (state.blueprint) {
+    const { aim } = state.blueprint;
+    if (!aim) return 'Aim at the floor (or a build) to place the blueprint.';
+    if (aim.fits) return `It fits: E builds all ${state.blueprint.bricks.toLocaleString('en')} bricks, R turns it, Q puts it away.`;
+    return `${aim.blocked.toLocaleString('en')} brick${aim.blocked === 1 ? '' : 's'} won’t fit here: ${aim.why ?? ''}`;
   }
   if (state.held) {
     if (!state.aim) return `Holding a ${shapeLabel(state.held)}: aim at the floor or a brick.`;
@@ -95,9 +106,11 @@ function note(state: BrickState): string {
 
 export function BuildControls({ state, onCommand }: BuildControlsProps) {
   const noteId = useId();
+  const fileRef = useRef<HTMLInputElement>(null);
   const ready = state.sync === 'ready' && state.access === 'member';
   const waiting = state.busy !== null;
   const loading = state.sync === 'loading' || state.access === 'checking' || waiting;
+  const blueprintOut = state.blueprint !== null;
   const holding = state.held !== null;
   const canUse = holding ? state.aim?.fits === true : state.target?.can === 'pick';
   const useLabel = state.busy === 'picking' ? 'Picking up…' : state.busy === 'placing' ? 'Placing…' : holding ? 'Place' : 'Pick up';
@@ -153,7 +166,7 @@ export function BuildControls({ state, onCommand }: BuildControlsProps) {
           </label>
           <button
             type="button"
-            disabled={!ready || waiting || holding}
+            disabled={!ready || waiting || holding || blueprintOut}
             aria-busy={state.busy === 'making' || undefined}
             aria-keyshortcuts="B"
             onClick={() => onCommand({ kind: 'make' })}
@@ -164,10 +177,62 @@ export function BuildControls({ state, onCommand }: BuildControlsProps) {
           </button>
         </div>
       )}
+      {state.maker && (
+        <div className={styles.view} role="group" aria-label="Blueprint" data-blueprint={state.blueprint ? 'out' : 'none'}>
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".ldr,.mpd,.ldraw,.l3b"
+            className={styles.srOnly}
+            tabIndex={-1}
+            aria-hidden="true"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              event.target.value = '';
+              if (file) onCommand({ kind: 'blueprint', file });
+            }}
+          />
+          {!state.blueprint ? (
+            <button
+              type="button"
+              disabled={!ready || waiting || holding}
+              aria-busy={state.busy === 'reading' || undefined}
+              title={`An LDraw file (.ldr or .mpd, from BrickLink Studio, LeoCAD or Mecabricks), up to ${BLUEPRINT_MAX.toLocaleString('en')} bricks of: ${BLUEPRINT_PARTS.map((p) => `${p.label} (${p.part})`).join(', ')}`}
+              onClick={() => fileRef.current?.click()}
+            >
+              {state.busy === 'reading' && <Spinner />}
+              {state.busy === 'reading' ? 'Reading…' : 'Load blueprint…'}
+            </button>
+          ) : (
+            <>
+              <button
+                type="button"
+                disabled={!ready || waiting || state.blueprint.aim?.fits !== true}
+                aria-busy={state.busy === 'building' || undefined}
+                aria-keyshortcuts="E"
+                onClick={() => onCommand({ kind: 'use' })}
+              >
+                {state.busy === 'building' && <Spinner />}
+                {state.busy === 'building' ? 'Building…' : `Build ${state.blueprint.name}`}
+                <kbd className={styles.key}>E</kbd>
+              </button>
+              <button type="button" disabled={!ready || waiting} aria-keyshortcuts="R" onClick={() => onCommand({ kind: 'rotate' })}>
+                Turn
+                <kbd className={styles.key}>R</kbd>
+              </button>
+              <button type="button" disabled={waiting} aria-keyshortcuts="Q" onClick={() => onCommand({ kind: 'put-away' })}>
+                Put away
+                <kbd className={styles.key}>Q</kbd>
+              </button>
+            </>
+          )}
+        </div>
+      )}
+      {state.blueprint?.skipped && <p className={styles.viewNote}>{state.blueprint.skipped}</p>}
       <div className={styles.view} role="group" aria-label="Build" aria-describedby={noteId}>
         <button
           type="button"
-          disabled={!ready || waiting || !canUse}
+          disabled={!ready || waiting || blueprintOut || !canUse}
           aria-busy={state.busy === 'picking' || state.busy === 'placing' || undefined}
           aria-keyshortcuts="E"
           onClick={() => onCommand({ kind: 'use' })}
@@ -176,13 +241,13 @@ export function BuildControls({ state, onCommand }: BuildControlsProps) {
           {useLabel}
           <kbd className={styles.key}>E</kbd>
         </button>
-        <button type="button" disabled={!ready || waiting || !holding} aria-keyshortcuts="R" onClick={() => onCommand({ kind: 'rotate' })}>
+        <button type="button" disabled={!ready || waiting || blueprintOut || !holding} aria-keyshortcuts="R" onClick={() => onCommand({ kind: 'rotate' })}>
           Turn
           <kbd className={styles.key}>R</kbd>
         </button>
         <button
           type="button"
-          disabled={!ready || waiting || !holding}
+          disabled={!ready || waiting || blueprintOut || !holding}
           aria-busy={state.busy === 'dropping' || undefined}
           aria-keyshortcuts="Q"
           onClick={() => onCommand({ kind: 'drop' })}

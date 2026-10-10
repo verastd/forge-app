@@ -12,6 +12,7 @@ import * as cape from './cape.js';
 import * as chest from './chest.js';
 import * as flyer from './flyer.js';
 import * as bricks from './bricks.js';
+import * as blueprint from './blueprint.js';
 import * as headFit from './headFit.js';
 import * as lobby from './index.js';
 import type {
@@ -106,7 +107,7 @@ const RETIRED = [
 ];
 
 /** Everything the re-exported modules export, in one list. */
-const REEXPORTED = [presence, attenuation, acoustics, voice, avatar, avatarMotion, collide, chase, headFit, bricks, flyer, cape, chest, actions, play, behaviors].flatMap((module) => Object.keys(module));
+const REEXPORTED = [presence, attenuation, acoustics, voice, avatar, avatarMotion, collide, chase, headFit, bricks, blueprint, flyer, cape, chest, actions, play, behaviors].flatMap((module) => Object.keys(module));
 
 describe('@forge/lobby public API', () => {
   it('exports its own API plus everything presence.ts and the voice modules export, with no name taken twice', () => {

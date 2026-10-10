@@ -1641,6 +1641,38 @@ export const BrickPlaceSchema = z.object({
 });
 export type BrickPlace = z.infer<typeof BrickPlaceSchema>;
 
+/** The most bricks one blueprint builds (@forge/lobby's BLUEPRINT_MAX). */
+export const BRICK_BUILD_MAX = 1000;
+export const BRICK_BUILD_NAME_MAX = 60;
+
+/** A brick of a build: where it goes, and its colour. */
+export const BrickBuildPieceSchema = z.object({
+  shape: z.enum(BRICK_SHAPE_IDS),
+  color: z.enum(BRICK_COLOR_IDS),
+  x: brickCoord,
+  y: brickCoord,
+  z: brickCoord,
+  rot: z.number().int().min(0).max(3),
+});
+export type BrickBuildPiece = z.infer<typeof BrickBuildPieceSchema>;
+
+/**
+ * `POST /api/lobby/bricks/build` (the brick maker): a blueprint built where
+ * it's placed, all at once, every brick new. All of it fits or none is built.
+ */
+export const BrickBuildSchema = z.object({
+  name: z.string().min(1).max(BRICK_BUILD_NAME_MAX),
+  bricks: z.array(BrickBuildPieceSchema).min(1).max(BRICK_BUILD_MAX),
+});
+export type BrickBuild = z.infer<typeof BrickBuildSchema>;
+
+/** A build's answer: how many bricks it made, and the revision. */
+export const BrickBuiltSchema = z.object({
+  rev: z.number().int().min(0),
+  built: z.number().int().min(1),
+});
+export type BrickBuilt = z.infer<typeof BrickBuiltSchema>;
+
 // ---------------------------------------------------------------------------
 // The rail registry and the brief, mirrored in apps/api (services/rails.py,
 // services/brief.py) and held to tests/fixtures/{rails,brief}-golden.json.

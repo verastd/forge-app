@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { expect, test } from '@playwright/test';
 import type { Page, Route } from '@playwright/test';
 
@@ -33,6 +36,7 @@ interface Brick {
 }
 
 const ME = 'gh:4242';
+const TOWER = readFileSync(join(__dirname, 'fixtures', 'tower.ldr'));
 const STAMP = '2026-10-10T00:00:00+00:00';
 const brick = (id: string, x: number, y: number, z: number, shape = 'brick-2x4'): Brick => ({
   id,
@@ -57,6 +61,8 @@ class Cave {
   refuse: { status: number; body: unknown } | null = null;
   listStatus = 200;
   made = 0;
+  /** The blueprints built, by name. */
+  builds: string[] = [];
 
   /** An admin's "Be the Lego bot", for testing (`admin` says whether they may). */
   admin = false;
@@ -103,6 +109,16 @@ class Cave {
       return reply(200, me());
     }
     this.rev += 1;
+    if (method === 'POST' && path === 'build') {
+      const body = JSON.parse(request.postData() ?? '{}') as { name: string; bricks: Omit<Brick, 'id' | 'updatedAt'>[] };
+      this.builds.push(body.name);
+      for (const piece of body.bricks) {
+        this.made += 1;
+        const id = (0xb00000000000 + this.made).toString(16);
+        this.bricks.set(id, { ...piece, id, updatedAt: STAMP });
+      }
+      return reply(200, { rev: this.rev, built: body.bricks.length });
+    }
     if (method === 'POST' && path === '') {
       const body = JSON.parse(request.postData() ?? '{}') as { shape: string; color: string };
       this.made += 1;
@@ -292,6 +308,71 @@ test.describe('building with bricks', () => {
     await expect(page.getByRole('group', { name: 'Testing' })).toHaveCount(0);
   });
 
+  test('the Lego bot loads a blueprint, sees it fit, builds it all at once, and puts it away', async ({ page, context, baseURL }) => {
+    await signInAs(context, baseURL ?? '', { sub: '4242', login: 'lego-bot' });
+    const cave = new Cave(true);
+    await enter(page, cave);
+    const group = page.getByRole('group', { name: 'Blueprint' });
+    await expect(group.getByRole('button', { name: 'Load blueprint…' })).toBeEnabled();
+    await group.locator('input[type=file]').setInputFiles({ name: 'tower.ldr', mimeType: 'text/plain', buffer: TOWER });
+    await expect(lobbyRoot(page)).toHaveAttribute('data-blueprint', 'out');
+    await expect(toast(page, 'Tower: 4 bricks · E builds it where the ghost is')).toBeVisible();
+    await expect(page.locator('[data-control="build"]').getByText('1 part skipped: 1 not one of our shapes.')).toBeVisible();
+    await expect(lobbyRoot(page)).toHaveAttribute('data-blueprint-fits', 'yes');
+    await expect(note(page)).toContainText('It fits: E builds all 4 bricks');
+    // While it's out, the hands wait, and B says why.
+    await expect(build(page).getByRole('button', { name: /Pick up/ })).toBeDisabled();
+    await page.keyboard.press('KeyB');
+    await expect(toast(page, 'Put the blueprint away first')).toBeVisible();
+
+    // R turns it; it still fits.
+    await page.keyboard.press('KeyR');
+    await expect(lobbyRoot(page)).toHaveAttribute('data-blueprint-fits', 'yes');
+
+    cave.hold = true;
+    await page.keyboard.press('KeyE');
+    const building = group.getByRole('button', { name: /Building…/ });
+    await expect(building).toHaveAttribute('aria-busy', 'true');
+    await expect(building).toBeDisabled();
+    await expect(note(page)).toContainText('Building Tower: 4 bricks…');
+    cave.release();
+    await expect(toast(page, 'Built Tower: 4 bricks')).toBeVisible();
+    await expect(lobbyRoot(page)).toHaveAttribute('data-bricks', '4');
+    expect(cave.builds).toEqual(['Tower']);
+    // Built, the same spot is taken: the ghost says so.
+    await expect(lobbyRoot(page)).toHaveAttribute('data-blueprint-fits', 'no');
+    await expect(note(page)).toContainText('won’t fit here: It would overlap a brick.');
+
+    await page.keyboard.press('KeyQ');
+    await expect(toast(page, 'Blueprint put away')).toBeVisible();
+    await expect(lobbyRoot(page)).toHaveAttribute('data-blueprint', '');
+  });
+
+  test('a file that isn’t a blueprint, and a build the API refuses, each say why', async ({ page, context, baseURL }) => {
+    await signInAs(context, baseURL ?? '', { sub: '4242', login: 'lego-bot' });
+    const cave = new Cave(true);
+    await enter(page, cave);
+    const input = page.getByRole('group', { name: 'Blueprint' }).locator('input[type=file]');
+    await input.setInputFiles({ name: 'notes.ldr', mimeType: 'text/plain', buffer: Buffer.from('0 just some notes\n') });
+    await expect(toast(page, 'That file has no LDraw parts in it.')).toBeVisible();
+    await expect(lobbyRoot(page)).toHaveAttribute('data-blueprint', '');
+
+    await input.setInputFiles({ name: 'tower.ldr', mimeType: 'text/plain', buffer: TOWER });
+    await expect(lobbyRoot(page)).toHaveAttribute('data-blueprint-fits', 'yes');
+    cave.refuse = { status: 409, body: { error: 'brick_limit', limit: 5000, room: 2 } };
+    await page.keyboard.press('KeyE');
+    await expect(toast(page, 'The cave is full')).toBeVisible();
+    await expect(lobbyRoot(page)).toHaveAttribute('data-bricks', '0');
+    await expect(lobbyRoot(page)).toHaveAttribute('data-blueprint', 'out');
+  });
+
+  test('only the Lego bot gets blueprints', async ({ page, context, baseURL }) => {
+    await signInAs(context, baseURL ?? '', { sub: '4242', login: 'visitor' });
+    await enter(page, new Cave(false));
+    await expect(lobbyRoot(page)).toHaveAttribute('data-brick-access', 'member');
+    await expect(page.getByRole('group', { name: 'Blueprint' })).toHaveCount(0);
+  });
+
   test('the build failing to load says so, and Try again loads it', async ({ page }) => {
     const cave = new Cave(false, [brick('aaaaaaaaaaaa', 0, 0, 0)]);
     cave.listStatus = 502;
@@ -342,7 +423,9 @@ test.describe('the bricks BFF, against a stand-in API', () => {
             : json(200, { rev: 4, brick: { ...brick('dddddddddddd', 0, 0, 0), holder: 'gh:4242' } })
           : request.path === '/api/lobby/bricks/me'
             ? json(200, { memberId: 'gh:4242', maker: true, canStandIn: false, standIn: false })
-            : request.path === '/api/lobby/bricks/me/stand-in'
+            : request.path === '/api/lobby/bricks/build'
+              ? json(200, { rev: 9, built: 900 })
+              : request.path === '/api/lobby/bricks/me/stand-in'
               ? json(200, { memberId: 'gh:4242', maker: true, canStandIn: true, standIn: true })
             : undefined,
       async (seen) => {
@@ -373,6 +456,11 @@ test.describe('the bricks BFF, against a stand-in API', () => {
           canStandIn: false,
           standIn: false,
         });
+        const blueprint = { name: 'Wall', bricks: Array.from({ length: 900 }, (_, i) => ({ shape: 'brick-1x1', color: 'red', x: i % 30, y: 0, z: Math.floor(i / 30), rot: 0 })) };
+        const built = await context.request.post('/bff/lobby/bricks/build', { data: blueprint, headers: { origin: base } });
+        expect(built.status()).toBe(200);
+        expect(seen.at(-1)?.path).toBe('/api/lobby/bricks/build');
+        expect(JSON.parse(seen.at(-1)?.body ?? '{}').bricks).toHaveLength(900);
         const standIn = await context.request.put('/bff/lobby/bricks/me/stand-in', { data: { on: true }, headers: { origin: base } });
         expect(standIn.status()).toBe(200);
         expect(seen.at(-1)?.method).toBe('PUT');

@@ -195,3 +195,71 @@ export function createLoneBrick(shapeId: string, material: THREE.Material, centr
   group.add(mesh);
   return group;
 }
+
+/** A blueprint's ghost: every brick see-through where it would go, green where it fits and red where it doesn't. */
+export interface GhostLayer {
+  set(bricks: readonly (BrickAt & { fits: boolean })[]): void;
+  hide(): void;
+  dispose(): void;
+}
+
+const GHOST_FITS = new THREE.Color('#46e08a');
+const GHOST_BLOCKED = new THREE.Color('#ff5d5d');
+
+export function createGhostLayer(scene: THREE.Scene): GhostLayer {
+  const material = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.38, depthWrite: false });
+  const meshes = new Map<string, THREE.InstancedMesh>();
+  const matrix = new THREE.Matrix4();
+  const meshFor = (shape: BrickShape, count: number): THREE.InstancedMesh => {
+    let mesh = meshes.get(shape.id);
+    if (!mesh || mesh.instanceMatrix.count < count) {
+      let capacity = 16;
+      while (capacity < count) capacity *= 2;
+      if (mesh) {
+        scene.remove(mesh);
+        mesh.dispose();
+      }
+      mesh = new THREE.InstancedMesh(brickGeometry(shape), material, capacity);
+      mesh.name = `blueprint:${shape.id}`;
+      mesh.frustumCulled = false;
+      mesh.renderOrder = 1;
+      meshes.set(shape.id, mesh);
+      scene.add(mesh);
+    }
+    return mesh;
+  };
+  const hide = (): void => {
+    for (const mesh of meshes.values()) mesh.count = 0;
+  };
+  return {
+    set(bricks) {
+      const byShape = new Map<string, (BrickAt & { fits: boolean })[]>();
+      for (const brick of bricks) {
+        const list = byShape.get(brick.shape);
+        if (list) list.push(brick);
+        else byShape.set(brick.shape, [brick]);
+      }
+      for (const shape of BRICK_SHAPES) {
+        const list = byShape.get(shape.id) ?? [];
+        if (list.length === 0 && !meshes.has(shape.id)) continue;
+        const mesh = meshFor(shape, list.length);
+        list.forEach((brick, index) => {
+          mesh.setMatrixAt(index, brickMatrix(brick, matrix));
+          mesh.setColorAt(index, brick.fits ? GHOST_FITS : GHOST_BLOCKED);
+        });
+        mesh.count = list.length;
+        mesh.instanceMatrix.needsUpdate = true;
+        if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+      }
+    },
+    hide,
+    dispose() {
+      for (const mesh of meshes.values()) {
+        scene.remove(mesh);
+        mesh.dispose();
+      }
+      meshes.clear();
+      material.dispose();
+    },
+  };
+}

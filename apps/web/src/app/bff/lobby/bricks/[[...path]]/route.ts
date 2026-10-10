@@ -23,13 +23,16 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
 
 const BRICK = '[0-9a-f]{12}';
-const SEGMENT = new RegExp(`^(?:me|stand-in|pick|place|${BRICK})$`);
+const SEGMENT = new RegExp(`^(?:me|stand-in|build|pick|place|${BRICK})$`);
+/** A whole blueprint: about 80 bytes a brick, up to the API's 1,000, and the JSON around them. */
+const BUILD_BODY_MAX = 192 * 1024;
 const SINCE = /^[0-9]{1,15}$/;
 
 interface Route {
   method: ForwardSpec['method'];
   path: RegExp;
   identity: ForwardSpec['identity'];
+  maxBodyBytes?: number;
 }
 
 const ROUTES: readonly Route[] = [
@@ -39,6 +42,8 @@ const ROUTES: readonly Route[] = [
   // Admins (the API checks): be the brick maker for testing, or stop.
   { method: 'PUT', path: /^me\/stand-in$/, identity: 'required' },
   { method: 'POST', path: /^$/, identity: 'required' },
+  // The brick maker builds a blueprint, all at once (the API checks who's asking).
+  { method: 'POST', path: /^build$/, identity: 'required', maxBodyBytes: BUILD_BODY_MAX },
   { method: 'PUT', path: new RegExp(`^${BRICK}/pick$`), identity: 'required' },
   { method: 'PUT', path: new RegExp(`^${BRICK}/place$`), identity: 'required' },
   { method: 'DELETE', path: new RegExp(`^${BRICK}$`), identity: 'required' },
@@ -79,5 +84,10 @@ async function handle(request: NextRequest, { params }: Context, method: Forward
       upstreamPath += `?since=${since}`;
     }
   }
-  return forward(request, { method, upstreamPath, identity: route.identity });
+  return forward(request, {
+    method,
+    upstreamPath,
+    identity: route.identity,
+    ...(route.maxBodyBytes === undefined ? {} : { maxBodyBytes: route.maxBodyBytes }),
+  });
 }

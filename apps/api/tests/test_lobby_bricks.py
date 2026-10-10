@@ -468,3 +468,108 @@ def test_no_longer_an_admin_no_longer_the_lego_bot(
         "standIn": False,
     }
     assert make(client, admin_headers).json() == {"error": "not_the_maker"}
+
+
+def piece(shape: str, x: int, y: int, z: int, rot: int = 0, color: str = "blue") -> dict[str, Any]:
+    return {"shape": shape, "color": color, "x": x, "y": y, "z": z, "rot": rot}
+
+
+def build(client: TestClient, headers: dict[str, str], *pieces: dict[str, Any]) -> Any:
+    return client.post(
+        "/api/lobby/bricks/build", headers=headers, json={"name": "Tower", "bricks": list(pieces)}
+    )
+
+
+TOWER = (
+    piece("brick-2x4", 10, 0, 10),
+    piece("brick-2x2", 11, 3, 10),
+    piece("plate-2x2", 11, 6, 10),
+)
+
+
+def test_the_maker_builds_a_blueprint_all_at_once(
+    client: TestClient, maker: dict[str, str]
+) -> None:
+    rev = everything(client)["rev"]
+    built = build(client, maker, *TOWER)
+    assert built.status_code == 200
+    assert built.json() == {"rev": rev + 1, "built": 3}
+    listed = everything(client)
+    assert len(listed["bricks"]) == 3 and all("holder" not in b for b in listed["bricks"])
+    assert {b["shape"] for b in listed["bricks"]} == {"brick-2x4", "brick-2x2", "plate-2x2"}
+    # One delta brings every brick of it.
+    assert len(client.get(f"/api/lobby/bricks?since={rev}").json()["bricks"]) == 3
+    # Built on: the build's bricks are frozen like any build's.
+    top = next(b for b in listed["bricks"] if b["shape"] == "plate-2x2")
+    assert pick(client, maker, top["id"]).status_code == 200
+
+
+def test_a_build_fits_whole_or_not_at_all(client: TestClient, maker: dict[str, str]) -> None:
+    built(client, maker, x=10, z=10)
+    clash = build(client, maker, *TOWER)
+    assert clash.status_code == 409
+    assert clash.json() == {"error": "wont_fit", "problem": "overlap", "index": 0}
+    island = build(client, maker, piece("brick-2x2", 0, 6, 0), piece("brick-1x1", 0, 9, 0))
+    assert island.json() == {"error": "wont_fit", "problem": "floating", "index": 0}
+    far = build(client, maker, piece("brick-1x1", 200, 0, 0))
+    assert far.json()["problem"] == "outside"
+    # Nothing of a refused build was built.
+    assert len(everything(client)["bricks"]) == 1
+    # Resting on a placed brick is fine.
+    assert build(client, maker, piece("brick-2x2", 10, 3, 10)).status_code == 200
+
+
+def test_only_the_maker_builds_and_within_the_cap(
+    client: TestClient,
+    maker: dict[str, str],
+    visitor: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert build(client, visitor, *TOWER).json() == {"error": "not_the_maker"}
+    monkeypatch.setattr(rules, "LIMIT", 2)
+    full = build(client, maker, *TOWER)
+    assert full.status_code == 409
+    assert full.json() == {"error": "brick_limit", "limit": 2, "room": 2}
+
+
+def test_a_build_is_checked_before_it_is_read(client: TestClient, maker: dict[str, str]) -> None:
+    empty = client.post("/api/lobby/bricks/build", headers=maker, json={"name": "x", "bricks": []})
+    assert empty.status_code in (400, 422)
+    many = [piece("brick-1x1", i % 40, 0, i // 40) for i in range(1001)]
+    assert build(client, maker, *many).status_code in (400, 422)
+    odd = build(client, maker, {**piece("brick-1x1", 0, 0, 0), "color": "purple"})
+    assert odd.status_code in (400, 422)
+    huge = client.post(
+        "/api/lobby/bricks/build",
+        headers={**maker, "content-type": "application/json"},
+        content=b'{"name":"x","bricks":[' + b" " * (200 * 1024) + b"]}",
+    )
+    assert huge.status_code == 413
+
+
+def test_build_rules_mirror_the_lobby() -> None:
+    """The same answers as @forge/lobby's blueprint.test.ts `blueprintProblems`."""
+    at = rules.At
+    assert rules.blueprint_problems(
+        [at("brick-2x4", 0, 0, 0, 0), at("brick-2x2", 1, 3, 0, 0)], []
+    ) == [
+        None,
+        None,
+    ]
+    bridge = [at("brick-1x1", 0, 0, 0, 0), at("brick-1x4", 0, 3, 0, 0), at("plate-1x2", 2, 2, 0, 0)]
+    assert rules.blueprint_problems(bridge, []) == [None, None, None]
+    assert rules.blueprint_problems(
+        [at("brick-2x2", 0, 0, 0, 0), at("brick-2x2", 1, 0, 1, 0)], []
+    ) == ["overlap", "overlap"]
+    assert rules.blueprint_problems(
+        [at("brick-1x1", 0, 0, 0, 0)], [at("brick-2x2", 0, 0, 0, 0)]
+    ) == ["overlap"]
+    assert rules.blueprint_problems(
+        [at("brick-2x2", 0, 6, 0, 0), at("brick-1x1", 0, 9, 0, 0)], []
+    ) == ["floating", "floating"]
+    assert rules.blueprint_problems(
+        [at("nope", 0, 0, 0, 0), at("brick-1x1", 500, 0, 0, 0), at("brick-1x1", 0, -3, 0, 0)], []
+    ) == ["shape", "outside", "outside"]
+    assert rules.blueprint_problems([at("brick-1x1", 0, 0, 0, 7)], []) == ["shape"]
+    stacked = [at("brick-2x2", 0, 3, 0, 0), at("brick-1x1", 0, 6, 0, 0)]
+    assert rules.blueprint_problems(stacked, [at("brick-2x4", 0, 0, 0, 0)]) == [None, None]

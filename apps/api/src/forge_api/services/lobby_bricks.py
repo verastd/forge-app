@@ -21,7 +21,16 @@ import secrets
 from datetime import datetime, timedelta
 from typing import Any, Final
 
-from forge_api.models import Brick, BrickChange, BrickList, BrickMake, BrickMe, BrickPlace
+from forge_api.models import (
+    Brick,
+    BrickBuild,
+    BrickBuilt,
+    BrickChange,
+    BrickList,
+    BrickMake,
+    BrickMe,
+    BrickPlace,
+)
 from forge_api.services import avatars as avatars_service
 from forge_api.services import brick_rules as rules
 from forge_api.services import members as members_service
@@ -279,6 +288,37 @@ def make(db: StateDB, user: Identity, body: BrickMake, now: datetime) -> BrickCh
             (brick_id, body.shape, body.color, member_id, stamp, rev, stamp),
         )
         return _change(db, rev, brick_id)
+
+
+def build(db: StateDB, user: Identity, body: BrickBuild, now: datetime) -> BrickBuilt:
+    """A blueprint built where it's placed, every brick new and placed, all at once: all of
+    it fits or none of it is built. 403 not_the_maker; 409 brick_limit (with the room
+    left), wont_fit (the first brick that doesn't, and why)."""
+    with db.transaction():
+        _lapse(db, now)
+        _require_maker(db, user)
+        count = db.query_one("SELECT COUNT(*) AS n FROM lobby_bricks WHERE gone = 0")
+        room = rules.LIMIT - (count["n"] if count is not None else 0)
+        if len(body.bricks) > room:
+            raise ApiError(
+                409, {"error": "brick_limit", "limit": rules.LIMIT, "room": max(0, room)}
+            )
+        pieces = [rules.At(p.shape, p.x, p.y, p.z, p.rot) for p in body.bricks]
+        problems = rules.blueprint_problems(pieces, _placed(db))
+        for index, problem in enumerate(problems):
+            if problem is not None:
+                raise ApiError(409, {"error": "wont_fit", "problem": problem, "index": index})
+        rev = _bump(db)
+        stamp = members_service.to_db(now)
+        db.executemany(
+            "INSERT INTO lobby_bricks (id, shape, color, x, y, z, rot, holder, held_at, "
+            "has_home, gone, rev, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, 1, 0, ?, ?)",
+            [
+                (secrets.token_hex(6), p.shape, p.color, p.x, p.y, p.z, p.rot, rev, stamp)
+                for p in body.bricks
+            ],
+        )
+        return BrickBuilt(rev=rev, built=len(body.bricks))
 
 
 def pick(db: StateDB, user: Identity, brick_id: str, now: datetime) -> BrickChange:
