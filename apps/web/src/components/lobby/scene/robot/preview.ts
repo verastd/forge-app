@@ -39,7 +39,12 @@ export interface RobotPreview {
   /** The whole robot, close on its head (fitting a head), or from behind (fitting something worn on the back). */
   setFraming(framing: 'robot' | 'head' | 'back'): void;
   /** While set, a click on its head (or what it wears, or the model on its back) is reported (null: missed it). */
-  setPicking(onPick: ((pick: HeadPick | null) => void) | null, target?: 'head' | 'accessory' | 'back'): void;
+  /** `faceFront`: turn the robot to face the camera while picking (a mouth is marked straight on). */
+  setPicking(onPick: ((pick: HeadPick | null) => void) | null, target?: 'head' | 'accessory' | 'back', faceFront?: boolean): void;
+  /** Makes the robot talk (a talking mouth opens and pours), to see it without a microphone. */
+  setTalking(talking: boolean): void;
+  /** The worn head's colour seen straight on at (x, y) in its file's frame (see RobotView.headColorAt). */
+  headColorAt(x: number, y: number): string | null;
   dispose(): void;
 }
 
@@ -131,6 +136,7 @@ export function createRobotPreview(
   let look: RobotLook | null = null;
   let holding = false;
   let flying = false;
+  let talking = false;
   let state: PreviewState | null = null;
   let disposed = false;
 
@@ -205,7 +211,9 @@ export function createRobotPreview(
   let speed = 0;
   const frame = (now: number): void => {
     raf = requestAnimationFrame(frame);
-    const dt = Math.min((now - last) / 1000, 0.05);
+    // Never backwards: a first frame's time can be before `last` (taken when the preview was made),
+    // and a negative step would fling the camera's easing far off.
+    const dt = Math.min(Math.max(0, (now - last) / 1000), 0.05);
     last = now;
     t += dt;
     const width = canvas.clientWidth;
@@ -241,9 +249,13 @@ export function createRobotPreview(
         // Held still for fitting, the robot still shows an arm on its back moving (unless you'd
         // rather less motion, or a click on the model is being picked).
         armStill: reducedMotion || onPick !== null,
-        talking: false,
+        talking,
+        // A talking mouth pours its blocks here too, unless you'd rather less motion.
+        mouthStill: reducedMotion,
       });
       report(robot.state);
+      // What a talking mouth is doing, for the page (and its tests).
+      if (canvas.dataset.mouth !== robot.mouth) canvas.dataset.mouth = robot.mouth;
     }
     renderer.render(scene, camera);
   };
@@ -271,8 +283,15 @@ export function createRobotPreview(
       if (next !== 'robot' && framing !== next) spin = 0;
       framing = next;
     },
-    setPicking(next, target = 'head') {
+    setTalking(next) {
+      talking = next;
+    },
+    headColorAt(x, y) {
+      return robot?.headColorAt(x, y) ?? null;
+    },
+    setPicking(next, target = 'head', faceFront = false) {
       onPick = next;
+      if (next && faceFront) spin = 0;
       pickTarget = target;
       canvas.style.cursor = next ? 'crosshair' : '';
     },

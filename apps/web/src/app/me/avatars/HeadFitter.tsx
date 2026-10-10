@@ -32,6 +32,7 @@ import {
   autoPlacement,
   defaultColors,
   moveScreen,
+  mouthRecess,
   nudge,
   rescale,
   rotateAbout,
@@ -63,7 +64,7 @@ export interface HeadFitterProps {
 }
 
 type Reading = { kind: 'reading' } | { kind: 'ready'; measure: HeadMeasure } | { kind: 'error'; message: string };
-type Picking = null | 'left' | 'right' | 'hole' | 'ramp';
+type Picking = null | 'left' | 'right' | 'hole' | 'ramp' | 'mouth';
 
 const FITTING_LOOK_ID = 'gh:0';
 const MOVE_RANGE = 0.3;
@@ -108,8 +109,27 @@ function toWire(placement: HeadPlacement): AvatarHeadPlacement {
     ...(placement.emitter ? { emitter: placement.emitter } : {}),
     ...(placement.spout ? { spout: placement.spout } : {}),
     ...(placement.motion ? { motion: placement.motion } : {}),
+    ...(placement.mouth ? { mouth: placement.mouth } : {}),
   };
 }
+
+/** A talking mouth's plate colour until one is sampled: copper. */
+const MOUTH_COLOUR = '#8a4b2c';
+
+/** The model's own bounding box (its file's frame), from its measured vertices. */
+function fileBox(positions: ArrayLike<number>): { min: Point3; size: Point3 } {
+  const min: Point3 = [Infinity, Infinity, Infinity];
+  const max: Point3 = [-Infinity, -Infinity, -Infinity];
+  for (let i = 0; i < positions.length; i += 3) {
+    for (let a = 0; a < 3; a += 1) {
+      min[a] = Math.min(min[a]!, positions[i + a]!);
+      max[a] = Math.max(max[a]!, positions[i + a]!);
+    }
+  }
+  return { min, size: [Math.max(max[0] - min[0], 1e-9), Math.max(max[1] - min[1], 1e-9), Math.max(max[2] - min[2], 1e-9)] };
+}
+
+const fraction = (v: number): number => Math.round(Math.min(1, Math.max(0, v)) * 10_000) / 10_000;
 
 /** A face screen for a head that found no opening of its own: robot-face sized, just behind its eyes. */
 function defaultScreen(placement: HeadPlacement): HeadScreen {
@@ -164,6 +184,8 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled, w
   const screenAt = useRef<ScreenAtScale | null>(null);
   const sizing = useRef(false);
   const [picking, setPicking] = useState<Picking>(null);
+  /** The preview robot talking (a talking mouth opens and pours), to see it without a microphone. */
+  const [talkPreview, setTalkPreview] = useState(false);
   // Fitted over another head (or none): a click that was aimed at the old one is dropped.
   const wornId = worn?.id ?? null;
   useEffect(() => {
@@ -331,6 +353,8 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled, w
   placementRef.current = placement;
   const autoRef = useRef(auto);
   autoRef.current = auto;
+  const readingRef = useRef(reading);
+  readingRef.current = reading;
 
   const handlePick = useCallback(
     (pick: HeadPick | null) => {
@@ -347,6 +371,56 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled, w
         }
         setPlacement({ ...current, spout: pick.file });
         setNote({ tone: 'ok', text: machines ? 'Marked: machine parts fly out there.' : 'Ramp marked: new bricks drop out there.' });
+        setPicking(null);
+        return;
+      }
+      if (picking === 'mouth') {
+        const measured = readingRef.current.kind === 'ready' ? readingRef.current.measure : null;
+        if (!pick || !pick.onModel || !measured) {
+          setNote({ tone: 'warn', text: 'That missed the model. Click in the middle of the mouth opening.' });
+          return;
+        }
+        const found = mouthRecess(measured.triangles, pick.file);
+        if (!found) {
+          setNote({ tone: 'warn', text: 'That isn’t in an opening: click inside the mouth hole itself (the dark recess).' });
+          return;
+        }
+        const box = fileBox(measured.positions);
+        const [cx, cy, cz] = found.center;
+        const [w, h] = found.size;
+        // The plate's colour: the face just above the opening, seen straight on.
+        const colour = previewRef.current?.headColorAt(cx, cy + h / 2 + h * 0.25) ?? MOUTH_COLOUR;
+        const mouth = {
+          center: [fraction((cx - box.min[0]) / box.size[0]), fraction((cy - box.min[1]) / box.size[1]), fraction((cz - box.min[2]) / box.size[2])] as Point3,
+          size: [Math.max(0.01, fraction(w / box.size[0])), Math.max(0.01, fraction(h / box.size[1]))] as [number, number],
+          color: /^#[0-9a-f]{6}$/.test(colour) ? colour : MOUTH_COLOUR,
+        };
+        // A face screen the fit put over the mouth would hide it: that goes.
+        const screen = current.screen;
+        const covered =
+          screen !== null &&
+          screen !== undefined &&
+          Math.abs(pick.head[0] - screen.center[0]) <= screen.size[0] / 2 &&
+          Math.abs(pick.head[1] - screen.center[1]) <= screen.size[1] / 2;
+        // Glowing eyes the fit put in the mouth: placed again, on the model's own eyes.
+        const scale = current.scale;
+        const middle: [number, number] = [pick.head[0] + (cx - pick.file[0]) * scale, pick.head[1] + (cy - pick.file[1]) * scale];
+        const eyes = current.eyes ?? autoRef.current?.eyes ?? null;
+        const eyesInMouth =
+          eyes !== null && eyes.some((eye) => Math.abs(eye[0] - middle[0]) <= (w * scale) / 2 && Math.abs(eye[1] - middle[1]) <= (h * scale) / 2);
+        setPlacement({ ...current, mouth, ...(covered ? { screen: null } : {}) });
+        if (eyesInMouth) {
+          setNote({
+            tone: 'ok',
+            text: `Mouth marked${covered ? ' (the face screen over it is off)' : ''}. The glowing eyes were in it: click the model’s left eye, then its right.`,
+          });
+          setPicking('left');
+          return;
+        }
+        setNote({
+          tone: 'ok',
+          text: `Mouth marked${covered ? ' (the face screen over it is off)' : ''}: its plate shuts it when quiet. Try “Preview talking”.`,
+        });
         setPicking(null);
         return;
       }
@@ -384,9 +458,13 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled, w
   );
 
   useEffect(() => {
+    previewRef.current?.setTalking(talkPreview && Boolean(placement?.mouth));
+  }, [talkPreview, placement?.mouth]);
+
+  useEffect(() => {
     const preview = previewRef.current;
     if (!preview) return undefined;
-    preview.setPicking(picking ? handlePick : null, picking === 'ramp' ? 'back' : worn ? 'accessory' : 'head');
+    preview.setPicking(picking ? handlePick : null, picking === 'ramp' ? 'back' : worn ? 'accessory' : 'head', picking === 'mouth');
     if (!picking) return undefined;
     const onKey = (event: KeyboardEvent): void => {
       if (event.key === 'Escape') setPicking(null);
@@ -445,6 +523,33 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled, w
   };
 
   /** The helicopter is a choice of its own: Size, Move and Reset leave it as it is. */
+  /** Talking mouth on: mark it (a click in the opening); off: gone. */
+  const onMouth = (event: ChangeEvent<HTMLInputElement>): void => {
+    if (event.target.checked) {
+      setPicking('mouth');
+      return;
+    }
+    setPicking((now) => (now === 'mouth' ? null : now));
+    setTalkPreview(false);
+    setPlacement((current) => (current ? { ...current, mouth: null } : current));
+  };
+
+  const onMouthSize = (index: 0 | 1) => (event: ChangeEvent<HTMLInputElement>): void => {
+    const value = Math.min(1, Math.max(0.01, Number(event.target.value) / 100));
+    setPlacement((current) => {
+      if (!current?.mouth) return current;
+      const size: [number, number] = [...current.mouth.size];
+      size[index] = value;
+      return { ...current, mouth: { ...current.mouth, size } };
+    });
+  };
+
+  const onMouthColour = (event: ChangeEvent<HTMLInputElement>): void => {
+    const color = event.target.value.toLowerCase();
+    if (!/^#[0-9a-f]{6}$/.test(color)) return;
+    setPlacement((current) => (current?.mouth ? { ...current, mouth: { ...current.mouth, color } } : current));
+  };
+
   const onFlyer = (event: ChangeEvent<HTMLInputElement>): void => {
     const on = event.target.checked;
     setPlacement((current) => (current ? { ...current, flyer: on ? 'helicopter' : null } : current));
@@ -508,6 +613,7 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled, w
       placement?.emitter === 'machines'
         ? 'Click where machine parts fly out (an engine’s intake, say).'
         : 'Click the ramp (or chute) new bricks drop out of.',
+    mouth: 'Click in the middle of the mouth opening (the dark recess).',
   };
 
   return (
@@ -738,6 +844,76 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled, w
           </div>
         )}
 
+        {fit === 'replace' && (
+          <label className={`${styles.radio} ${styles.fitFull}`}>
+            <input type="checkbox" checked={Boolean(placement?.mouth) || picking === 'mouth'} onChange={onMouth} disabled={locked} />
+            <span>
+              Talking mouth
+              <br />
+              <span className={styles.hint}>
+                {placement?.mouth
+                  ? 'Shut while its wearer is quiet; while they talk it drops open and green blocks pour out.'
+                  : picking === 'mouth'
+                    ? 'Click in the middle of the mouth opening (the dark recess).'
+                    : 'Off: the mouth stays as the model has it.'}
+              </span>
+            </span>
+          </label>
+        )}
+
+        {fit === 'replace' && placement?.mouth && (
+          <div className={styles.fitRow} data-mouth-marked="yes">
+            <button
+              type="button"
+              className={`btn btn-sm ${picking === 'mouth' ? 'btn-primary' : 'btn-ghost'}`}
+              aria-pressed={picking === 'mouth'}
+              onClick={() => setPicking(picking === 'mouth' ? null : 'mouth')}
+              disabled={locked}
+            >
+              Mark the mouth again
+            </button>
+            <button
+              type="button"
+              className={`btn btn-sm ${talkPreview ? 'btn-primary' : 'btn-ghost'}`}
+              aria-pressed={talkPreview}
+              onClick={() => setTalkPreview((on) => !on)}
+              disabled={locked}
+            >
+              {talkPreview ? 'Stop talking' : 'Preview talking'}
+            </button>
+            <span className={styles.hint} role="status" aria-live="polite" data-talk-preview={talkPreview ? 'talking' : 'quiet'}>
+              {talkPreview ? 'Talking: mouth open, pouring green blocks' : 'Quiet: mouth shut (idle)'}
+            </span>
+            <label className={styles.hint}>
+              Plate colour{' '}
+              <input type="color" value={placement.mouth.color} onChange={onMouthColour} disabled={locked} aria-label="Mouth plate colour" />
+            </label>
+          </div>
+        )}
+        {fit === 'replace' &&
+          placement?.mouth &&
+          (['Mouth width', 'Mouth height'] as const).map((label, index) => {
+            const percent = Math.round(placement.mouth!.size[index]! * 100);
+            return (
+              <label key={label} className={`${styles.label} ${styles.fitFull}`}>
+                <span className={styles.sliderHead} aria-hidden="true">
+                  {label} <span className={styles.sliderValue}>{percent}% of the model</span>
+                </span>
+                <input
+                  type="range"
+                  min={1}
+                  max={100}
+                  step={1}
+                  value={percent}
+                  onChange={onMouthSize(index as 0 | 1)}
+                  disabled={locked}
+                  aria-label={label}
+                  aria-valuetext={`${percent} percent of the model`}
+                />
+              </label>
+            );
+          })}
+
         {fit !== 'back' && (
           <label className={`${styles.radio} ${styles.fitFull}`}>
             <input type="checkbox" checked={placement?.flyer === 'helicopter'} onChange={onFlyer} disabled={locked} />
@@ -856,7 +1032,7 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled, w
             type="button"
             className="btn btn-sm btn-ghost"
             onClick={() => {
-              if (auto) setPlacement((current) => ({ ...auto, flyer: current?.flyer ?? null, emitter: current?.emitter ?? null, spout: current?.spout ?? null, motion: current?.motion ?? null }));
+              if (auto) setPlacement((current) => ({ ...auto, flyer: current?.flyer ?? null, emitter: current?.emitter ?? null, spout: current?.spout ?? null, motion: current?.motion ?? null, mouth: current?.mouth ?? null }));
               setPicking(null);
               setNote({ tone: 'ok', text: 'Back to the first guess.' });
             }}

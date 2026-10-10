@@ -39,6 +39,7 @@ from forge_api.models import (
     AvatarChestUpload,
     AvatarColors,
     AvatarHead,
+    AvatarHeadMouth,
     AvatarHeadPlacement,
     AvatarHeadUpload,
     AvatarList,
@@ -171,6 +172,17 @@ register_schema(
         )""",
         # Where a brick-making back model's ramp is (fractions of its file's bounding box).
         # No row: guessed.
+        # A replacing head's talking mouth (its opening, fractions of its file's bounding box,
+        # and the plate's colour). No row: the mouth stays as the model has it.
+        """CREATE TABLE IF NOT EXISTS avatars_head_mouths (
+            head_id TEXT PRIMARY KEY REFERENCES avatars_heads (id),
+            cx REAL NOT NULL,
+            cy REAL NOT NULL,
+            cz REAL NOT NULL,
+            w REAL NOT NULL,
+            h REAL NOT NULL,
+            color TEXT NOT NULL
+        )""",
         """CREATE TABLE IF NOT EXISTS avatars_head_spouts (
             head_id TEXT PRIMARY KEY REFERENCES avatars_heads (id),
             x REAL NOT NULL,
@@ -186,7 +198,8 @@ _HEAD_SELECT: Final = (
     "a.slant AS a_slant, a.turn AS a_turn, a.pitch AS a_pitch, "
     "o.member_id AS o_member, l.eye_scale AS l_eye_scale, l.screen AS l_screen, "
     "r.tilt AS r_tilt, r.turn AS r_turn, r.slant AS r_slant, f.flyer AS f_flyer, "
-    "e.emitter AS e_emitter, s.x AS s_x, s.y AS s_y, s.z AS s_z, m.motion AS m_motion "
+    "e.emitter AS e_emitter, s.x AS s_x, s.y AS s_y, s.z AS s_z, m.motion AS m_motion, "
+    "u.cx AS u_cx, u.cy AS u_cy, u.cz AS u_cz, u.w AS u_w, u.h AS u_h, u.color AS u_color "
     "FROM avatars_heads h LEFT JOIN avatars_head_placements p ON p.head_id = h.id "
     "LEFT JOIN avatars_head_eye_angles a ON a.head_id = h.id "
     "LEFT JOIN avatars_head_owners o ON o.head_id = h.id "
@@ -195,7 +208,8 @@ _HEAD_SELECT: Final = (
     "LEFT JOIN avatars_head_flyers f ON f.head_id = h.id "
     "LEFT JOIN avatars_head_emitters e ON e.head_id = h.id "
     "LEFT JOIN avatars_head_spouts s ON s.head_id = h.id "
-    "LEFT JOIN avatars_head_motions m ON m.head_id = h.id"
+    "LEFT JOIN avatars_head_motions m ON m.head_id = h.id "
+    "LEFT JOIN avatars_head_mouths u ON u.head_id = h.id"
 )
 
 
@@ -485,16 +499,28 @@ def _placement(row: dict[str, Any]) -> AvatarHeadPlacement:
         emitter=row["e_emitter"],
         spout=(row["s_x"], row["s_y"], row["s_z"]) if row["s_x"] is not None else None,
         motion=row["m_motion"],
+        mouth=(
+            AvatarHeadMouth(
+                center=(row["u_cx"], row["u_cy"], row["u_cz"]),
+                size=(row["u_w"], row["u_h"]),
+                color=row["u_color"],
+            )
+            if row["u_cx"] is not None
+            else None
+        ),
     )
 
 
 def _check_emitter(fit: str, placement: AvatarHeadPlacement | None) -> None:
     """Only a model worn on the back makes anything (400 emitter_back_only) or moves on its
-    own (400 motion_back_only)."""
+    own (400 motion_back_only); only a replacing head talks with its mouth (400
+    mouth_head_only)."""
     if placement is not None and placement.emitter is not None and fit != "back":
         raise ApiError(400, {"error": "emitter_back_only", "fields": ["placement.emitter"]})
     if placement is not None and placement.motion is not None and fit != "back":
         raise ApiError(400, {"error": "motion_back_only", "fields": ["placement.motion"]})
+    if placement is not None and placement.mouth is not None and fit != "replace":
+        raise ApiError(400, {"error": "mouth_head_only", "fields": ["placement.mouth"]})
 
 
 def _makes(db: StateDB, member_id: str, emitter: str) -> bool:
@@ -526,8 +552,16 @@ def _store_placement(db: StateDB, head_id: str, placement: AvatarHeadPlacement |
     db.execute("DELETE FROM avatars_head_emitters WHERE head_id = ?", (head_id,))
     db.execute("DELETE FROM avatars_head_spouts WHERE head_id = ?", (head_id,))
     db.execute("DELETE FROM avatars_head_motions WHERE head_id = ?", (head_id,))
+    db.execute("DELETE FROM avatars_head_mouths WHERE head_id = ?", (head_id,))
     if placement is None:
         return
+    if placement.mouth is not None:
+        mouth = placement.mouth
+        db.execute(
+            "INSERT INTO avatars_head_mouths (head_id, cx, cy, cz, w, h, color) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (head_id, *mouth.center, *mouth.size, mouth.color),
+        )
     if placement.motion is not None:
         db.execute(
             "INSERT INTO avatars_head_motions (head_id, motion) VALUES (?, ?)",
@@ -846,6 +880,7 @@ def delete_head(db: StateDB, head_id: str) -> None:
         db.execute("DELETE FROM avatars_head_emitters WHERE head_id = ?", (head_id,))
         db.execute("DELETE FROM avatars_head_spouts WHERE head_id = ?", (head_id,))
         db.execute("DELETE FROM avatars_head_motions WHERE head_id = ?", (head_id,))
+        db.execute("DELETE FROM avatars_head_mouths WHERE head_id = ?", (head_id,))
         db.execute("DELETE FROM avatars_head_owners WHERE head_id = ?", (head_id,))
         db.execute("DELETE FROM avatars_heads WHERE id = ?", (head_id,))
         _drop_unused_assets(db, [row["sha256"]])
