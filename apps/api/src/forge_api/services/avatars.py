@@ -121,6 +121,13 @@ register_schema(
             cape_outer TEXT,
             cape_lining TEXT
         )""",
+        # Retired: an uploaded chestplate's glow (before blend modes). Kept defined, never read,
+        # so its rows (which reference avatars_members) can be cleared when a robot is saved
+        # or reset.
+        """CREATE TABLE IF NOT EXISTS avatars_member_chest_glow (
+            member_id TEXT PRIMARY KEY REFERENCES avatars_members (member_id),
+            glow REAL NOT NULL
+        )""",
         # How a robot's uploaded chestplate blends over the armour (a CSS mix-blend-mode) and its
         # opacity. No row: normal, fully opaque.
         """CREATE TABLE IF NOT EXISTS avatars_member_chest_blends (
@@ -651,6 +658,7 @@ def set_avatar(db: StateDB, member_id: str, update: AvatarUpdate, now: datetime)
                 (member_id, c.eyeRight, finish),
             )
         db.execute("DELETE FROM avatars_member_chest_blends WHERE member_id = ?", (member_id,))
+        db.execute("DELETE FROM avatars_member_chest_glow WHERE member_id = ?", (member_id,))
         blend = update.chestBlend or "normal"
         opacity = 1.0 if update.chestOpacity is None else update.chestOpacity
         if blend != "normal" or opacity != 1:
@@ -672,6 +680,7 @@ def reset_avatar(db: StateDB, member_id: str) -> None:
         db.execute("DELETE FROM avatars_member_looks WHERE member_id = ?", (member_id,))
         db.execute("DELETE FROM avatars_member_backs WHERE member_id = ?", (member_id,))
         db.execute("DELETE FROM avatars_member_chest_blends WHERE member_id = ?", (member_id,))
+        db.execute("DELETE FROM avatars_member_chest_glow WHERE member_id = ?", (member_id,))
         db.execute("DELETE FROM avatars_members WHERE member_id = ?", (member_id,))
         _drop_unused_assets(db, [row["chest_sha256"] if row else None])
 

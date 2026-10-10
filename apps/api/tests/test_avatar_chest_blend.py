@@ -76,3 +76,24 @@ def test_resetting_the_robot_takes_its_blend_too(
     put(client, admin_headers, {"colors": COLORS, "chestBlend": "overlay"})
     assert client.delete(f"/api/avatars/members/{MEMBER}", headers=admin_headers).status_code == 204
     assert blends() == []
+
+
+def test_a_robot_saved_with_the_retired_glow_can_still_be_saved_and_reset(
+    client: TestClient, admin_headers: dict[str, str]
+) -> None:
+    """A glow row from before blend modes references the robot: saving clears it, and so
+    does resetting (else the reset's delete would break the foreign key)."""
+    put(client, admin_headers, {"colors": COLORS})
+    db = get_state_db()
+    with db.transaction():
+        db.execute(
+            "INSERT INTO avatars_member_chest_glow (member_id, glow) VALUES (?, 0.4)", (MEMBER,)
+        )
+    assert put(client, admin_headers, {"colors": COLORS}).status_code == 200
+    assert db.query_all("SELECT * FROM avatars_member_chest_glow") == []
+    with db.transaction():
+        db.execute(
+            "INSERT INTO avatars_member_chest_glow (member_id, glow) VALUES (?, 0.4)", (MEMBER,)
+        )
+    assert client.delete(f"/api/avatars/members/{MEMBER}", headers=admin_headers).status_code == 204
+    assert db.query_all("SELECT * FROM avatars_member_chest_glow") == []
