@@ -145,6 +145,11 @@ register_schema(
             head_id TEXT PRIMARY KEY REFERENCES avatars_heads (id),
             flyer TEXT NOT NULL
         )""",
+        # What a back model makes for its wearer (bricks). No row: nothing.
+        """CREATE TABLE IF NOT EXISTS avatars_head_emitters (
+            head_id TEXT PRIMARY KEY REFERENCES avatars_heads (id),
+            emitter TEXT NOT NULL
+        )""",
     ],
 )
 
@@ -153,13 +158,15 @@ _HEAD_SELECT: Final = (
     "SELECT h.*, p.scale AS p_scale, p.x AS p_x, p.y AS p_y, p.z AS p_z, p.eyes AS p_eyes, "
     "a.slant AS a_slant, a.turn AS a_turn, a.pitch AS a_pitch, "
     "o.member_id AS o_member, l.eye_scale AS l_eye_scale, l.screen AS l_screen, "
-    "r.tilt AS r_tilt, r.turn AS r_turn, r.slant AS r_slant, f.flyer AS f_flyer "
+    "r.tilt AS r_tilt, r.turn AS r_turn, r.slant AS r_slant, f.flyer AS f_flyer, "
+    "e.emitter AS e_emitter "
     "FROM avatars_heads h LEFT JOIN avatars_head_placements p ON p.head_id = h.id "
     "LEFT JOIN avatars_head_eye_angles a ON a.head_id = h.id "
     "LEFT JOIN avatars_head_owners o ON o.head_id = h.id "
     "LEFT JOIN avatars_head_eye_looks l ON l.head_id = h.id "
     "LEFT JOIN avatars_head_angles r ON r.head_id = h.id "
-    "LEFT JOIN avatars_head_flyers f ON f.head_id = h.id"
+    "LEFT JOIN avatars_head_flyers f ON f.head_id = h.id "
+    "LEFT JOIN avatars_head_emitters e ON e.head_id = h.id"
 )
 
 
@@ -444,7 +451,25 @@ def _placement(row: dict[str, Any]) -> AvatarHeadPlacement:
         eyeScale=row["l_eye_scale"],
         screen=screen,
         flyer=row["f_flyer"],
+        emitter=row["e_emitter"],
     )
+
+
+def _check_emitter(fit: str, placement: AvatarHeadPlacement | None) -> None:
+    """Only a model worn on the back makes anything (400 emitter_back_only)."""
+    if placement is not None and placement.emitter is not None and fit != "back":
+        raise ApiError(400, {"error": "emitter_back_only", "fields": ["placement.emitter"]})
+
+
+def is_brick_maker(db: StateDB, member_id: str) -> bool:
+    """Whether `member_id`'s robot wears a back model that makes bricks."""
+    row = db.query_one(
+        "SELECT 1 FROM avatars_member_backs b "
+        "JOIN avatars_head_emitters e ON e.head_id = b.head_id "
+        "WHERE b.member_id = ? AND e.emitter = 'bricks'",
+        (member_id,),
+    )
+    return row is not None
 
 
 def _store_placement(db: StateDB, head_id: str, placement: AvatarHeadPlacement | None) -> None:
@@ -453,8 +478,14 @@ def _store_placement(db: StateDB, head_id: str, placement: AvatarHeadPlacement |
     db.execute("DELETE FROM avatars_head_eye_looks WHERE head_id = ?", (head_id,))
     db.execute("DELETE FROM avatars_head_angles WHERE head_id = ?", (head_id,))
     db.execute("DELETE FROM avatars_head_flyers WHERE head_id = ?", (head_id,))
+    db.execute("DELETE FROM avatars_head_emitters WHERE head_id = ?", (head_id,))
     if placement is None:
         return
+    if placement.emitter is not None:
+        db.execute(
+            "INSERT INTO avatars_head_emitters (head_id, emitter) VALUES (?, ?)",
+            (head_id, placement.emitter),
+        )
     if placement.flyer is not None:
         db.execute(
             "INSERT INTO avatars_head_flyers (head_id, flyer) VALUES (?, ?)",
@@ -670,6 +701,7 @@ def put_head(db: StateDB, head_id: str, upload: AvatarHeadUpload, now: datetime)
     name = upload.name.strip()
     if not name:
         raise _invalid("name", "blank")
+    _check_emitter(upload.fit, upload.placement)
     raw = decode_base64(upload.data, AVATAR_HEAD_MAX_BYTES)
     eyes = check_glb(raw)
     with db.transaction():
@@ -696,8 +728,10 @@ def refit_head(
 ) -> AvatarHead:
     """Changes how a library head is worn, keeping its file. 404 head_not_found."""
     with db.transaction():
-        if db.query_one("SELECT 1 FROM avatars_heads WHERE id = ?", (head_id,)) is None:
+        head = db.query_one("SELECT fit FROM avatars_heads WHERE id = ?", (head_id,))
+        if head is None:
             raise ApiError(404, {"error": "head_not_found"})
+        _check_emitter(head["fit"], placement)
         _store_placement(db, head_id, placement)
         db.execute(
             "UPDATE avatars_heads SET updated_at = ? WHERE id = ?",
@@ -739,6 +773,7 @@ def delete_head(db: StateDB, head_id: str) -> None:
         db.execute("DELETE FROM avatars_head_eye_looks WHERE head_id = ?", (head_id,))
         db.execute("DELETE FROM avatars_head_angles WHERE head_id = ?", (head_id,))
         db.execute("DELETE FROM avatars_head_flyers WHERE head_id = ?", (head_id,))
+        db.execute("DELETE FROM avatars_head_emitters WHERE head_id = ?", (head_id,))
         db.execute("DELETE FROM avatars_head_owners WHERE head_id = ?", (head_id,))
         db.execute("DELETE FROM avatars_heads WHERE id = ?", (head_id,))
         _drop_unused_assets(db, [row["sha256"]])
