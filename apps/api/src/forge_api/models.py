@@ -1305,6 +1305,8 @@ class Brick(BaseModel):
     z: _BrickCoord
     rot: _BrickRot
     holder: _AvatarMemberId | None = None
+    #: The blueprint build it came from (the whole build comes down at once); None: made by hand.
+    build: _BrickId | None = None
     updatedAt: str
 
 
@@ -1379,3 +1381,12 @@ class BrickBuild(BaseModel):
 class BrickBuilt(BaseModel):
     rev: _Rev
     built: Annotated[int, Field(ge=1)]
+    #: The build's id: every brick of it carries it as `build`.
+    build: _BrickId
+
+
+class BrickTakenDown(BaseModel):
+    """A whole build taken out of the cave: how many bricks went, and the revision."""
+
+    rev: _Rev
+    removed: Annotated[int, Field(ge=1)]

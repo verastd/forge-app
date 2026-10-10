@@ -16,8 +16,9 @@ import { assertionClaims, json, withStandIn } from './helpers/standin';
  * its own (`Cave` below), so each answer can be held to show the state the
  * page is in while it waits. The page says what it's doing on its root:
  * `data-bricks` (how many), `data-held` (the shape in your hand),
- * `data-brick-busy`, `data-aim` (fits / blocked) and `data-brick-target`
- * (pick / frozen). No assertion reads pixels.
+ * `data-brick-busy`, `data-aim` (fits / blocked), `data-brick-target`
+ * (pick / frozen) and `data-brick-take-down` (how many bricks a take-down
+ * waiting to be confirmed would take). No assertion reads pixels.
  *
  * The camera is seeded looking down at the floor a couple of metres ahead,
  * well within reach.
@@ -32,6 +33,7 @@ interface Brick {
   z: number;
   rot: number;
   holder?: string;
+  build?: string;
   updatedAt: string;
 }
 
@@ -112,12 +114,20 @@ class Cave {
     if (method === 'POST' && path === 'build') {
       const body = JSON.parse(request.postData() ?? '{}') as { name: string; bricks: Omit<Brick, 'id' | 'updatedAt'>[] };
       this.builds.push(body.name);
+      const buildId = (0xbd0000000000 + this.builds.length).toString(16);
       for (const piece of body.bricks) {
         this.made += 1;
         const id = (0xb00000000000 + this.made).toString(16);
-        this.bricks.set(id, { ...piece, id, updatedAt: STAMP });
+        this.bricks.set(id, { ...piece, id, build: buildId, updatedAt: STAMP });
       }
-      return reply(200, { rev: this.rev, built: body.bricks.length });
+      return reply(200, { rev: this.rev, built: body.bricks.length, build: buildId });
+    }
+    if (method === 'DELETE' && path.startsWith('builds/')) {
+      const buildId = path.slice('builds/'.length);
+      const of = [...this.bricks.values()].filter((b) => b.build === buildId);
+      if (of.length === 0) return reply(404, { error: 'build_not_found' });
+      for (const b of of) this.bricks.delete(b.id);
+      return reply(200, { rev: this.rev, removed: of.length });
     }
     if (method === 'POST' && path === '') {
       const body = JSON.parse(request.postData() ?? '{}') as { shape: string; color: string };
@@ -379,6 +389,58 @@ test.describe('building with bricks', () => {
     await expect(toast(page, 'Built Gappy: 2 bricks')).toBeVisible();
     const bricks = [...cave.bricks.values()];
     expect(bricks.map((b) => b.y).sort((x, y) => x - y)).toEqual([0, 6]);
+  });
+
+  test('the Lego bot takes down a whole blueprint build at once, asked first, each step saying so', async ({ page, context, baseURL }) => {
+    await signInAs(context, baseURL ?? '', { sub: '4242', login: 'lego-bot' });
+    const BUILD = 'bd0000000009';
+    const ofBuild = (id: string, y: number): Brick => ({ ...brick(id, 0, y, 0), build: BUILD });
+    const cave = new Cave(true, [ofBuild('a00000000001', 0), ofBuild('a00000000002', 3), ofBuild('a00000000003', 6), brick('a00000000004', 30, 0, 30)]);
+    await enter(page, cave);
+    await expect(lobbyRoot(page)).toHaveAttribute('data-bricks', '4');
+    await expect(lobbyRoot(page)).toHaveAttribute('data-brick-target', 'pick');
+    await expect(note(page)).toContainText('of a 3-brick build: E to pick it up, X to remove it, Shift+X to take down the whole build.');
+    const takeDown = build(page).getByRole('button', { name: /Take down build/ });
+    await expect(takeDown).toBeEnabled();
+
+    // Asked first: Cancel calls it off.
+    await page.keyboard.press('Shift+KeyX');
+    await build(page).getByRole('button', { name: 'Cancel' }).click();
+    await expect(lobbyRoot(page)).toHaveAttribute('data-brick-take-down', '');
+    await expect(takeDown).toBeVisible();
+    expect(cave.calls.some((call) => call.startsWith('DELETE'))).toBe(false);
+
+    // Asked again: the button, the line and a toast say how many.
+    await page.keyboard.press('Shift+KeyX');
+    await expect(lobbyRoot(page)).toHaveAttribute('data-brick-take-down', '3');
+    await expect(build(page).getByRole('button', { name: /Take down all 3\?/ })).toHaveAttribute('data-take-down', 'confirm');
+    await expect(note(page)).toContainText('Take down all 3 bricks of the outlined build?');
+    await expect(toast(page, 'Take down all 3 bricks of this build? Shift+X again to confirm.')).toBeVisible();
+
+    // Refused: every brick comes back, and the toast says why.
+    cave.refuse = { status: 404, body: { error: 'build_not_found' } };
+    await page.keyboard.press('Shift+KeyX');
+    await expect(toast(page, 'That build is already gone.')).toBeVisible();
+    await expect(lobbyRoot(page)).toHaveAttribute('data-bricks', '4');
+
+    // Confirmed with the button: Taking down… until the API answers, then all of it is gone at once.
+    await page.keyboard.press('Shift+KeyX');
+    cave.hold = true;
+    await build(page).getByRole('button', { name: /Take down all 3\?/ }).click();
+    const taking = build(page).getByRole('button', { name: /Taking down…/ });
+    await expect(taking).toHaveAttribute('aria-busy', 'true');
+    await expect(taking).toBeDisabled();
+    await expect(note(page)).toContainText('Taking down the build…');
+    await expect(lobbyRoot(page)).toHaveAttribute('data-brick-busy', 'taking-down');
+    cave.release();
+    await expect(toast(page, 'Took down a build: 3 bricks')).toBeVisible();
+    await expect(lobbyRoot(page)).toHaveAttribute('data-bricks', '1');
+    expect(cave.calls).toContain(`DELETE builds/${BUILD}`);
+    expect([...cave.bricks.keys()]).toEqual(['a00000000004']);
+    // Nothing of a build to point at now: the button waits, and Shift+X says what it needs.
+    await expect(takeDown).toBeDisabled();
+    await page.keyboard.press('Shift+KeyX');
+    await expect(toast(page, 'Point at a brick of a blueprint build')).toBeVisible();
   });
 
   test('only the Lego bot gets blueprints', async ({ page, context, baseURL }) => {

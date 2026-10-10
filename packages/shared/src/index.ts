@@ -1608,6 +1608,8 @@ export const BrickSchema = z.object({
   z: brickCoord,
   rot: z.number().int().min(0).max(3),
   holder: z.string().regex(AVATAR_MEMBER_ID).optional(),
+  /** The blueprint build it came from (the whole build comes down at once); absent: made by hand. */
+  build: z.string().regex(BRICK_ID).optional(),
   updatedAt: z.string(),
 });
 export type Brick = z.infer<typeof BrickSchema>;
@@ -1694,8 +1696,20 @@ export type BrickBuild = z.infer<typeof BrickBuildSchema>;
 export const BrickBuiltSchema = z.object({
   rev: z.number().int().min(0),
   built: z.number().int().min(1),
+  /** The build's id: every brick of it carries it as `build`. */
+  build: z.string().regex(BRICK_ID),
 });
 export type BrickBuilt = z.infer<typeof BrickBuiltSchema>;
+
+/**
+ * `DELETE /api/lobby/bricks/builds/{buildId}` (the brick maker): a whole
+ * blueprint build taken away at once. How many bricks went, and the revision.
+ */
+export const BrickTakenDownSchema = z.object({
+  rev: z.number().int().min(0),
+  removed: z.number().int().min(1),
+});
+export type BrickTakenDown = z.infer<typeof BrickTakenDownSchema>;
 
 // ---------------------------------------------------------------------------
 // The rail registry and the brief, mirrored in apps/api (services/rails.py,

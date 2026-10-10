@@ -1526,3 +1526,10 @@
 .buildNote {
   flex-wrap: wrap;
 }
+
+/* "Take down all N?": the Lego bot is about to take a whole build away. */
+.takeDownConfirm,
+.takeDownConfirm:hover {
+  border-color: var(--danger-line);
+  color: var(--danger);
+}

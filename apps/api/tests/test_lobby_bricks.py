@@ -493,9 +493,13 @@ def test_the_maker_builds_a_blueprint_all_at_once(
     rev = everything(client)["rev"]
     built = build(client, maker, *TOWER)
     assert built.status_code == 200
-    assert built.json() == {"rev": rev + 1, "built": 3}
+    answer = built.json()
+    assert answer == {"rev": rev + 1, "built": 3, "build": answer["build"]}
+    assert re.fullmatch(r"[0-9a-f]{12}", answer["build"])
     listed = everything(client)
     assert len(listed["bricks"]) == 3 and all("holder" not in b for b in listed["bricks"])
+    # Every brick of it says which build it came from.
+    assert {b["build"] for b in listed["bricks"]} == {answer["build"]}
     assert {b["shape"] for b in listed["bricks"]} == {"brick-2x4", "brick-2x2", "plate-2x2"}
     # One delta brings every brick of it.
     assert len(client.get(f"/api/lobby/bricks?since={rev}").json()["bricks"]) == 3
@@ -518,6 +522,60 @@ def test_a_build_fits_whole_or_not_at_all(client: TestClient, maker: dict[str, s
     assert island.status_code == 200 and island.json()["built"] == 2
     # Resting on a placed brick is fine.
     assert build(client, maker, piece("brick-2x2", 10, 3, 10)).status_code == 200
+
+
+def test_a_whole_build_comes_down_at_once(
+    client: TestClient, maker: dict[str, str], visitor: dict[str, str]
+) -> None:
+    by_hand = built(client, maker, x=-20, z=-20)
+    assert "build" not in everything(client)["bricks"][0]
+    first = build(client, maker, *TOWER).json()["build"]
+    second = build(client, maker, piece("brick-1x1", -10, 0, -10)).json()["build"]
+    # A brick of it moved away, or in someone's hand, still goes with it.
+    tower = [b for b in everything(client)["bricks"] if b.get("build") == first]
+    top = next(b for b in tower if b["shape"] == "plate-2x2")
+    assert pick(client, maker, top["id"]).status_code == 200
+    assert place(client, maker, top["id"], x=15, y=0, z=15).status_code == 200
+    held = next(b for b in tower if b["shape"] == "brick-2x2")
+    assert pick(client, maker, held["id"]).status_code == 200
+    rev = everything(client)["rev"]
+    assert client.delete(f"/api/lobby/bricks/builds/{first}", headers=visitor).status_code == 403
+    gone = client.delete(f"/api/lobby/bricks/builds/{first}", headers=maker)
+    assert gone.status_code == 200
+    assert gone.json() == {"rev": rev + 1, "removed": 3}
+    left = {b["id"] for b in everything(client)["bricks"]}
+    assert by_hand in left and len(left) == 2
+    # One delta says all of it went.
+    delta = client.get(f"/api/lobby/bricks?since={rev}").json()
+    assert sorted(delta["gone"]) == sorted(b["id"] for b in tower) and delta["bricks"] == []
+    # Gone already, never built, or not an id.
+    for missing in (first, "abcdefabcdef", "nope"):
+        nothing = client.delete(f"/api/lobby/bricks/builds/{missing}", headers=maker)
+        assert nothing.status_code == 404 and nothing.json() == {"error": "build_not_found"}
+    assert client.delete(f"/api/lobby/bricks/builds/{second}", headers=maker).status_code == 200
+
+
+def test_builds_made_before_builds_were_tagged_still_come_down_whole(
+    client: TestClient, maker: dict[str, str], clock: FakeClock
+) -> None:
+    db = get_state_db()
+    by_hand = built(client, maker, x=-20, z=-20)
+    build(client, maker, *TOWER)
+    build(client, maker, piece("brick-1x1", -10, 0, -10))
+    # As the cave was before: no tags, and never tagged.
+    db.execute("DELETE FROM lobby_bricks_builds")
+    db.execute("DELETE FROM lobby_bricks_meta WHERE key = 'builds_tagged'")
+    listed = everything(client)["bricks"]
+    tower = {b["build"] for b in listed if b["shape"] != "brick-1x1" and b["id"] != by_hand}
+    assert len(tower) == 1
+    # A build of one brick, and a brick made by hand, aren't builds.
+    assert all("build" not in b for b in listed if b["shape"] == "brick-1x1" or b["id"] == by_hand)
+    gone = client.delete(f"/api/lobby/bricks/builds/{tower.pop()}", headers=maker)
+    assert gone.json()["removed"] == 3
+    # The tags go with the tombstones.
+    clock.advance(2 * 86400)
+    everything(client)
+    assert db.query_all("SELECT * FROM lobby_bricks_builds") == []
 
 
 def test_only_the_maker_builds_and_within_the_cap(

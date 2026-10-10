@@ -3,7 +3,7 @@
 /**
  * Building with bricks, under Play: the Lego bot's maker row (shape, colour,
  * Make brick) and everyone's hands (Pick up / Place, Turn, Drop, and for the
- * Lego bot Remove), each with its key.
+ * Lego bot Remove and Take down build), each with its key.
  *
  * Every state says itself, on the buttons and on the line under them:
  * - the build loading ("Loading the bricks…", a spinner), or failed to load
@@ -11,7 +11,10 @@
  * - checking who you are, or why you can only look (signed out, the practice
  *   account);
  * - a write under way: its button shows a spinner and says so (Making…,
- *   Picking up…, Placing…, Dropping…, Removing…), and every button waits;
+ *   Picking up…, Placing…, Dropping…, Removing…, Taking down…), and every
+ *   button waits;
+ * - taking down a whole build asks first: the button turns into "Take down
+ *   all N?" (with Cancel) and the build is outlined until it's confirmed;
  * - holding a brick: whether it fits where it's aimed, and why not;
  * - not holding: what you're pointing at and whether you can take it.
  *
@@ -40,6 +43,7 @@ export const INITIAL_BRICKS: BrickState = {
   held: null,
   aim: null,
   target: null,
+  takeDown: null,
   blueprint: null,
 };
 
@@ -64,6 +68,8 @@ function note(state: BrickState): string {
       return 'Putting it down…';
     case 'removing':
       return 'Removing it…';
+    case 'taking-down':
+      return 'Taking down the build…';
     case 'switching':
       return 'Switching…';
     case 'reading':
@@ -91,11 +97,19 @@ function note(state: BrickState): string {
     if (aim.fits) return `It fits: E builds all ${state.blueprint.bricks.toLocaleString('en')} bricks, R turns it, Q puts it away.`;
     return `${aim.blocked.toLocaleString('en')} brick${aim.blocked === 1 ? '' : 's'} won’t fit here: ${aim.why ?? ''}`;
   }
+  if (state.takeDown) {
+    const n = state.takeDown.count.toLocaleString('en');
+    return `Take down all ${n} brick${state.takeDown.count === 1 ? '' : 's'} of the outlined build? Shift+X again to confirm.`;
+  }
   if (state.held) {
     if (!state.aim) return `Holding a ${shapeLabel(state.held)}: aim at the floor or a brick.`;
     return state.aim.fits ? 'It fits: E to place it, R to turn it.' : (state.aim.why ?? 'It doesn’t fit there.');
   }
   if (state.target) {
+    const { build } = state.target;
+    if (state.maker && build !== null) {
+      return `A ${state.target.label} of a ${build.toLocaleString('en')}-brick build: E to pick it up, X to remove it, Shift+X to take down the whole build.`;
+    }
     return state.target.can === 'pick'
       ? `A ${state.target.label}: E to pick it up.`
       : 'Part of a build: only the Lego bot can take it out.';
@@ -267,6 +281,30 @@ export function BuildControls({ state, onCommand }: BuildControlsProps) {
             {state.busy === 'removing' && <Spinner />}
             {state.busy === 'removing' ? 'Removing…' : 'Remove'}
             <kbd className={styles.key}>X</kbd>
+          </button>
+        )}
+        {state.maker && (
+          <button
+            type="button"
+            className={state.takeDown ? styles.takeDownConfirm : undefined}
+            disabled={!ready || waiting || (state.takeDown === null && state.target?.build == null)}
+            aria-busy={state.busy === 'taking-down' || undefined}
+            aria-keyshortcuts="Shift+X"
+            data-take-down={state.takeDown ? 'confirm' : undefined}
+            onClick={() => onCommand({ kind: 'take-down' })}
+          >
+            {state.busy === 'taking-down' && <Spinner />}
+            {state.busy === 'taking-down'
+              ? 'Taking down…'
+              : state.takeDown
+                ? `Take down all ${state.takeDown.count.toLocaleString('en')}?`
+                : 'Take down build'}
+            <kbd className={styles.key}>⇧X</kbd>
+          </button>
+        )}
+        {state.maker && state.takeDown && state.busy === null && (
+          <button type="button" onClick={() => onCommand({ kind: 'cancel-take-down' })}>
+            Cancel
           </button>
         )}
       </div>

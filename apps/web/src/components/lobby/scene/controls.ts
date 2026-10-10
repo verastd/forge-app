@@ -53,7 +53,7 @@ export interface ControlsOptions {
   /** G: wave. */
   onWave?(): void;
   /**
-   * The building keys: B, C (Shift+C backwards), X, E, R, Q and 1–9, by
+   * The building keys: B, C (Shift+C backwards), X (Shift+X a whole build), E, R, Q and 1–9, by
    * `KeyboardEvent.code`. Only while building is in the cave.
    */
   onBrickKey?(code: string, shift: boolean): void;
