@@ -2,9 +2,10 @@
 build.
 
 Only the brick maker (the robot wearing a back model that makes bricks: services/avatars.py
-`is_brick_maker`) makes bricks and takes them away. Anyone signed in may pick up a loose
-brick and place it; a brick something is fastened to is part of a build, frozen for
-everyone but the maker. Where a brick may go is services/brick_rules.py.
+`is_brick_maker`, or an admin who switched on "Be the Lego bot" to test) makes bricks and
+takes them away. Anyone signed in may pick up a loose brick and place it; a brick something
+is fastened to is part of a build, frozen for everyone but the maker. Where a brick may go
+is services/brick_rules.py.
 
 A brick is held (in someone's hand: x, y, z, rot is where it was taken from) or placed. A
 hold left longer than HOLD_LAPSE (they left, or their tab died) lapses: the brick goes back
@@ -25,6 +26,7 @@ from forge_api.services import avatars as avatars_service
 from forge_api.services import brick_rules as rules
 from forge_api.services import members as members_service
 from forge_api.services.errors import ApiError
+from forge_api.services.identity import Identity, is_admin
 from forge_api.services.state import StateDB, register_schema
 
 FLAG: Final = "apps_lobby"
@@ -52,6 +54,12 @@ register_schema(
             updated_at TEXT NOT NULL
         )""",
         "CREATE INDEX IF NOT EXISTS lobby_bricks_rev ON lobby_bricks (rev)",
+        # Admins testing as the brick maker ("Be the Lego bot"). A row: switched on. It only
+        # counts while they're still an admin (is_admin, every call).
+        """CREATE TABLE IF NOT EXISTS lobby_bricks_stand_ins (
+            member_id TEXT PRIMARY KEY,
+            since TEXT NOT NULL
+        )""",
         # The cave's revision (`rev`), and the oldest revision a delta can start from
         # (`floor`: tombstones before it are gone).
         """CREATE TABLE IF NOT EXISTS lobby_bricks_meta (
@@ -188,14 +196,53 @@ def list_bricks(db: StateDB, since: int | None, now: datetime) -> BrickList:
     )
 
 
-def me(db: StateDB, member_id: str) -> BrickMe:
+def _member(user: Identity) -> str:
+    return f"gh:{user.sub}"
+
+
+def _standing_in(db: StateDB, user: Identity) -> bool:
+    row = db.query_one("SELECT 1 FROM lobby_bricks_stand_ins WHERE member_id = ?", (_member(user),))
+    return row is not None
+
+
+def _is_maker(db: StateDB, user: Identity) -> bool:
+    """The brick maker: wearing the brick-making backpack, or an admin testing as it."""
+    if avatars_service.is_brick_maker(db, _member(user)):
+        return True
+    return is_admin(user) and _standing_in(db, user)
+
+
+def me(db: StateDB, user: Identity) -> BrickMe:
     """Who the caller is to the bricks, and whether they make them (the browser's keys and
     panel follow it; every maker-only call still checks)."""
-    return BrickMe(memberId=member_id, maker=avatars_service.is_brick_maker(db, member_id))
+    admin = is_admin(user)
+    return BrickMe(
+        memberId=_member(user),
+        maker=_is_maker(db, user),
+        canStandIn=admin,
+        standIn=admin and _standing_in(db, user),
+    )
 
 
-def _require_maker(db: StateDB, member_id: str) -> None:
-    if not avatars_service.is_brick_maker(db, member_id):
+def stand_in(db: StateDB, user: Identity, on: bool, now: datetime) -> BrickMe:
+    """An admin takes over the brick maker's powers to test them, or gives them back.
+    403 admin_only."""
+    if not is_admin(user):
+        raise ApiError(403, {"error": "admin_only"})
+    with db.transaction():
+        if on:
+            db.execute(
+                "INSERT INTO lobby_bricks_stand_ins (member_id, since) VALUES (?, ?) "
+                "ON CONFLICT (member_id) DO NOTHING",
+                (_member(user), members_service.to_db(now)),
+            )
+        else:
+            db.execute("DELETE FROM lobby_bricks_stand_ins WHERE member_id = ?", (_member(user),))
+        return me(db, user)
+
+
+def _require_maker(db: StateDB, user: Identity) -> None:
+    if not _is_maker(db, user):
         raise ApiError(403, {"error": "not_the_maker"})
 
 
@@ -213,11 +260,12 @@ def _change(db: StateDB, rev: int, brick_id: str) -> BrickChange:
     return BrickChange(rev=rev, brick=_brick(row) if row else None)
 
 
-def make(db: StateDB, member_id: str, body: BrickMake, now: datetime) -> BrickChange:
+def make(db: StateDB, user: Identity, body: BrickMake, now: datetime) -> BrickChange:
     """A new brick in the maker's hand. 403 not_the_maker, 409 hands_full / brick_limit."""
+    member_id = _member(user)
     with db.transaction():
         _lapse(db, now)
-        _require_maker(db, member_id)
+        _require_maker(db, user)
         _hands_free(db, member_id)
         count = db.query_one("SELECT COUNT(*) AS n FROM lobby_bricks WHERE gone = 0")
         if count is not None and count["n"] >= rules.LIMIT:
@@ -233,9 +281,10 @@ def make(db: StateDB, member_id: str, body: BrickMake, now: datetime) -> BrickCh
         return _change(db, rev, brick_id)
 
 
-def pick(db: StateDB, member_id: str, brick_id: str, now: datetime) -> BrickChange:
+def pick(db: StateDB, user: Identity, brick_id: str, now: datetime) -> BrickChange:
     """Into the caller's hand: a loose brick for anyone, any brick for the maker.
     404 brick_not_found; 409 taken (someone has it), frozen (part of a build), hands_full."""
+    member_id = _member(user)
     with db.transaction():
         _lapse(db, now)
         row = _row(db, brick_id)
@@ -244,7 +293,7 @@ def pick(db: StateDB, member_id: str, brick_id: str, now: datetime) -> BrickChan
         if row["holder"] is not None:
             raise ApiError(409, {"error": "taken"})
         _hands_free(db, member_id)
-        if not avatars_service.is_brick_maker(db, member_id):
+        if not _is_maker(db, user):
             here = _at(row)
             if rules.frozen(here, _placed(db, but=brick_id)):
                 raise ApiError(409, {"error": "frozen"})
@@ -270,10 +319,10 @@ def place(
         return _change(db, rev, brick_id)
 
 
-def remove(db: StateDB, member_id: str, brick_id: str, now: datetime) -> BrickChange:
+def remove(db: StateDB, user: Identity, brick_id: str, now: datetime) -> BrickChange:
     """Takes a brick out of the cave (the maker only). 403 not_the_maker, 404."""
     with db.transaction():
-        _require_maker(db, member_id)
+        _require_maker(db, user)
         _row(db, brick_id)
         rev = _take_away(db, brick_id, now)
         return BrickChange(rev=rev)

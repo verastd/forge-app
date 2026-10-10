@@ -1307,6 +1307,16 @@ class BrickChange(BaseModel):
 class BrickMe(BaseModel):
     memberId: _AvatarMemberId
     maker: bool
+    #: An admin may take over the brick maker's powers to test them…
+    canStandIn: bool
+    #: …and has.
+    standIn: bool
+
+
+class BrickStandIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    on: StrictBool
 
 
 class BrickMake(BaseModel):
