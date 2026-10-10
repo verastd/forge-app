@@ -53,7 +53,7 @@ const KIND = /^[a-z][a-z0-9-]{0,15}$/;
 const STATE_MAX_CHARS = 80;
 const CONFIRM_MS = Object.freeze({ min: 100, max: 10_000 });
 
-/** The lobby's behaviours today: a wave, and catch-and-throw (actions.ts, play.ts). */
+/** The lobby's behaviours today: a wave, catch-and-throw (actions.ts, play.ts), and building bricks (bricks.ts). */
 export const BEHAVIORS: readonly BehaviorEntry[] = deepFreeze<readonly BehaviorEntry[]>([
   {
     id: 'wave',
@@ -91,6 +91,26 @@ export const BEHAVIORS: readonly BehaviorEntry[] = deepFreeze<readonly BehaviorE
       paused: 'Catch is switched off for now',
     },
     confirmWithinMs: 3500,
+    wireVersion: 1,
+  },
+  {
+    id: 'bricks',
+    title: 'Building bricks',
+    flag: 'apps_lobby',
+    // Only a ping: the API keeps the bricks and has the last word (bricks.ts).
+    intents: ['bricks'],
+    entityKinds: ['brick'],
+    authority: 'world',
+    budget: { entities: 5000, bytesPerSecond: ACTION_MAX_LENGTH * MAX_ACTIONS_PER_SECOND, msPerTick: 2, intentsPerSecond: MAX_ACTIONS_PER_SECOND },
+    states: {
+      requested: 'Placing…',
+      confirmed: 'Placed',
+      contested: 'Taken: someone got it first',
+      rejected: 'It doesn’t fit there',
+      outOfRange: 'Too far away to reach',
+      paused: 'Building is switched off for now',
+    },
+    confirmWithinMs: 3000,
     wireVersion: 1,
   },
 ]);
