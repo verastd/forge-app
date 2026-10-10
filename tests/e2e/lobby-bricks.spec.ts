@@ -423,8 +423,12 @@ test.describe('building with bricks', () => {
     await expect(toast(page, 'That build is already gone.')).toBeVisible();
     await expect(lobbyRoot(page)).toHaveAttribute('data-bricks', '4');
 
-    // Confirmed with the button: Taking down… until the API answers, then all of it is gone at once.
-    await page.keyboard.press('Shift+KeyX');
+    // Holding a brick of it, the button still offers the whole build (the held brick goes too);
+    // confirmed with the button: Taking down… until the API answers, then all of it is gone at once.
+    await page.keyboard.press('KeyE');
+    await expect(lobbyRoot(page)).toHaveAttribute('data-held', 'brick-2x4');
+    await takeDown.click();
+    await expect(lobbyRoot(page)).toHaveAttribute('data-brick-take-down', '3');
     cave.hold = true;
     await build(page).getByRole('button', { name: /Take down all 3\?/ }).click();
     const taking = build(page).getByRole('button', { name: /Taking down…/ });
@@ -437,6 +441,7 @@ test.describe('building with bricks', () => {
     await expect(lobbyRoot(page)).toHaveAttribute('data-bricks', '1');
     expect(cave.calls).toContain(`DELETE builds/${BUILD}`);
     expect([...cave.bricks.keys()]).toEqual(['a00000000004']);
+    await expect(lobbyRoot(page)).toHaveAttribute('data-held', '');
     // Nothing of a build to point at now: the button waits, and Shift+X says what it needs.
     await expect(takeDown).toBeDisabled();
     await page.keyboard.press('Shift+KeyX');

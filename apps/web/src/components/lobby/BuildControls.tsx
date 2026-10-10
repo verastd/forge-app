@@ -43,6 +43,7 @@ export const INITIAL_BRICKS: BrickState = {
   held: null,
   aim: null,
   target: null,
+  heldBuild: null,
   takeDown: null,
   blueprint: null,
 };
@@ -287,7 +288,7 @@ export function BuildControls({ state, onCommand }: BuildControlsProps) {
           <button
             type="button"
             className={state.takeDown ? styles.takeDownConfirm : undefined}
-            disabled={!ready || waiting || (state.takeDown === null && state.target?.build == null)}
+            disabled={!ready || waiting || (state.takeDown === null && (state.target?.build ?? state.heldBuild) == null)}
             aria-busy={state.busy === 'taking-down' || undefined}
             aria-keyshortcuts="Shift+X"
             data-take-down={state.takeDown ? 'confirm' : undefined}

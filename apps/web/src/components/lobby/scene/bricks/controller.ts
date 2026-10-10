@@ -92,6 +92,8 @@ export interface BrickState {
   aim: { fits: boolean; why: string | null } | null;
   /** Not holding: the brick you're pointing at, what you can do with it, and how many bricks its blueprint build has (null: made by hand). */
   target: { label: string; can: 'pick' | 'frozen'; build: number | null } | null;
+  /** Holding a brick of a blueprint build: how many bricks the build has (null: not holding one). */
+  heldBuild: number | null;
   /** The Lego bot asked to take down a whole build: how many bricks, waiting for them to confirm. */
   takeDown: { count: number } | null;
   /**
@@ -895,6 +897,7 @@ export function createBricks(
         held || !target
           ? null
           : { label: shapeLabel(target.shape), can: target.can, build: buildSize(bricks.get(target.id)?.build) },
+      heldBuild: held ? buildSize(held.build) : null,
       takeDown: armed ? { count: ofBuild(armed.build).length } : null,
       blueprint: blueprint
         ? { name: blueprint.name, bricks: blueprint.bricks.length, skipped: skippedText(blueprint), aim: plannedAim }
