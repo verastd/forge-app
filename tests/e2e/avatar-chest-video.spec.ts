@@ -5,6 +5,7 @@ import { expect, test } from '@playwright/test';
 import type { Page, Route } from '@playwright/test';
 
 import { signInAs } from './helpers/session';
+import { json, withStandIn } from './helpers/standin';
 
 /**
  * A chestplate that's a short clip (MP4 or WebM) instead of an image: read in
@@ -115,5 +116,43 @@ test.describe('a chestplate that plays', () => {
     await expect(page.getByRole('alert').filter({ hasText: 'That file isn’t really a WebM.' })).toBeVisible();
     await page.getByRole('button', { name: 'Remove clip' }).click();
     await expect(page.getByText('Their initials (no image yet)')).toBeVisible();
+  });
+
+  test('a saved clip plays in its thumbnail, and holds still for anyone who asked for less motion', async ({ page, context, baseURL }) => {
+    await signInAs(context, baseURL ?? '', { sub: '4242', login: 'trent-admin' });
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await openEditor(page, { ...ROBOT, chest: SHA, chestType: 'video/webm' });
+    const thumb = page.locator('video[src^="blob:"]');
+    await expect(thumb).toHaveCount(1);
+    await expect(thumb).not.toHaveAttribute('autoplay', /.*/);
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    await expect(page.locator('video[src^="blob:"][autoplay]')).toHaveCount(1);
+  });
+});
+
+test.describe('a stored clip, through the avatars BFF, against a stand-in API', () => {
+  test('comes back as the clip it is, cached for good', async ({ context }) => {
+    const mp4 = 'a'.repeat(64);
+    const webm = 'b'.repeat(64);
+    await withStandIn(
+      (request) =>
+        request.path === `/api/avatars/assets/${mp4}`
+          ? { status: 200, headers: { 'content-type': 'video/mp4' }, body: 'MP4DATA' }
+          : request.path === `/api/avatars/assets/${webm}`
+            ? { status: 200, headers: { 'content-type': 'video/webm' }, body: 'WEBMDATA' }
+            : json(404, { error: 'asset_not_found' }),
+      async () => {
+        for (const [sha, type, body] of [
+          [mp4, 'video/mp4', 'MP4DATA'],
+          [webm, 'video/webm', 'WEBMDATA'],
+        ] as const) {
+          const clip = await context.request.get(`/bff/avatars/assets/${sha}`);
+          expect(clip.status(), type).toBe(200);
+          expect(clip.headers()['content-type']).toBe(type);
+          expect(clip.headers()['cache-control']).toBe('public, max-age=31536000, immutable');
+          expect(await clip.text()).toBe(body);
+        }
+      },
+    );
   });
 });

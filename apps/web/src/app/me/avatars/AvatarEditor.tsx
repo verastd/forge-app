@@ -187,6 +187,50 @@ function videoFacts(file: File): Promise<{ width: number; height: number; durati
   });
 }
 
+/**
+ * A saved chestplate clip, playing in its thumbnail: fetched whole and played from memory (the
+ * asset route sends no byte ranges, which Safari's <video> needs to stream), still for anyone
+ * who'd rather nothing moved, a spinner while it comes, a mark if it can't.
+ */
+function ChestClipThumb({ sha }: { sha: string }) {
+  const [state, setState] = useState<{ kind: 'loading' } | { kind: 'ready'; url: string } | { kind: 'error' }>({ kind: 'loading' });
+  const [still, setStill] = useState(false);
+  useEffect(() => {
+    const query = window.matchMedia('(prefers-reduced-motion: reduce)');
+    setStill(query.matches);
+    const changed = (event: MediaQueryListEvent): void => setStill(event.matches);
+    query.addEventListener('change', changed);
+    return () => query.removeEventListener('change', changed);
+  }, []);
+  useEffect(() => {
+    let url: string | null = null;
+    let gone = false;
+    setState({ kind: 'loading' });
+    fetch(`/bff/avatars/assets/${sha}`)
+      .then((response) => {
+        if (!response.ok) throw new Error(String(response.status));
+        return response.blob();
+      })
+      .then(
+        (blob) => {
+          if (gone) return;
+          url = URL.createObjectURL(blob);
+          setState({ kind: 'ready', url });
+        },
+        () => {
+          if (!gone) setState({ kind: 'error' });
+        },
+      );
+    return () => {
+      gone = true;
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [sha]);
+  if (state.kind === 'loading') return <span className="spinner" aria-hidden="true" />;
+  if (state.kind === 'error') return <span title="The clip couldn’t load">!</span>;
+  return <video key={String(still)} className={styles.chestClip} src={state.url} muted loop playsInline autoPlay={!still} preload="auto" />;
+}
+
 /** What's wrong with a clip, in words; null when nothing is. */
 function clipProblemText(problem: ReturnType<typeof chestVideoProblem>): string | null {
   if (!problem) return null;
@@ -861,9 +905,7 @@ function RobotEditor({ member, list, setList, onDirty, onDraft }: RobotEditorPro
               }
               aria-hidden="true"
             >
-              {chestIsClip && saved?.chest && (
-                <video className={styles.chestClip} src={`/bff/avatars/assets/${saved.chest}`} muted loop autoPlay playsInline />
-              )}
+              {chestIsClip && saved?.chest && <ChestClipThumb sha={saved.chest} />}
               {!saved?.chest && emblemInitials(member.login)}
             </span>
             <div className="stack" style={{ gap: 6 }}>
