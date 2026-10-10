@@ -1,7 +1,7 @@
 /**
  * The bricks BFF (behind `apps_lobby`, which the API enforces): the lobby
- * reads the cave's bricks from `GET /bff/lobby/bricks?since=<rev>` (forwarded
- * as nobody when signed out), and builds with the rest as the signed-in
+ * reads the cave's bricks from `GET /bff/lobby/bricks?since=<rev>` (always
+ * forwarded as nobody, so the practice account sees the build too), and builds with the rest as the signed-in
  * GitHub member: `GET me` says who you are and whether you make bricks, the brick maker makes (`POST`) and takes away (`DELETE
  * {id}`), anyone picks up (`PUT {id}/pick`) and places (`PUT {id}/place`).
  * Who is the brick maker is the API's to decide, never this file's.
@@ -33,7 +33,8 @@ interface Route {
 }
 
 const ROUTES: readonly Route[] = [
-  { method: 'GET', path: /^$/, identity: 'optional' },
+  // The build is public: asked as nobody, so the practice account sees it too.
+  { method: 'GET', path: /^$/, identity: 'none' },
   { method: 'GET', path: /^me$/, identity: 'required' },
   { method: 'POST', path: /^$/, identity: 'required' },
   { method: 'PUT', path: new RegExp(`^${BRICK}/pick$`), identity: 'required' },

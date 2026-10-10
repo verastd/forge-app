@@ -75,8 +75,13 @@ export interface ForwardSpec {
   method: 'GET' | 'POST' | 'DELETE' | 'PATCH' | 'PUT';
   /** The API path, already validated and encoded by the route, e.g. `/api/bridge/claim`. */
   upstreamPath: string;
-  /** `optional`: forwarded as nobody when signed out. `required`: 401 when signed out. */
-  identity: 'required' | 'optional';
+  /**
+   * `optional`: forwarded as nobody when signed out. `required`: 401 when
+   * signed out. `none` (a public read only): always forwarded as nobody,
+   * whoever is asking, the practice account included, so this server never
+   * looks at the session or mints for it.
+   */
+  identity: 'required' | 'optional' | 'none';
   timeoutMs?: number;
   /**
    * The body cap, when a route needs more than {@link MAX_BODY_BYTES}: a
@@ -115,12 +120,13 @@ function responseHeaders(upstream: Headers): Headers {
 /** Check, vouch and forward one browser request to the API (see the module comment). */
 export async function forward(request: NextRequest, spec: ForwardSpec): Promise<Response> {
   if (spec.method !== 'GET' && !isSameOrigin(request)) return bffError(403, 'bad_origin');
-  // Keys anyone can seal under: never mint, whoever seems to be asking.
-  if (sessionKeys()?.practiceOnly) return bffError(503, 'not_configured');
+  const anonymous = spec.identity === 'none' && spec.method === 'GET';
+  // Keys anyone can seal under: never mint, whoever seems to be asking. (Asking as nobody mints nothing.)
+  if (!anonymous && sessionKeys()?.practiceOnly) return bffError(503, 'not_configured');
   const base = apiUrl();
   if (base === null) return bffError(503, 'not_configured');
 
-  const session = await getSession();
+  const session = anonymous ? null : await getSession();
   if (session?.demo === true) return bffError(403, 'practice_session');
   if (session === null && spec.identity === 'required') return bffError(401, 'unauthenticated');
 

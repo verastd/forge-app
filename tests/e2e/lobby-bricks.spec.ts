@@ -3,7 +3,8 @@ import type { Page, Route } from '@playwright/test';
 
 import { encodeAction } from '../../packages/lobby/dist/index.js';
 import { addGhost, lobbyRoot, openLobby, seedCamera, serveFlags } from './helpers/lobby';
-import { signInAs } from './helpers/session';
+import { demoSignIn, signInAs } from './helpers/session';
+import { assertionClaims, json, withStandIn } from './helpers/standin';
 
 /**
  * Building with bricks in the cave, project `chromium-demo`.
@@ -274,5 +275,57 @@ test.describe('building with bricks', () => {
     );
     await expect(lobbyRoot(page)).toHaveAttribute('data-bricks', '1', { timeout: 5_000 });
     expect(cave.calls.some((c) => c.startsWith('GET ?since='))).toBe(true);
+  });
+});
+
+test.describe('the bricks BFF, against a stand-in API', () => {
+  test.describe.configure({ mode: 'serial', timeout: 60_000 });
+
+  const LIST = { rev: 3, full: true, bricks: [brick('aaaaaaaaaaaa', 0, 0, 0)], gone: [] };
+
+  test('the build goes up as nobody, even for the practice account; building needs you, as you', async ({ page, context, baseURL }) => {
+    const base = baseURL ?? '';
+    await withStandIn(
+      (request) =>
+        request.path.startsWith('/api/lobby/bricks?') || request.path === '/api/lobby/bricks'
+          ? request.method === 'GET'
+            ? json(200, LIST)
+            : json(200, { rev: 4, brick: { ...brick('dddddddddddd', 0, 0, 0), holder: 'gh:4242' } })
+          : request.path === '/api/lobby/bricks/me'
+            ? json(200, { memberId: 'gh:4242', maker: true })
+            : undefined,
+      async (seen) => {
+        // Signed out: the build, as nobody; a since is passed on, anything else is refused here.
+        const list = await context.request.get('/bff/lobby/bricks?since=2');
+        expect(list.status()).toBe(200);
+        expect(await list.json()).toEqual(LIST);
+        expect(seen.at(-1)?.path).toBe('/api/lobby/bricks?since=2');
+        expect(seen.at(-1)?.authorization).toBeNull();
+        expect((await context.request.get('/bff/lobby/bricks?since=-1')).status()).toBe(400);
+        expect((await context.request.get('/bff/lobby/bricks/me')).status()).toBe(401);
+        expect((await context.request.get('/bff/lobby/bricks/nope')).status()).toBe(404);
+
+        // The practice account: still sees the build (as nobody), still can't build.
+        await page.goto('/signin');
+        await demoSignIn(page);
+        const practice = await context.request.get('/bff/lobby/bricks');
+        expect(practice.status()).toBe(200);
+        expect(seen.at(-1)?.authorization).toBeNull();
+        expect((await context.request.get('/bff/lobby/bricks/me')).status()).toBe(403);
+
+        // Signed in with GitHub: who you are, and a brick made as you.
+        await context.clearCookies();
+        await signInAs(context, base, { sub: '4242', login: 'lego-bot' });
+        expect(await (await context.request.get('/bff/lobby/bricks/me')).json()).toEqual({ memberId: 'gh:4242', maker: true });
+        expect(assertionClaims(seen.at(-1)?.authorization)).toMatchObject({ sub: '4242' });
+        const made = await context.request.post('/bff/lobby/bricks', {
+          data: { shape: 'brick-1x1', color: 'red' },
+          headers: { origin: base },
+        });
+        expect(made.status()).toBe(200);
+        expect(seen.at(-1)?.method).toBe('POST');
+        expect(assertionClaims(seen.at(-1)?.authorization)).toMatchObject({ sub: '4242' });
+      },
+    );
   });
 });
