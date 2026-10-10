@@ -58,6 +58,10 @@ class Cave {
   listStatus = 200;
   made = 0;
 
+  /** An admin's "Be the Lego bot", for testing (`admin` says whether they may). */
+  admin = false;
+  standIn = false;
+
   constructor(
     private readonly maker: boolean,
     initial: Brick[] = [],
@@ -78,7 +82,8 @@ class Cave {
     this.calls.push(`${method} ${path}${url.search}`);
     const reply = (status: number, body: unknown) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 
-    if (method === 'GET' && path === 'me') return reply(200, { memberId: ME, maker: this.maker });
+    const me = () => ({ memberId: ME, maker: this.maker || this.standIn, canStandIn: this.admin, standIn: this.standIn });
+    if (method === 'GET' && path === 'me') return reply(200, me());
     if (method === 'GET' && path === '') {
       if (this.listStatus !== 200) return reply(this.listStatus, { error: 'service_unreachable' });
       return reply(200, { rev: this.rev, full: true, bricks: [...this.bricks.values()], gone: [] });
@@ -91,6 +96,11 @@ class Cave {
       const { status, body } = this.refuse;
       this.refuse = null;
       return reply(status, body);
+    }
+    if (method === 'PUT' && path === 'me/stand-in') {
+      if (!this.admin) return reply(403, { error: 'admin_only' });
+      this.standIn = (JSON.parse(request.postData() ?? '{}') as { on: boolean }).on;
+      return reply(200, me());
     }
     this.rev += 1;
     if (method === 'POST' && path === '') {
@@ -243,6 +253,45 @@ test.describe('building with bricks', () => {
     expect(cave.calls.some((c) => c.startsWith('PUT'))).toBe(false);
   });
 
+  test('an admin can be the Lego bot to test it, and stop, each switch saying so', async ({ page, context, baseURL }) => {
+    await signInAs(context, baseURL ?? '', { sub: '4242', login: 'trent-admin' });
+    const cave = new Cave(false);
+    cave.admin = true;
+    await enter(page, cave);
+    const testing = page.getByRole('group', { name: 'Testing' });
+    const toggle = testing.getByRole('button', { name: /Be the Lego bot/ });
+    await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+    await expect(page.getByRole('group', { name: 'Make bricks' })).toHaveCount(0);
+
+    cave.hold = true;
+    await toggle.click();
+    const switching = testing.getByRole('button', { name: /Switching…/ });
+    await expect(switching).toHaveAttribute('aria-busy', 'true');
+    await expect(switching).toBeDisabled();
+    await expect(note(page)).toContainText('Switching…');
+    cave.release();
+    await expect(lobbyRoot(page)).toHaveAttribute('data-brick-stand-in', 'on');
+    await expect(toast(page, 'You’re the Lego bot now (testing)')).toBeVisible();
+    await expect(testing.getByRole('button', { name: /Being the Lego bot/ })).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByRole('group', { name: 'Make bricks' })).toBeVisible();
+    await expect(note(page)).toContainText('Testing as the Lego bot: B makes a brick.');
+    // The Lego bot's keys work now.
+    await page.keyboard.press('KeyB');
+    await expect(lobbyRoot(page)).toHaveAttribute('data-held', 'brick-2x4');
+
+    await testing.getByRole('button', { name: /Being the Lego bot/ }).click();
+    await expect(lobbyRoot(page)).toHaveAttribute('data-brick-stand-in', 'off');
+    await expect(toast(page, 'Back to yourself')).toBeVisible();
+    await expect(page.getByRole('group', { name: 'Make bricks' })).toHaveCount(0);
+  });
+
+  test('a visitor has no Lego bot switch', async ({ page, context, baseURL }) => {
+    await signInAs(context, baseURL ?? '', { sub: '4242', login: 'visitor' });
+    await enter(page, new Cave(false));
+    await expect(lobbyRoot(page)).toHaveAttribute('data-brick-access', 'member');
+    await expect(page.getByRole('group', { name: 'Testing' })).toHaveCount(0);
+  });
+
   test('the build failing to load says so, and Try again loads it', async ({ page }) => {
     const cave = new Cave(false, [brick('aaaaaaaaaaaa', 0, 0, 0)]);
     cave.listStatus = 502;
@@ -292,7 +341,9 @@ test.describe('the bricks BFF, against a stand-in API', () => {
             ? json(200, LIST)
             : json(200, { rev: 4, brick: { ...brick('dddddddddddd', 0, 0, 0), holder: 'gh:4242' } })
           : request.path === '/api/lobby/bricks/me'
-            ? json(200, { memberId: 'gh:4242', maker: true })
+            ? json(200, { memberId: 'gh:4242', maker: true, canStandIn: false, standIn: false })
+            : request.path === '/api/lobby/bricks/me/stand-in'
+              ? json(200, { memberId: 'gh:4242', maker: true, canStandIn: true, standIn: true })
             : undefined,
       async (seen) => {
         // Signed out: the build, as nobody; a since is passed on, anything else is refused here.
@@ -316,7 +367,17 @@ test.describe('the bricks BFF, against a stand-in API', () => {
         // Signed in with GitHub: who you are, and a brick made as you.
         await context.clearCookies();
         await signInAs(context, base, { sub: '4242', login: 'lego-bot' });
-        expect(await (await context.request.get('/bff/lobby/bricks/me')).json()).toEqual({ memberId: 'gh:4242', maker: true });
+        expect(await (await context.request.get('/bff/lobby/bricks/me')).json()).toEqual({
+          memberId: 'gh:4242',
+          maker: true,
+          canStandIn: false,
+          standIn: false,
+        });
+        const standIn = await context.request.put('/bff/lobby/bricks/me/stand-in', { data: { on: true }, headers: { origin: base } });
+        expect(standIn.status()).toBe(200);
+        expect(seen.at(-1)?.method).toBe('PUT');
+        expect(seen.at(-1)?.path).toBe('/api/lobby/bricks/me/stand-in');
+        expect(assertionClaims(seen.at(-1)?.authorization)).toMatchObject({ sub: '4242' });
         expect(assertionClaims(seen.at(-1)?.authorization)).toMatchObject({ sub: '4242' });
         const made = await context.request.post('/bff/lobby/bricks', {
           data: { shape: 'brick-1x1', color: 'red' },

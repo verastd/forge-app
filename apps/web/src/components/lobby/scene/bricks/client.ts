@@ -41,6 +41,8 @@ export function refusalText(status: number, code: string, problem: BrickProblem 
       return 'Only the Lego bot makes and removes bricks.';
     case 'brick_limit':
       return `The cave is full: it holds ${BRICK.limit.toLocaleString('en')} bricks.`;
+    case 'admin_only':
+      return 'Only admins can take over the Lego bot.';
     case 'brick_not_found':
       return 'That brick is gone.';
     case 'unauthenticated':
@@ -62,6 +64,8 @@ export interface BrickClient {
   pick(id: string): Promise<BrickChange>;
   place(id: string, at: BrickPlace): Promise<BrickChange>;
   remove(id: string): Promise<BrickChange>;
+  /** Admins: be the brick maker for testing, or stop. */
+  standIn(on: boolean): Promise<BrickMe>;
 }
 
 async function call<T>(
@@ -106,5 +110,9 @@ export function createBrickClient(fetchImpl: typeof fetch = (...args) => fetch(.
     pick: (id) => call(fetchImpl, `/${id}/pick`, { method: 'PUT' }, change),
     place: (id, at) => call(fetchImpl, `/${id}/place`, { method: 'PUT', headers: JSON_HEADERS, body: JSON.stringify(at) }, change),
     remove: (id) => call(fetchImpl, `/${id}`, { method: 'DELETE' }, change),
+    standIn: (on) =>
+      call(fetchImpl, '/me/stand-in', { method: 'PUT', headers: JSON_HEADERS, body: JSON.stringify({ on }) }, (body) =>
+        BrickMeSchema.safeParse(body),
+      ),
   };
 }

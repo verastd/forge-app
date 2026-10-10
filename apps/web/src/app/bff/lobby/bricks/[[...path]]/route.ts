@@ -23,7 +23,7 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
 
 const BRICK = '[0-9a-f]{12}';
-const SEGMENT = new RegExp(`^(?:me|pick|place|${BRICK})$`);
+const SEGMENT = new RegExp(`^(?:me|stand-in|pick|place|${BRICK})$`);
 const SINCE = /^[0-9]{1,15}$/;
 
 interface Route {
@@ -36,6 +36,8 @@ const ROUTES: readonly Route[] = [
   // The build is public: asked as nobody, so the practice account sees it too.
   { method: 'GET', path: /^$/, identity: 'none' },
   { method: 'GET', path: /^me$/, identity: 'required' },
+  // Admins (the API checks): be the brick maker for testing, or stop.
+  { method: 'PUT', path: /^me\/stand-in$/, identity: 'required' },
   { method: 'POST', path: /^$/, identity: 'required' },
   { method: 'PUT', path: new RegExp(`^${BRICK}/pick$`), identity: 'required' },
   { method: 'PUT', path: new RegExp(`^${BRICK}/place$`), identity: 'required' },

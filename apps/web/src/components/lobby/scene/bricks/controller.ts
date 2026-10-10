@@ -47,7 +47,7 @@ import type { DrawnBrick } from './meshes';
 /** Who you are to the bricks: what the shell knows of your session. */
 export type Builder = 'member' | 'signed-out' | 'practice';
 
-export type BrickBusy = 'making' | 'picking' | 'placing' | 'dropping' | 'removing';
+export type BrickBusy = 'making' | 'picking' | 'placing' | 'dropping' | 'removing' | 'switching';
 
 export interface BrickState {
   /** The build: loading it, shown, or failed to load (and trying again). */
@@ -55,6 +55,10 @@ export interface BrickState {
   /** Whether you can build: checking with the API, yes, or why not. */
   access: 'checking' | 'member' | 'signed-out' | 'practice' | 'unavailable';
   maker: boolean;
+  /** An admin may take over the Lego bot to test it ("Be the Lego bot")… */
+  canStandIn: boolean;
+  /** …and has. */
+  standIn: boolean;
   /** Bricks in the cave, placed and held. */
   count: number;
   /** The shape and colour the Lego bot makes next (indexes into BRICK_SHAPES and BRICK_COLORS). */
@@ -78,7 +82,8 @@ export type BrickCommand =
   | { kind: 'rotate' }
   | { kind: 'drop' }
   | { kind: 'remove' }
-  | { kind: 'retry' };
+  | { kind: 'retry' }
+  | { kind: 'stand-in'; on: boolean };
 
 export interface BrickFrame {
   /** Your eye, for dropping in front of you and for reach. */
@@ -134,6 +139,8 @@ export function createBricks(
   let access: BrickState['access'] = 'checking';
   let memberId: string | null = null;
   let maker = false;
+  let canStandIn = false;
+  let standIn = false;
   let shape = 4;
   let color = 0;
   let rot: BrickRot = 0;
@@ -192,11 +199,15 @@ export function createBricks(
       if (disposed || builder !== 'member') return;
       memberId = me.memberId;
       maker = me.maker;
+      canStandIn = me.canStandIn;
+      standIn = me.standIn;
       access = 'member';
     } catch (error) {
       if (disposed || builder !== 'member') return;
       memberId = null;
       maker = false;
+      canStandIn = false;
+      standIn = false;
       access = error instanceof BrickRefusal && error.code === 'practice_session' ? 'practice' : 'unavailable';
     }
   };
@@ -444,6 +455,33 @@ export function createBricks(
 
   const run = (command: BrickCommand): void => {
     switch (command.kind) {
+      case 'stand-in': {
+        if (!canBuild() || busy !== null) return;
+        if (!canStandIn) {
+          events.onEvent('Only admins can take over the Lego bot.');
+          return;
+        }
+        busy = 'switching';
+        changed = true;
+        client
+          .standIn(command.on)
+          .then((me) => {
+            if (disposed) return;
+            maker = me.maker;
+            canStandIn = me.canStandIn;
+            standIn = me.standIn;
+            events.onEvent(me.standIn ? 'You’re the Lego bot now (testing): B makes a brick' : 'Back to yourself');
+          })
+          .catch((error: unknown) => {
+            if (disposed) return;
+            events.onEvent(error instanceof BrickRefusal ? error.message : 'Couldn’t switch: try again.');
+          })
+          .finally(() => {
+            busy = null;
+            changed = true;
+          });
+        return;
+      }
       case 'retry':
         if (sync === 'error') {
           sync = 'loading';
@@ -575,6 +613,8 @@ export function createBricks(
       sync,
       access,
       maker,
+      canStandIn,
+      standIn,
       count: bricks.size,
       shape,
       color,
@@ -593,6 +633,8 @@ export function createBricks(
       builder = next;
       memberId = null;
       maker = false;
+      canStandIn = false;
+      standIn = false;
       access = next === 'member' ? 'checking' : next;
       changed = true;
       if (next === 'member') void whoAmI();

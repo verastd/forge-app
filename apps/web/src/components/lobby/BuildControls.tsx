@@ -14,6 +14,10 @@
  *   Picking up…, Placing…, Dropping…, Removing…), and every button waits;
  * - holding a brick: whether it fits where it's aimed, and why not;
  * - not holding: what you're pointing at and whether you can take it.
+ *
+ * An admin also gets "Be the Lego bot": the brick maker's keys and powers,
+ * for testing, while someone else wears the backpack (Switching… while the
+ * API answers).
  */
 
 import { BRICK, BRICK_COLORS, BRICK_SHAPES } from '@forge/lobby';
@@ -27,6 +31,8 @@ export const INITIAL_BRICKS: BrickState = {
   sync: 'loading',
   access: 'checking',
   maker: false,
+  canStandIn: false,
+  standIn: false,
   count: 0,
   shape: 4,
   color: 0,
@@ -57,6 +63,8 @@ function note(state: BrickState): string {
       return 'Putting it down…';
     case 'removing':
       return 'Removing it…';
+    case 'switching':
+      return 'Switching…';
     case null:
       break;
   }
@@ -81,6 +89,7 @@ function note(state: BrickState): string {
       ? `A ${state.target.label}: E to pick it up.`
       : 'Part of a build: only the Lego bot can take it out.';
   }
+  if (state.standIn) return 'Testing as the Lego bot: B makes a brick.';
   return state.maker ? 'You’re the Lego bot: B makes a brick.' : 'Point at a loose brick to pick it up.';
 }
 
@@ -95,6 +104,20 @@ export function BuildControls({ state, onCommand }: BuildControlsProps) {
 
   return (
     <div className={styles.viewBar} data-control="build" data-sync={state.sync} data-access={state.access}>
+      {state.canStandIn && (
+        <div className={styles.view} role="group" aria-label="Testing">
+          <button
+            type="button"
+            aria-pressed={state.standIn}
+            disabled={!ready || waiting}
+            aria-busy={state.busy === 'switching' || undefined}
+            onClick={() => onCommand({ kind: 'stand-in', on: !state.standIn })}
+          >
+            {state.busy === 'switching' && <Spinner />}
+            {state.busy === 'switching' ? 'Switching…' : state.standIn ? 'Being the Lego bot' : 'Be the Lego bot'}
+          </button>
+        </div>
+      )}
       {state.maker && (
         <div className={styles.view} role="group" aria-label="Make bricks">
           <label className={styles.buildPick}>

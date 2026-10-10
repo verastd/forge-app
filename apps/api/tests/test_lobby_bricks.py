@@ -128,10 +128,14 @@ def test_me_says_who_makes_bricks(
     assert client.get("/api/lobby/bricks/me", headers=maker).json() == {
         "memberId": MAKER,
         "maker": True,
+        "canStandIn": False,
+        "standIn": False,
     }
     assert client.get("/api/lobby/bricks/me", headers=visitor).json() == {
         "memberId": "gh:3003",
         "maker": False,
+        "canStandIn": False,
+        "standIn": False,
     }
     assert client.get("/api/lobby/bricks/me").status_code == 401
 
@@ -394,3 +398,73 @@ def test_shapes_and_colours_match_the_lobby_and_the_contract() -> None:
             assert f"'{name}'" in shared
     assert f"stud: {rules.STUD}," in lobby and f"limit: {rules.LIMIT}," in lobby
     assert f"radius: {int(rules.RADIUS)}," in lobby and f"maxPlates: {rules.MAX_PLATES}," in lobby
+
+
+def stand_in(client: TestClient, headers: dict[str, str], on: bool) -> Any:
+    return client.put("/api/lobby/bricks/me/stand-in", headers=headers, json={"on": on})
+
+
+def test_an_admin_can_be_the_lego_bot_to_test_and_stop(
+    client: TestClient,
+    maker: dict[str, str],
+    admin_headers: dict[str, str],
+    visitor: dict[str, str],
+) -> None:
+    admin = admin_headers
+    assert client.get("/api/lobby/bricks/me", headers=admin).json() == {
+        "memberId": "gh:1002",
+        "maker": False,
+        "canStandIn": True,
+        "standIn": False,
+    }
+    assert make(client, admin).json() == {"error": "not_the_maker"}
+    # A brick of the real Lego bot's, built on: frozen for the admin until they take over.
+    base = built(client, maker)
+    top = built(client, maker, y=3)
+    assert pick(client, admin, top).json() == {"error": "frozen"}
+
+    on = stand_in(client, admin, True)
+    assert on.status_code == 200 and on.json()["maker"] is True and on.json()["standIn"] is True
+    # Twice is the same as once.
+    assert stand_in(client, admin, True).json()["standIn"] is True
+    assert pick(client, admin, top).status_code == 200
+    assert client.delete(f"/api/lobby/bricks/{top}", headers=admin).status_code == 200
+    made = make(client, admin)
+    assert made.status_code == 200 and made.json()["brick"]["holder"] == "gh:1002"
+    # The real Lego bot still is one.
+    assert client.get("/api/lobby/bricks/me", headers=maker).json()["maker"] is True
+    assert client.delete(f"/api/lobby/bricks/{base}", headers=maker).status_code == 200
+
+    off = stand_in(client, admin, False)
+    assert off.json() == {
+        "memberId": "gh:1002",
+        "maker": False,
+        "canStandIn": True,
+        "standIn": False,
+    }
+    assert client.delete(
+        f"/api/lobby/bricks/{made.json()['brick']['id']}", headers=admin
+    ).json() == {"error": "not_the_maker"}
+
+    refused = stand_in(client, visitor, True)
+    assert refused.status_code == 403 and refused.json() == {"error": "admin_only"}
+    assert client.put("/api/lobby/bricks/me/stand-in", json={"on": True}).status_code == 401
+    assert client.put(
+        "/api/lobby/bricks/me/stand-in", headers=admin, json={"on": "yes"}
+    ).status_code in (400, 422)
+
+
+def test_no_longer_an_admin_no_longer_the_lego_bot(
+    client: TestClient,
+    admin_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert stand_in(client, admin_headers, True).json()["maker"] is True
+    monkeypatch.setenv("FORGE_ADMIN_IDS", "999")
+    assert client.get("/api/lobby/bricks/me", headers=admin_headers).json() == {
+        "memberId": "gh:1002",
+        "maker": False,
+        "canStandIn": False,
+        "standIn": False,
+    }
+    assert make(client, admin_headers).json() == {"error": "not_the_maker"}

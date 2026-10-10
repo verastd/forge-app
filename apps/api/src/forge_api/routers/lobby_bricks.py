@@ -4,7 +4,8 @@
 - `GET /api/lobby/bricks?since=<rev>`: every brick, or what changed since `rev`. Public:
   everyone in the cave sees the build.
 - Signed in (`Member`): `GET /api/lobby/bricks/me` (who you are, and whether you make
-  bricks), `PUT /api/lobby/bricks/{id}/pick` and `.../{id}/place`.
+  bricks), `PUT /api/lobby/bricks/me/stand-in` (admins only: "Be the Lego bot", for
+  testing), `PUT /api/lobby/bricks/{id}/pick` and `.../{id}/place`.
 - The brick maker only (checked on every call): `POST /api/lobby/bricks` (make one) and
   `DELETE /api/lobby/bricks/{id}` (take one away).
 """
@@ -14,7 +15,15 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 
-from forge_api.models import BRICK_ID, BrickChange, BrickList, BrickMake, BrickMe, BrickPlace
+from forge_api.models import (
+    BRICK_ID,
+    BrickChange,
+    BrickList,
+    BrickMake,
+    BrickMe,
+    BrickPlace,
+    BrickStandIn,
+)
 from forge_api.routers.members import Db, Member, Now, body_doc, json_body
 from forge_api.services import flags as flags_service
 from forge_api.services import lobby_bricks as bricks_service
@@ -52,7 +61,18 @@ def list_bricks(db: Db, now: Now, since: Annotated[int | None, Query(ge=0)] = No
 
 @router.get("/me", response_model=BrickMe)
 def my_bricks(user: Member, db: Db) -> BrickMe:
-    return bricks_service.me(db, _member_id(user))
+    return bricks_service.me(db, user)
+
+
+@router.put("/me/stand-in", response_model=BrickMe, openapi_extra=body_doc(BrickStandIn))
+def put_stand_in(
+    user: Member,
+    db: Db,
+    now: Now,
+    body: Annotated[BrickStandIn, Depends(json_body(BrickStandIn))],
+) -> BrickMe:
+    """An admin takes over the brick maker's powers to test them, or gives them back."""
+    return bricks_service.stand_in(db, user, body.on, now)
 
 
 @router.post(
@@ -67,12 +87,12 @@ def make_brick(
     now: Now,
     body: Annotated[BrickMake, Depends(json_body(BrickMake))],
 ) -> BrickChange:
-    return bricks_service.make(db, _member_id(user), body, now)
+    return bricks_service.make(db, user, body, now)
 
 
 @router.put("/{brickId}/pick", response_model=BrickChange, response_model_exclude_none=True)
 def pick_brick(user: Member, db: Db, now: Now, brick_id: BrickId) -> BrickChange:
-    return bricks_service.pick(db, _member_id(user), brick_id, now)
+    return bricks_service.pick(db, user, brick_id, now)
 
 
 @router.put(
@@ -93,4 +113,4 @@ def place_brick(
 
 @router.delete("/{brickId}", response_model=BrickChange, response_model_exclude_none=True)
 def delete_brick(user: Member, db: Db, now: Now, brick_id: BrickId) -> BrickChange:
-    return bricks_service.remove(db, _member_id(user), brick_id, now)
+    return bricks_service.remove(db, user, brick_id, now)

@@ -1606,8 +1606,18 @@ export type BrickChange = z.infer<typeof BrickChangeSchema>;
 export const BrickMeSchema = z.object({
   memberId: z.string().regex(AVATAR_MEMBER_ID),
   maker: z.boolean(),
+  /** An admin may take over the brick maker's powers to test them… */
+  canStandIn: z.boolean(),
+  /** …and has ("Be the Lego bot"). */
+  standIn: z.boolean(),
 });
 export type BrickMe = z.infer<typeof BrickMeSchema>;
+
+/** `PUT /api/lobby/bricks/me/stand-in` (admins): be the brick maker for testing, or stop. */
+export const BrickStandInSchema = z.object({
+  on: z.boolean(),
+});
+export type BrickStandIn = z.infer<typeof BrickStandInSchema>;
 
 /** `POST /api/lobby/bricks` (the brick maker): a new brick, into their hand. */
 export const BrickMakeSchema = z.object({
