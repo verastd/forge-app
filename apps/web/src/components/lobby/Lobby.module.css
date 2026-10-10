@@ -1474,3 +1474,55 @@
 .root[data-motion='reduced'] .view button.incoming {
   animation: none;
 }
+
+/* ---- building: the Lego bot's maker row and everyone's hands, under play ---- */
+
+.buildPick {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  border-right: 1px solid rgba(var(--cave-line-rgb), 0.35);
+}
+
+.buildPick select {
+  height: 34px;
+  border: 0;
+  background: none;
+  color: rgba(var(--cave-text-rgb), 0.85);
+  font: 500 10px var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.buildPick select:disabled {
+  color: rgba(var(--cave-text-rgb), 0.35);
+  cursor: not-allowed;
+}
+
+.buildPick select:focus-visible {
+  outline: 2px solid var(--cave-accent);
+  outline-offset: -2px;
+}
+
+.buildPick option {
+  background: #10131a;
+  color: #e9edf3;
+}
+
+.swatch {
+  width: 12px;
+  height: 12px;
+  border: 1px solid rgba(var(--cave-line-rgb), 0.6);
+}
+
+.brickCount {
+  flex-basis: 100%;
+  color: rgba(var(--cave-text-rgb), 0.55);
+  white-space: nowrap;
+}
+
+.buildNote {
+  flex-wrap: wrap;
+}

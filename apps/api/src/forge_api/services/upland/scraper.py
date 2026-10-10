@@ -105,7 +105,7 @@ def extract_address_from_memo(memo: str) -> str | None:
 
 
 def city_from_address(address: str | None) -> str | None:
-    """"111 VENICE BLVD, Los Angeles, CA" -> "Los Angeles"."""
+    """ "111 VENICE BLVD, Los Angeles, CA" -> "Los Angeles"."""
     parts = [part.strip() for part in (address or "").split(",")]
     return parts[-2] if len(parts) >= 3 and parts[-2] else None
 
@@ -275,8 +275,17 @@ async def _record_progress(
                ON CONFLICT(key) DO UPDATE SET current_block = excluded.current_block,
                  status = excluded.status, total_actions = excluded.total_actions,
                  updated_at = excluded.updated_at, error = excluded.error""",
-            (f"{start_block}-{end_block}", start_block, end_block, current_block, status, total,
-             now, now, error),
+            (
+                f"{start_block}-{end_block}",
+                start_block,
+                end_block,
+                current_block,
+                status,
+                total,
+                now,
+                now,
+                error,
+            ),
         )
         await db.commit()
 

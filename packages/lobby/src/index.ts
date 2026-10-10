@@ -37,6 +37,7 @@ export * from './chase.js';
 export * from './actions.js';
 export * from './play.js';
 export * from './headFit.js';
+export * from './bricks.js';
 export * from './flyer.js';
 export * from './cape.js';
 export * from './chest.js';

@@ -1,0 +1,396 @@
+"""Building bricks in the lobby: only the brick maker (the robot wearing a back model
+that makes bricks) makes and takes away bricks; anyone signed in picks up a loose brick
+and places it; a brick something is fastened to is frozen for all but the maker; holds
+lapse; every change bumps the revision, and deltas say what changed."""
+
+import base64
+import json
+import re
+import struct
+from collections.abc import Iterator
+from pathlib import Path
+from typing import Any
+
+import pytest
+from fastapi.testclient import TestClient
+
+from forge_api.main import app
+from forge_api.models import BRICK_COLOR_IDS, BRICK_SHAPE_IDS
+from forge_api.services import brick_rules as rules
+from forge_api.services import members as members_service
+from forge_api.services.state import get_state_db
+
+from .conftest import AuthHeaders, FakeClock
+
+MAKER = "gh:1001"
+COLORS = {"shell": "#e8e4da", "trim": "#3a7bd5", "accent": "#ffc23d", "eye": "#5ee7ff"}
+BACKPACK: dict[str, Any] = {"scale": 0.5, "offset": [0.0, 0.0, -0.1], "emitter": "bricks"}
+
+
+@pytest.fixture(autouse=True)
+def lobby_on(monkeypatch: pytest.MonkeyPatch, clock: FakeClock) -> Iterator[None]:
+    monkeypatch.setenv("FORGE_FLAGS_JSON", json.dumps({"apps_lobby": True, "lobby_avatars": True}))
+    app.dependency_overrides[members_service.current_time] = clock
+    yield
+
+
+def glb() -> bytes:
+    text = json.dumps({"asset": {"version": "2.0"}, "nodes": [{"name": "Pack"}]}).encode()
+    text += b" " * (-len(text) % 4)
+    length = 12 + 8 + len(text)
+    return (
+        b"glTF" + struct.pack("<II", 2, length) + struct.pack("<II", len(text), 0x4E4F534A) + text
+    )
+
+
+def upload(
+    client: TestClient, headers: dict[str, str], head_id: str, fit: str, **extra: Any
+) -> Any:
+    body = {"name": head_id, "fit": fit, "data": base64.b64encode(glb()).decode(), **extra}
+    return client.put(f"/api/avatars/heads/{head_id}", headers=headers, json=body)
+
+
+@pytest.fixture
+def maker(client: TestClient, admin_headers: dict[str, str], user_headers: dict[str, str]) -> Any:
+    """The contributor (gh:1001) wears the brick-making backpack; their headers."""
+    packed = upload(client, admin_headers, "pack", "back", placement=BACKPACK, owner=MAKER)
+    assert packed.status_code == 200
+    dressed = client.put(
+        f"/api/avatars/members/{MAKER}",
+        headers=admin_headers,
+        json={"colors": COLORS, "back": "pack"},
+    )
+    assert dressed.status_code == 200
+    return user_headers
+
+
+@pytest.fixture
+def visitor(auth_headers: AuthHeaders) -> dict[str, str]:
+    return auth_headers("3003", "visitor")
+
+
+def make(client: TestClient, headers: dict[str, str], shape: str = "brick-2x4") -> Any:
+    return client.post("/api/lobby/bricks", headers=headers, json={"shape": shape, "color": "red"})
+
+
+def place(client: TestClient, headers: dict[str, str], brick_id: str, **at: int) -> Any:
+    body = {"x": 0, "y": 0, "z": 0, "rot": 0, **at}
+    return client.put(f"/api/lobby/bricks/{brick_id}/place", headers=headers, json=body)
+
+
+def pick(client: TestClient, headers: dict[str, str], brick_id: str) -> Any:
+    return client.put(f"/api/lobby/bricks/{brick_id}/pick", headers=headers)
+
+
+def built(client: TestClient, headers: dict[str, str], **at: int) -> str:
+    """A brick the maker made and placed; its id."""
+    made = make(client, headers)
+    assert made.status_code == 200, made.json()
+    brick_id: str = made.json()["brick"]["id"]
+    assert place(client, headers, brick_id, **at).status_code == 200
+    return brick_id
+
+
+def everything(client: TestClient) -> dict[str, Any]:
+    body: dict[str, Any] = client.get("/api/lobby/bricks").json()
+    return body
+
+
+def test_the_maker_makes_a_brick_into_their_hand_and_places_it(
+    client: TestClient, maker: dict[str, str]
+) -> None:
+    made = make(client, maker)
+    assert made.status_code == 200
+    brick = made.json()["brick"]
+    assert brick["holder"] == MAKER and brick["shape"] == "brick-2x4"
+    assert made.json()["rev"] == 1
+    placed = place(client, maker, brick["id"], x=3, z=-2, rot=1)
+    assert placed.status_code == 200
+    assert placed.json()["rev"] == 2
+    assert "holder" not in placed.json()["brick"]
+    listed = everything(client)
+    assert listed["full"] is True and listed["rev"] == 2 and listed["gone"] == []
+    assert listed["bricks"][0] | {"updatedAt": ""} == {
+        "id": brick["id"],
+        "shape": "brick-2x4",
+        "color": "red",
+        "x": 3,
+        "y": 0,
+        "z": -2,
+        "rot": 1,
+        "updatedAt": "",
+    }
+
+
+def test_me_says_who_makes_bricks(
+    client: TestClient, maker: dict[str, str], visitor: dict[str, str]
+) -> None:
+    assert client.get("/api/lobby/bricks/me", headers=maker).json() == {
+        "memberId": MAKER,
+        "maker": True,
+    }
+    assert client.get("/api/lobby/bricks/me", headers=visitor).json() == {
+        "memberId": "gh:3003",
+        "maker": False,
+    }
+    assert client.get("/api/lobby/bricks/me").status_code == 401
+
+
+def test_only_the_maker_makes_or_takes_away(
+    client: TestClient, maker: dict[str, str], visitor: dict[str, str]
+) -> None:
+    assert make(client, visitor).json() == {"error": "not_the_maker"}
+    assert make(client, visitor).status_code == 403
+    brick_id = built(client, maker)
+    gone = client.delete(f"/api/lobby/bricks/{brick_id}", headers=visitor)
+    assert gone.status_code == 403
+    removed = client.delete(f"/api/lobby/bricks/{brick_id}", headers=maker)
+    assert removed.status_code == 200 and "brick" not in removed.json()
+    assert everything(client)["bricks"] == []
+    assert client.delete(f"/api/lobby/bricks/{brick_id}", headers=maker).status_code == 404
+
+
+def test_signed_out_callers_only_look(client: TestClient, maker: dict[str, str]) -> None:
+    brick_id = built(client, maker)
+    assert client.get("/api/lobby/bricks").status_code == 200
+    assert (
+        client.post("/api/lobby/bricks", json={"shape": "brick-1x1", "color": "red"}).status_code
+        == 401
+    )
+    assert client.put(f"/api/lobby/bricks/{brick_id}/pick").status_code == 401
+
+
+def test_anyone_picks_up_a_loose_brick_and_builds_on_another(
+    client: TestClient, maker: dict[str, str], visitor: dict[str, str]
+) -> None:
+    base = built(client, maker)
+    loose = built(client, maker, x=10)
+    picked = pick(client, visitor, loose)
+    assert picked.status_code == 200 and picked.json()["brick"]["holder"] == "gh:3003"
+    # Its old spot is kept while it's held.
+    assert picked.json()["brick"]["x"] == 10
+    stacked = place(client, visitor, loose, y=3)
+    assert stacked.status_code == 200 and stacked.json()["brick"]["y"] == 3
+    # Fastened together, both are part of the build now.
+    assert pick(client, visitor, base).json() == {"error": "frozen"}
+    assert pick(client, visitor, loose).json() == {"error": "frozen"}
+    # The maker can still pull one out.
+    assert pick(client, maker, loose).status_code == 200
+
+
+def test_two_hands_one_brick(
+    client: TestClient, maker: dict[str, str], visitor: dict[str, str], auth_headers: AuthHeaders
+) -> None:
+    loose = built(client, maker)
+    assert pick(client, visitor, loose).status_code == 200
+    # Picking it again is a no-op; someone else gets turned away.
+    assert pick(client, visitor, loose).status_code == 200
+    late = pick(client, auth_headers("4004", "late"), loose)
+    assert late.status_code == 409 and late.json() == {"error": "taken"}
+    assert place(client, maker, loose).json() == {"error": "not_holding"}
+
+
+def test_one_brick_in_hand_at_a_time(
+    client: TestClient, maker: dict[str, str], visitor: dict[str, str]
+) -> None:
+    first = built(client, maker)
+    second = built(client, maker, x=10)
+    assert pick(client, visitor, first).status_code == 200
+    full = pick(client, visitor, second)
+    assert full.status_code == 409 and full.json() == {"error": "hands_full", "brick": first}
+    assert make(client, maker).status_code == 200
+    assert make(client, maker).json()["error"] == "hands_full"
+
+
+def test_a_brick_must_fit(client: TestClient, maker: dict[str, str]) -> None:
+    built(client, maker)
+    held = make(client, maker).json()["brick"]["id"]
+    for at, problem in (
+        ({"x": 1}, "overlap"),
+        ({"x": 20, "y": 6}, "floating"),
+        ({"x": 200}, "outside"),
+        ({"y": rules.MAX_PLATES}, "outside"),
+    ):
+        refused = place(client, maker, held, **at)
+        assert refused.status_code == 409
+        assert refused.json() == {"error": "wont_fit", "problem": problem}
+    bad = place(client, maker, held, rot=4)
+    assert bad.status_code in (400, 422)
+
+
+def test_unknown_bricks_and_bad_bodies(client: TestClient, maker: dict[str, str]) -> None:
+    assert pick(client, maker, "nope").status_code == 404
+    assert pick(client, maker, "0123456789ab").status_code == 404
+    odd = client.post(
+        "/api/lobby/bricks", headers=maker, json={"shape": "brick-9x9", "color": "red"}
+    )
+    assert odd.status_code in (400, 422)
+    assert client.get("/api/lobby/bricks?since=-1").status_code in (400, 422)
+
+
+def test_deltas_say_what_changed_since_a_revision(
+    client: TestClient, maker: dict[str, str]
+) -> None:
+    first = built(client, maker)
+    rev = everything(client)["rev"]
+    second = built(client, maker, x=10)
+    client.delete(f"/api/lobby/bricks/{first}", headers=maker)
+    delta = client.get(f"/api/lobby/bricks?since={rev}").json()
+    assert delta["full"] is False
+    assert [b["id"] for b in delta["bricks"]] == [second]
+    assert delta["gone"] == [first]
+    assert delta["rev"] == rev + 3
+    # Caught up: nothing new. From the future (a reset cave): everything.
+    assert client.get(f"/api/lobby/bricks?since={delta['rev']}").json()["bricks"] == []
+    assert client.get("/api/lobby/bricks?since=999").json()["full"] is True
+
+
+def test_old_tombstones_are_forgotten_and_old_deltas_get_everything(
+    client: TestClient, maker: dict[str, str], clock: FakeClock
+) -> None:
+    first = built(client, maker)
+    client.delete(f"/api/lobby/bricks/{first}", headers=maker)
+    clock.advance(2 * 86400)
+    second = built(client, maker)
+    stale = client.get("/api/lobby/bricks?since=1").json()
+    assert stale["full"] is True and [b["id"] for b in stale["bricks"]] == [second]
+    rows = get_state_db().query_all("SELECT id FROM lobby_bricks")
+    assert [r["id"] for r in rows] == [second]
+
+
+def test_a_lapsed_hold_goes_back_or_away(
+    client: TestClient, maker: dict[str, str], visitor: dict[str, str], clock: FakeClock
+) -> None:
+    home = built(client, maker, x=5)
+    assert pick(client, visitor, home).status_code == 200
+    fresh = make(client, maker).json()["brick"]["id"]
+    clock.advance(6 * 60)
+    listed = everything(client)
+    assert [(b["id"], b["x"], "holder" in b) for b in listed["bricks"]] == [(home, 5, False)]
+    assert fresh not in [b["id"] for b in listed["bricks"]]
+
+
+def test_a_lapsed_hold_whose_spot_was_taken_lands_nearby(
+    client: TestClient, maker: dict[str, str], visitor: dict[str, str], clock: FakeClock
+) -> None:
+    home = built(client, maker, x=5)
+    assert pick(client, visitor, home).status_code == 200
+    built(client, maker, x=5)
+    clock.advance(6 * 60)
+    back = next(b for b in everything(client)["bricks"] if b["id"] == home)
+    assert back["y"] == 0 and (back["x"], back["z"]) != (5, 0)
+
+
+def test_a_lapsed_hold_with_nowhere_to_go_is_taken_away(
+    client: TestClient, maker: dict[str, str], visitor: dict[str, str], clock: FakeClock
+) -> None:
+    home = built(client, maker, x=5)
+    assert pick(client, visitor, home).status_code == 200
+    # Fill its spot and every floor spot around it.
+    db = get_state_db()
+    with db.transaction():
+        for x in range(-20, 30):
+            for z in range(-20, 20):
+                db.execute(
+                    "INSERT INTO lobby_bricks (id, shape, color, x, y, z, rot, holder, held_at, "
+                    "has_home, gone, rev, updated_at) VALUES (?, 'brick-1x1', 'red', ?, 0, ?, 0, "
+                    "NULL, NULL, 1, 0, 1, '2026-08-10T09:00:00.000000Z')",
+                    (f"{(x + 50) * 100 + z + 50:012x}", x, z),
+                )
+    clock.advance(6 * 60)
+    assert home not in [b["id"] for b in everything(client)["bricks"]]
+
+
+def test_the_cave_holds_only_so_many(
+    client: TestClient, maker: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(rules, "LIMIT", 1)
+    built(client, maker)
+    full = make(client, maker)
+    assert full.status_code == 409 and full.json() == {"error": "brick_limit", "limit": 1}
+
+
+def test_off_with_the_lobby(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("FORGE_FLAGS_JSON", json.dumps({"apps_lobby": False}))
+    off = client.get("/api/lobby/bricks")
+    assert off.status_code == 404 and off.json() == {"error": "lobby-disabled"}
+
+
+def test_only_a_back_model_makes_anything(
+    client: TestClient, admin_headers: dict[str, str]
+) -> None:
+    refused = upload(client, admin_headers, "mask", "replace", placement=BACKPACK)
+    assert refused.status_code == 400 and refused.json()["error"] == "emitter_back_only"
+    assert upload(client, admin_headers, "mask", "replace").status_code == 200
+    refit = client.put(
+        "/api/avatars/heads/mask/placement", headers=admin_headers, json={"placement": BACKPACK}
+    )
+    assert refit.status_code == 400
+    assert (
+        client.put(
+            "/api/avatars/heads/nope/placement", headers=admin_headers, json={"placement": BACKPACK}
+        ).status_code
+        == 404
+    )
+
+
+def test_the_emitter_is_kept_with_the_fit_and_goes_with_the_model(
+    client: TestClient, maker: dict[str, str], admin_headers: dict[str, str]
+) -> None:
+    heads = client.get("/api/avatars").json()["heads"]
+    assert heads[0]["placement"]["emitter"] == "bricks"
+    assert make(client, maker).status_code == 200
+    # Refit without it: no longer the maker.
+    plain = {k: v for k, v in BACKPACK.items() if k != "emitter"}
+    client.put(
+        "/api/avatars/heads/pack/placement", headers=admin_headers, json={"placement": plain}
+    )
+    assert get_state_db().query_all("SELECT * FROM avatars_head_emitters") == []
+    client.put(
+        "/api/avatars/heads/pack/placement", headers=admin_headers, json={"placement": BACKPACK}
+    )
+    assert client.delete("/api/avatars/heads/pack", headers=admin_headers).status_code == 204
+    assert get_state_db().query_all("SELECT * FROM avatars_head_emitters") == []
+
+
+def test_rules_mirror_the_lobby() -> None:
+    """The same answers as @forge/lobby's bricks.test.ts for the same bricks."""
+    at = rules.At
+    base = at("brick-2x4", 0, 0, 0, 0)
+    assert sorted(rules.cells(at("brick-1x2", 0, 0, 0, 1))) == [(0, 0), (0, 1)]
+    for rot in range(4):
+        assert len(rules.cells(at("brick-2x4", 5, 0, 5, rot))) == 8
+        assert len(rules.studs(at("slope-2x2", 0, 0, 0, rot))) == 2
+    assert rules.cells(at("nope", 0, 0, 0, 0)) == [] and rules.height(at("nope", 0, 0, 0, 0)) == 0
+    assert rules.connected(base, at("brick-1x1", 3, 3, 1, 0))
+    assert rules.connected(at("brick-1x1", 3, 3, 1, 0), base)
+    assert not rules.connected(base, at("brick-1x1", 4, 3, 1, 0))
+    assert not rules.connected(at("slope-2x2", 0, 0, 0, 0), at("brick-1x1", 0, 3, 1, 0))
+    assert rules.problem(at("plate-2x2", 0, 2, 0, 0), [at("brick-2x2", 0, 3, 0, 0)]) is None
+    assert rules.problem(at("nope", 0, 0, 0, 0), []) == "shape"
+    assert rules.problem(at("brick-1x1", 0, -1, 0, 0), []) == "outside"
+    top = at("brick-2x2", 0, 3, 0, 0)
+    assert rules.frozen(base, [base, top]) and not rules.frozen(base, [base])
+    assert rules.floor_spot("brick-1x1", 0, 999, 999, []) is None
+
+
+def test_shapes_and_colours_match_the_lobby_and_the_contract() -> None:
+    """The same shapes (sizes included) and colours as @forge/lobby and @forge/shared."""
+    root = Path(__file__).resolve().parents[3]
+    lobby = (root / "packages/lobby/src/bricks.ts").read_text()
+    shared = (root / "packages/shared/src/index.ts").read_text()
+    shapes = re.findall(
+        r"\{ id: '([a-z0-9-]+)', label: '[^']+', sx: (\d), sz: (\d), h: (\d)", lobby
+    )
+    assert [s[0] for s in shapes] == list(BRICK_SHAPE_IDS) == list(rules.SHAPES)
+    for name, sx, sz, h in shapes:
+        shape = rules.SHAPES[name]
+        assert (shape.sx, shape.sz, shape.h) == (int(sx), int(sz), int(h))
+        assert shape.slope == name.startswith("slope")
+    colours = re.findall(r"\{ id: '([a-z]+)', label: '[^']+', hex:", lobby)
+    assert colours == list(BRICK_COLOR_IDS)
+    for listed in (BRICK_SHAPE_IDS, BRICK_COLOR_IDS):
+        for name in listed:
+            assert f"'{name}'" in shared
+    assert f"stud: {rules.STUD}," in lobby and f"limit: {rules.LIMIT}," in lobby
+    assert f"radius: {int(rules.RADIUS)}," in lobby and f"maxPlates: {rules.MAX_PLATES}," in lobby

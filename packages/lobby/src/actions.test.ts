@@ -24,6 +24,8 @@ describe('encodeAction / parseAction', () => {
       { kind: 'throw', to: null, from: { x: 0, y: 1.4, z: 0 }, dest: { x: 0, y: 0.09, z: -7 }, time: 0.9 },
       { kind: 'catch', thrower: 'practice-0a0b0c', caught: true },
       { kind: 'catch', thrower: 'gh:7', caught: false },
+      { kind: 'bricks', rev: 0 },
+      { kind: 'bricks', rev: 4182 },
     ];
     for (const action of actions) expect(parseAction(encodeAction(action))).toEqual(action);
   });
@@ -63,6 +65,14 @@ describe('encodeAction / parseAction', () => {
     expect(parseAction(json({ ...good, d: [0, -1, 0] }))).toBeNull();
     expect(parseAction(json({ ...good, d: 'here' }))).toBeNull();
     expect(parseAction(json({ ...good, extra: true }))).toBeNull();
+  });
+
+  it('rejects a bricks ping without a whole, non-negative revision', () => {
+    expect(parseAction(json({ v: 1, k: 'bricks', r: -1 }))).toBeNull();
+    expect(parseAction(json({ v: 1, k: 'bricks', r: 1.5 }))).toBeNull();
+    expect(parseAction(json({ v: 1, k: 'bricks', r: '3' }))).toBeNull();
+    expect(parseAction(json({ v: 1, k: 'bricks' }))).toBeNull();
+    expect(parseAction(json({ v: 1, k: 'bricks', r: 3, x: 1 }))).toBeNull();
   });
 
   it('rejects a catch with a bad thrower or verdict', () => {

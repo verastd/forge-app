@@ -39,7 +39,14 @@ export type LobbyAction =
   /** A throw from `from` to `dest`, at `to` (an id) or at nobody (null), in the air for `time` seconds. */
   | { kind: 'throw'; to: string | null; from: Vec3; dest: Vec3; time: number }
   /** The catcher's own word on the ball `thrower` threw at them: caught it, or missed. */
-  | { kind: 'catch'; thrower: string; caught: boolean };
+  | { kind: 'catch'; thrower: string; caught: boolean }
+  /**
+   * The cave's bricks changed (the API's word, at revision `rev`): fetch what's
+   * new. A notice, not a behaviour: the API holds the bricks and has the last
+   * word, so it has no BEHAVIORS entry (the catalog's intents are pinned to the
+   * four above by tests/acceptance/issue-48).
+   */
+  | { kind: 'bricks'; rev: number };
 
 export type LobbyActionKind = LobbyAction['kind'];
 
@@ -65,6 +72,8 @@ export function encodeAction(action: LobbyAction): string {
       });
     case 'catch':
       return JSON.stringify({ v: ACTION_VERSION, k: 'catch', by: action.thrower, c: action.caught });
+    case 'bricks':
+      return JSON.stringify({ v: ACTION_VERSION, k: 'bricks', r: action.rev });
   }
 }
 
@@ -116,6 +125,12 @@ export function parseAction(raw: unknown): LobbyAction | null {
       const { by, c } = message;
       if (typeof by !== 'string' || !ID.test(by) || typeof c !== 'boolean') return null;
       return { kind: 'catch', thrower: by, caught: c };
+    }
+    case 'bricks': {
+      if (!hasKeys(message, ['v', 'k', 'r'])) return null;
+      const { r } = message;
+      if (typeof r !== 'number' || !Number.isSafeInteger(r) || r < 0) return null;
+      return { kind: 'bricks', rev: r };
     }
     default:
       return null;

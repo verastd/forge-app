@@ -1257,6 +1257,7 @@ function HeadLibrary({ member, drafted, list, setList }: HeadLibraryProps) {
               <span className="chip">{FIT_LABEL[h.fit]}</span>
               {h.fit === 'replace' && !h.eyes && <span className="chip chip-warn">No EyeL/EyeR: no eyes</span>}
               {h.placement.flyer === 'helicopter' && <span className="chip">Helicopter</span>}
+              {h.placement.emitter === 'bricks' && <span className="chip">Makes bricks</span>}
               <span className={styles.headMeta}>{kb(h.bytes)}</span>
               <span className={styles.headMeta}>{list.avatars.filter((a) => a.head === h.id).length} wearing</span>
               <button

@@ -52,7 +52,23 @@ export interface ControlsOptions {
   onBall?(): void;
   /** G: wave. */
   onWave?(): void;
+  /**
+   * The building keys: B, C (Shift+C backwards), X, E, R, Q and 1–9, by
+   * `KeyboardEvent.code`. Only while building is in the cave.
+   */
+  onBrickKey?(code: string, shift: boolean): void;
 }
+
+/** The keys building takes (controls.ts hands them to `onBrickKey`). */
+export const BRICK_KEYS: ReadonlySet<string> = new Set([
+  'KeyB',
+  'KeyC',
+  'KeyX',
+  'KeyE',
+  'KeyR',
+  'KeyQ',
+  ...Array.from({ length: 9 }, (_, i) => `Digit${i + 1}`),
+]);
 
 /** Where the mouse is over the canvas, in client coordinates, or null once it has left. */
 export interface HoverChange {
@@ -211,6 +227,10 @@ export function createControls(motion: Motion, opts: ControlsOptions): Controls 
     const shortcut = { KeyV: opts.onToggleView, KeyF: opts.onBall, KeyG: opts.onWave }[event.code];
     if (plain && shortcut) {
       shortcut();
+      return;
+    }
+    if (plain && opts.onBrickKey && BRICK_KEYS.has(event.code)) {
+      opts.onBrickKey(event.code, event.shiftKey);
       return;
     }
     if (event.ctrlKey || event.metaKey || event.altKey || !MOVE_KEYS.has(event.code) || isTextEntry(event.target)) {

@@ -1129,6 +1129,9 @@ class AvatarHeadScreen(BaseModel):
 #: What may fly over a head.
 AvatarHeadFlyer = Literal["helicopter"]
 
+#: What a back model makes for whoever wears it on their back (bricks: the brick maker).
+AvatarHeadEmitter = Literal["bricks"]
+
 
 class AvatarHeadPlacement(BaseModel):
     """How a library head is worn: its file scaled by `scale` about its origin, then moved
@@ -1163,6 +1166,8 @@ class AvatarHeadPlacement(BaseModel):
     screen: AvatarHeadScreen | None = None
     #: What flies over the head (a helicopter with a searchlight); None: nothing.
     flyer: AvatarHeadFlyer | None = None
+    #: What a back model makes for its wearer (bricks); None: nothing. Back models only.
+    emitter: AvatarHeadEmitter | None = None
 
 
 #: A head worn as its file says.
@@ -1239,3 +1244,82 @@ class AvatarMemberList(BaseModel):
 
 class AvatarAccess(BaseModel):
     canEdit: bool
+
+
+# ---------------------------------------------------------------------------
+# Building bricks in the Apps lobby (packages/shared, field for field). The grid and
+# the rules are services/brick_rules.py (@forge/lobby's bricks.ts).
+# ---------------------------------------------------------------------------
+
+BrickShapeId = Literal[
+    "brick-1x1",
+    "brick-1x2",
+    "brick-1x4",
+    "brick-2x2",
+    "brick-2x4",
+    "plate-1x2",
+    "plate-2x2",
+    "plate-2x4",
+    "slope-2x2",
+]
+BRICK_SHAPE_IDS: Final = get_args(BrickShapeId)
+BrickColorId = Literal[
+    "red", "blue", "yellow", "green", "white", "black",
+    "orange", "lime", "azure", "pink", "tan", "grey",
+]  # fmt: skip
+BRICK_COLOR_IDS: Final = get_args(BrickColorId)
+BRICK_ID: Final = r"^[0-9a-f]{12}$"
+BRICK_COORD_MAX: Final = 1000
+
+_BrickId = Annotated[str, Field(pattern=BRICK_ID)]
+_BrickCoord = Annotated[int, Field(ge=-BRICK_COORD_MAX, le=BRICK_COORD_MAX, strict=True)]
+_BrickRot = Annotated[int, Field(ge=0, le=3, strict=True)]
+_Rev = Annotated[int, Field(ge=0)]
+
+
+class Brick(BaseModel):
+    """A brick: placed at (x, y, z) turned `rot`, or held by `holder` (then x, y, z, rot is
+    where it was taken from, zeros when new)."""
+
+    id: _BrickId
+    shape: BrickShapeId
+    color: BrickColorId
+    x: _BrickCoord
+    y: _BrickCoord
+    z: _BrickCoord
+    rot: _BrickRot
+    holder: _AvatarMemberId | None = None
+    updatedAt: str
+
+
+class BrickList(BaseModel):
+    rev: _Rev
+    full: bool
+    bricks: list[Brick]
+    gone: list[_BrickId]
+
+
+class BrickChange(BaseModel):
+    rev: _Rev
+    brick: Brick | None = None
+
+
+class BrickMe(BaseModel):
+    memberId: _AvatarMemberId
+    maker: bool
+
+
+class BrickMake(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    shape: BrickShapeId
+    color: BrickColorId
+
+
+class BrickPlace(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    x: _BrickCoord
+    y: _BrickCoord
+    z: _BrickCoord
+    rot: _BrickRot

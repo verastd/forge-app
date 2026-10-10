@@ -221,4 +221,32 @@ test.describe('what a robot wears on its back', () => {
     upload.release(200, { ...PACK, id: 'wings', name: 'Wings', fit: 'back', placement: sent!.placement });
     await expect(back(page).getByRole('button', { name: /^Wings/ })).toBeVisible();
   });
+
+  test('a back model can make bricks: the Lego bot’s backpack is added with it, and the library says so', async ({ page, context, baseURL }) => {
+    await signInAs(context, baseURL ?? '', { sub: '4242', login: 'trent-admin' });
+    await openEditor(page, { avatars: [ROBOT], heads: [] });
+    const upload = held();
+    let sent: { fit?: string; placement?: { emitter?: string } } | null = null;
+    await page.route('**/bff/avatars/heads/backpack', async (route) => {
+      sent = route.request().postDataJSON() as typeof sent;
+      await upload.handler(route);
+    });
+    await page.getByLabel('Name').fill('Backpack');
+    await page.getByRole('radio', { name: /Worn on the back/ }).check();
+    await page.getByLabel(/File \(\.glb/).setInputFiles({ name: 'backpack.glb', mimeType: 'model/gltf-binary', buffer: WINGS });
+    const makes = page.getByRole('checkbox', { name: /Makes bricks/ });
+    await expect(makes).toBeEnabled({ timeout: 90_000 });
+    await expect(makes).not.toBeChecked();
+    await expect(page.getByText('Off: an ordinary back model.')).toBeVisible();
+    await makes.check();
+    await expect(page.getByText(/is the Lego bot: they make building bricks/)).toBeVisible();
+
+    await page.getByRole('button', { name: 'Add to library' }).click();
+    await expect(page.getByRole('button', { name: 'Uploading…' })).toBeVisible();
+    await expect.poll(() => sent).not.toBeNull();
+    expect(sent!.fit).toBe('back');
+    expect(sent!.placement!.emitter).toBe('bricks');
+    upload.release(200, { ...PACK, id: 'backpack', name: 'Backpack', fit: 'back', placement: sent!.placement });
+    await expect(page.locator('li', { hasText: 'Backpack' }).getByText('Makes bricks', { exact: true })).toBeVisible();
+  });
 });

@@ -1377,6 +1377,10 @@ export type AvatarHeadScreen = z.infer<typeof AvatarHeadScreenSchema>;
 export const AVATAR_HEAD_FLYERS = ['helicopter'] as const;
 export type AvatarHeadFlyer = (typeof AVATAR_HEAD_FLYERS)[number];
 
+/** What a back model makes (`placement.emitter`): building bricks, for the robot wearing it. */
+export const AVATAR_HEAD_EMITTERS = ['bricks'] as const;
+export type AvatarHeadEmitter = (typeof AVATAR_HEAD_EMITTERS)[number];
+
 export const AvatarHeadPlacementSchema = z.object({
   scale: z.number().min(AVATAR_PLACEMENT_SCALE_MIN).max(AVATAR_PLACEMENT_SCALE_MAX),
   offset: placementPoint,
@@ -1421,6 +1425,12 @@ export const AvatarHeadPlacementSchema = z.object({
    * below. Absent: nothing.
    */
   flyer: z.enum(AVATAR_HEAD_FLYERS).nullish(),
+  /**
+   * What a back model makes for whoever wears it on their back: `bricks`
+   * makes them the cave's brick maker (only a model fitted for the back may
+   * have one). Absent: nothing.
+   */
+  emitter: z.enum(AVATAR_HEAD_EMITTERS).nullish(),
 });
 export type AvatarHeadPlacement = z.infer<typeof AvatarHeadPlacementSchema>;
 
@@ -1522,6 +1532,98 @@ export const AvatarAccessSchema = z.object({
   canEdit: z.boolean(),
 });
 export type AvatarAccess = z.infer<typeof AvatarAccessSchema>;
+
+// ---------------------------------------------------------------------------
+// Building bricks in the Apps lobby (behind `apps_lobby`), mirrored in
+// apps/api models.py. The grid and the rules are @forge/lobby's bricks.ts
+// (and apps/api services/brick_rules.py): x and z in studs from the cave's
+// middle, y in plates up from the floor.
+// ---------------------------------------------------------------------------
+
+/** The shapes, in the order keys 1–9 choose them (@forge/lobby's BRICK_SHAPES). */
+export const BRICK_SHAPE_IDS = [
+  'brick-1x1',
+  'brick-1x2',
+  'brick-1x4',
+  'brick-2x2',
+  'brick-2x4',
+  'plate-1x2',
+  'plate-2x2',
+  'plate-2x4',
+  'slope-2x2',
+] as const;
+export type BrickShapeId = (typeof BRICK_SHAPE_IDS)[number];
+
+/** The colours, in the order C steps through them (@forge/lobby's BRICK_COLORS). */
+export const BRICK_COLOR_IDS = ['red', 'blue', 'yellow', 'green', 'white', 'black', 'orange', 'lime', 'azure', 'pink', 'tan', 'grey'] as const;
+export type BrickColorId = (typeof BRICK_COLOR_IDS)[number];
+
+export const BRICK_ID = /^[0-9a-f]{12}$/;
+/** Grid coordinates stay well inside these (the rules keep bricks inside the cave). */
+export const BRICK_COORD_MAX = 1000;
+
+const brickCoord = z.number().int().min(-BRICK_COORD_MAX).max(BRICK_COORD_MAX);
+
+/**
+ * A brick. Placed: it sits at (x, y, z) turned `rot` quarter turns. Held:
+ * `holder` has it in hand, and (x, y, z, rot) is where it was taken from
+ * (where it goes back to if they let the hold lapse), or zeros when it's new.
+ */
+export const BrickSchema = z.object({
+  id: z.string().regex(BRICK_ID),
+  shape: z.enum(BRICK_SHAPE_IDS),
+  color: z.enum(BRICK_COLOR_IDS),
+  x: brickCoord,
+  y: brickCoord,
+  z: brickCoord,
+  rot: z.number().int().min(0).max(3),
+  holder: z.string().regex(AVATAR_MEMBER_ID).optional(),
+  updatedAt: z.string(),
+});
+export type Brick = z.infer<typeof BrickSchema>;
+
+/**
+ * `GET /api/lobby/bricks?since=<rev>`: every brick (`full`), or only what
+ * changed since `since` (changed bricks, and the ids of bricks taken away),
+ * and the revision they bring you to.
+ */
+export const BrickListSchema = z.object({
+  rev: z.number().int().min(0),
+  full: z.boolean(),
+  bricks: z.array(BrickSchema),
+  gone: z.array(z.string().regex(BRICK_ID)),
+});
+export type BrickList = z.infer<typeof BrickListSchema>;
+
+/** A write's answer: the brick as it now is (absent once removed) and the revision. */
+export const BrickChangeSchema = z.object({
+  rev: z.number().int().min(0),
+  brick: BrickSchema.optional(),
+});
+export type BrickChange = z.infer<typeof BrickChangeSchema>;
+
+/** `GET /api/lobby/bricks/me` (signed in): who you are to the bricks, and whether you make them. */
+export const BrickMeSchema = z.object({
+  memberId: z.string().regex(AVATAR_MEMBER_ID),
+  maker: z.boolean(),
+});
+export type BrickMe = z.infer<typeof BrickMeSchema>;
+
+/** `POST /api/lobby/bricks` (the brick maker): a new brick, into their hand. */
+export const BrickMakeSchema = z.object({
+  shape: z.enum(BRICK_SHAPE_IDS),
+  color: z.enum(BRICK_COLOR_IDS),
+});
+export type BrickMake = z.infer<typeof BrickMakeSchema>;
+
+/** `PUT /api/lobby/bricks/{id}/place` (its holder): where it goes. */
+export const BrickPlaceSchema = z.object({
+  x: brickCoord,
+  y: brickCoord,
+  z: brickCoord,
+  rot: z.number().int().min(0).max(3),
+});
+export type BrickPlace = z.infer<typeof BrickPlaceSchema>;
 
 // ---------------------------------------------------------------------------
 // The rail registry and the brief, mirrored in apps/api (services/rails.py,

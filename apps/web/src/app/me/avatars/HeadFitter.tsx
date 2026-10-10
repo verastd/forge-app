@@ -105,6 +105,7 @@ function toWire(placement: HeadPlacement): AvatarHeadPlacement {
     ...(placement.eyeScale && placement.eyeScale !== 1 ? { eyeScale: placement.eyeScale } : {}),
     ...(placement.screen ? { screen: placement.screen } : {}),
     ...(placement.flyer ? { flyer: placement.flyer } : {}),
+    ...(placement.emitter ? { emitter: placement.emitter } : {}),
   };
 }
 
@@ -433,6 +434,12 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled, w
     setPlacement((current) => (current ? { ...current, flyer: on ? 'helicopter' : null } : current));
   };
 
+  /** Making bricks is a back model's choice of its own, like the helicopter. */
+  const onEmitter = (event: ChangeEvent<HTMLInputElement>): void => {
+    const on = event.target.checked;
+    setPlacement((current) => (current ? { ...current, emitter: on ? 'bricks' : null } : current));
+  };
+
   const onScreenSize = (index: 0 | 1) => (event: ChangeEvent<HTMLInputElement>): void => {
     const metres = Number(event.target.value) / 100;
     setPlacement((current) => {
@@ -719,6 +726,21 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled, w
           </label>
         )}
 
+        {fit === 'back' && (
+          <label className={`${styles.radio} ${styles.fitFull}`}>
+            <input type="checkbox" checked={placement?.emitter === 'bricks'} onChange={onEmitter} disabled={locked} />
+            <span>
+              Makes bricks
+              <br />
+              <span className={styles.hint}>
+                {placement?.emitter === 'bricks'
+                  ? 'Whoever wears this on their back is the Lego bot: they make building bricks (B) and remove them (X).'
+                  : 'Off: an ordinary back model.'}
+              </span>
+            </span>
+          </label>
+        )}
+
         <div className={styles.fitRow}>
           {picking && (
             <button type="button" className="btn btn-sm btn-ghost" onClick={() => setPicking(null)}>
@@ -729,7 +751,7 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled, w
             type="button"
             className="btn btn-sm btn-ghost"
             onClick={() => {
-              if (auto) setPlacement((current) => ({ ...auto, flyer: current?.flyer ?? null }));
+              if (auto) setPlacement((current) => ({ ...auto, flyer: current?.flyer ?? null, emitter: current?.emitter ?? null }));
               setPicking(null);
               setNote({ tone: 'ok', text: 'Back to the first guess.' });
             }}
