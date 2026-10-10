@@ -19,6 +19,7 @@ import type { ChangeEvent, FormEvent } from 'react';
 import { AVATAR_FINISHES, AVATAR_PALETTES, defaultColors, emblemInitials } from '@forge/lobby';
 import type { AvatarColors, AvatarFinish } from '@forge/lobby';
 import {
+  AVATAR_CAPE_DEFAULT,
   AVATAR_CHEST_MAX_BYTES,
   AVATAR_CHEST_MAX_PIXELS,
   AVATAR_CHEST_TYPES,
@@ -26,7 +27,7 @@ import {
   AVATAR_HEAD_MAX_BYTES,
   AVATAR_HEAD_NAME_MAX,
 } from '@forge/shared';
-import type { Avatar, AvatarHead, AvatarHeadFit, AvatarHeadPlacement, AvatarList, AvatarMember } from '@forge/shared';
+import type { Avatar, AvatarCape, AvatarHead, AvatarHeadFit, AvatarHeadPlacement, AvatarList, AvatarMember } from '@forge/shared';
 
 import {
   AvatarsError,
@@ -91,6 +92,7 @@ const FINISH_CHOICES: Record<AvatarFinish, { label: string; hint: string }> = {
 const FIT_LABEL: Record<AvatarHeadFit, string> = {
   replace: 'Replaces the head',
   accessory: 'Face accessory',
+  back: 'Worn on the back',
 };
 
 const kb = (bytes: number): string => (bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`);
@@ -118,6 +120,9 @@ interface Draft {
   accessory: string | null;
   /** What the armour is made of. */
   finish: AvatarFinish;
+  /** On its back: a library model, or the cape (never both). */
+  back: string | null;
+  cape: AvatarCape | null;
 }
 
 function draftFor(memberId: string, list: AvatarList): Draft {
@@ -127,13 +132,16 @@ function draftFor(memberId: string, list: AvatarList): Draft {
     head: saved?.head ?? null,
     accessory: saved?.accessory ?? null,
     finish: saved?.finish ?? 'paint',
+    back: saved?.back ?? null,
+    cape: saved?.cape ?? null,
   };
 }
 
 /** Every key, by name: a right eye on only one side is a change too. */
 function sameDraft(a: Draft, b: Draft): boolean {
   const colours = (['shell', 'trim', 'accent', 'eye'] as const).every((k) => a.colors[k] === b.colors[k]);
-  return colours && (a.colors.eyeRight ?? null) === (b.colors.eyeRight ?? null) && a.head === b.head && a.accessory === b.accessory && a.finish === b.finish;
+  const capes = a.cape === null || b.cape === null ? a.cape === b.cape : a.cape.outer === b.cape.outer && a.cape.lining === b.cape.lining;
+  return colours && (a.colors.eyeRight ?? null) === (b.colors.eyeRight ?? null) && a.head === b.head && a.accessory === b.accessory && a.finish === b.finish && a.back === b.back && capes;
 }
 
 /** Reads an image's size in the browser, to refuse one the API would before uploading it. */
@@ -295,6 +303,8 @@ export function AvatarEditor() {
                       </span>
                       <span className={styles.memberName}>@{member.login}</span>
                       {saved?.finish && saved.finish !== 'paint' && <span className="chip">{FINISH_CHOICES[saved.finish].label}</span>}
+                      {saved?.cape && <span className="chip">Cape</span>}
+                      {saved?.back && <span className="chip">{list.heads.find((h) => h.id === saved.back)?.name ?? 'On its back'}</span>}
                       {saved && (
                         <span className={styles.customDot} title="Customised">
                           <span className={styles.visuallyHidden}>(customised)</span>
@@ -384,9 +394,20 @@ function RobotEditor({ member, list, setList, onDirty, onDraft }: RobotEditorPro
 
   const head = draft.head ? (list.heads.find((h) => h.id === draft.head) ?? null) : null;
   const accessory = draft.accessory ? (list.heads.find((h) => h.id === draft.accessory) ?? null) : null;
+  const back = draft.back ? (list.heads.find((h) => h.id === draft.back) ?? null) : null;
   const look: RobotLook = useMemo(
-    () => ({ id: member.memberId, name: member.login, colors: draft.colors, head, accessory, chest: saved?.chest ?? null, finish: draft.finish }),
-    [member.memberId, member.login, draft.colors, head, accessory, saved?.chest, draft.finish],
+    () => ({
+      id: member.memberId,
+      name: member.login,
+      colors: draft.colors,
+      head,
+      accessory,
+      chest: saved?.chest ?? null,
+      finish: draft.finish,
+      back,
+      cape: draft.cape,
+    }),
+    [member.memberId, member.login, draft.colors, head, accessory, saved?.chest, draft.finish, back, draft.cape],
   );
 
   const commit = useCallback(async (): Promise<Avatar> => {
@@ -397,6 +418,8 @@ function RobotEditor({ member, list, setList, onDirty, onDraft }: RobotEditorPro
       ...(draft.head ? { head: draft.head } : {}),
       ...(draft.accessory ? { accessory: draft.accessory } : {}),
       ...(draft.finish !== 'paint' ? { finish: draft.finish } : {}),
+      // On its back, one or the other (or neither): a model, or the cape.
+      ...(draft.back ? { back: draft.back } : draft.cape ? { cape: draft.cape } : {}),
     });
     setList((current) => ({ ...current, avatars: [...current.avatars.filter((a) => a.memberId !== result.memberId), result] }));
     return result;
@@ -420,7 +443,7 @@ function RobotEditor({ member, list, setList, onDirty, onDraft }: RobotEditorPro
     resetAvatar(member.memberId).then(
       () => {
         setList((current) => ({ ...current, avatars: current.avatars.filter((a) => a.memberId !== member.memberId) }));
-        setDraft({ colors: defaultColors(member.memberId), head: null, accessory: null, finish: 'paint' });
+        setDraft({ colors: defaultColors(member.memberId), head: null, accessory: null, finish: 'paint', back: null, cape: null });
         setBusy({ kind: 'idle' });
       },
       (error: unknown) => setBusy({ kind: 'error', message: describeAvatarsError(error), retry: reset }),
@@ -532,7 +555,7 @@ function RobotEditor({ member, list, setList, onDirty, onDraft }: RobotEditorPro
                 </button>
               ))}
           </div>
-          {ownHeads.length === 0 && (
+          {!ownHeads.some((h) => h.fit === 'replace') && (
             <p className={styles.hint}>No heads made for @{member.login} yet: add one in “Heads for @{member.login}” below.</p>
           )}
           {missingHead && <p className={styles.hint}>The head this robot wore was taken out of the library.</p>}
@@ -567,6 +590,83 @@ function RobotEditor({ member, list, setList, onDirty, onDraft }: RobotEditorPro
           </div>
           {!ownHeads.some((h) => h.fit === 'accessory') && (
             <p className={styles.hint}>No face accessories made for @{member.login} yet (a mask, a visor): add one below as a Face accessory.</p>
+          )}
+        </fieldset>
+
+        <fieldset className={styles.fieldset}>
+          <legend className={styles.legend}>Back</legend>
+          <div className={styles.heads} role="group" aria-label="Back">
+            <button
+              type="button"
+              className={styles.headChoice}
+              aria-pressed={draft.back === null && draft.cape === null}
+              onClick={() => setDraft((d) => ({ ...d, back: null, cape: null }))}
+            >
+              <span>None</span>
+              <span className={styles.headMeta}>Nothing on its back</span>
+            </button>
+            <button
+              type="button"
+              className={styles.headChoice}
+              aria-pressed={draft.cape !== null}
+              onClick={() => setDraft((d) => ({ ...d, back: null, cape: d.cape ?? { ...AVATAR_CAPE_DEFAULT } }))}
+            >
+              <span>Cape</span>
+              <span className={styles.headMeta}>Cloth that billows as it flies</span>
+            </button>
+            {ownHeads
+              .filter((h) => h.fit === 'back')
+              .map((h) => (
+                <button
+                  key={h.id}
+                  type="button"
+                  className={styles.headChoice}
+                  aria-pressed={draft.back === h.id}
+                  onClick={() => setDraft((d) => ({ ...d, back: h.id, cape: null }))}
+                >
+                  <span>{h.name}</span>
+                  <span className={styles.headMeta}>Worn on the back</span>
+                </button>
+              ))}
+          </div>
+          {draft.cape && (
+            <div className={styles.colors}>
+              {(
+                [
+                  ['outer', 'Outside', 'What everyone behind it sees'],
+                  ['lining', 'Lining', 'Inside, showing as it billows'],
+                ] as const
+              ).map(([key, label, hint]) => (
+                <label key={key} className={styles.color}>
+                  <input
+                    type="color"
+                    value={draft.cape![key]}
+                    onChange={(event) => {
+                      const value = event.target.value.toLowerCase();
+                      setDraft((d) => (d.cape ? { ...d, cape: { ...d.cape, [key]: value } } : d));
+                    }}
+                  />
+                  <span className={styles.colorText}>
+                    <span>Cape {label.toLowerCase()}</span>
+                    <code>{draft.cape![key]}</code>
+                    <span className={styles.hint}>{hint}</span>
+                  </span>
+                </label>
+              ))}
+              <button
+                type="button"
+                className="btn btn-sm btn-ghost"
+                onClick={() => setDraft((d) => ({ ...d, cape: { ...AVATAR_CAPE_DEFAULT } }))}
+                disabled={draft.cape.outer === AVATAR_CAPE_DEFAULT.outer && draft.cape.lining === AVATAR_CAPE_DEFAULT.lining}
+              >
+                Opera classic (black, crimson lining)
+              </button>
+            </div>
+          )}
+          {!ownHeads.some((h) => h.fit === 'back') && (
+            <p className={styles.hint}>
+              Or something of their own (wings, a jetpack, a sword): add a model below as Worn on the back.
+            </p>
           )}
         </fieldset>
 
@@ -1004,6 +1104,10 @@ function HeadLibrary({ member, drafted, list, setList }: HeadLibraryProps) {
             <strong>Face accessory</strong>: worn over the robot’s own head (a mask, a visor, a helmet). The eyes stay on the face
             screen; whatever covers them hides them, and an eye hole shows them through: click the hole to line it up with an eye.
           </li>
+          <li>
+            <strong>Worn on the back</strong>: between the shoulder blades, following the body (wings, a jetpack, a sword). Its
+            front goes against the robot’s back. (A cape needs no model: pick Cape under Back.)
+          </li>
         </ul>
       </div>
 
@@ -1157,14 +1261,18 @@ function HeadLibrary({ member, drafted, list, setList }: HeadLibraryProps) {
             <input ref={fileRef} className="text-input" type="file" accept=".glb,model/gltf-binary" onChange={onFile} disabled={busy || !member} />
           </label>
           <div className={styles.radios} role="radiogroup" aria-label="How it fits">
-            {(['replace', 'accessory'] as const).map((value) => (
+            {(['replace', 'accessory', 'back'] as const).map((value) => (
               <label key={value} className={styles.radio}>
                 <input type="radio" name="fit" value={value} checked={fit === value} onChange={() => setFit(value)} disabled={busy} />
                 <span>
                   {FIT_LABEL[value]}
                   <br />
                   <span className={styles.hint}>
-                    {value === 'replace' ? 'The robot’s own head is hidden.' : 'Worn over the robot’s own head; can cover the eyes.'}
+                    {value === 'replace'
+                      ? 'The robot’s own head is hidden.'
+                      : value === 'accessory'
+                        ? 'Worn over the robot’s own head; can cover the eyes.'
+                        : 'Between the shoulder blades: wings, a jetpack, a sword.'}
                   </span>
                 </span>
               </label>

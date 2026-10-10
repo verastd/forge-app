@@ -36,7 +36,8 @@ export interface RobotPreview {
   /** Reads a head (a local file's bytes under `key`, or a library head's sha256) and measures it for fitting. */
   loadHead(source: HeadSource): Promise<HeadMeasure>;
   /** The whole robot on its turntable, or close in on its head, held still (turned only by a drag). */
-  setFraming(framing: 'robot' | 'head'): void;
+  /** The whole robot, close on its head (fitting a head), or from behind (fitting something worn on the back). */
+  setFraming(framing: 'robot' | 'head' | 'back'): void;
   /** While set, a click on its head is reported (null: missed it). */
   setPicking(onPick: ((pick: HeadPick | null) => void) | null, target?: 'head' | 'accessory'): void;
   dispose(): void;
@@ -49,11 +50,14 @@ const CLICK_SLOP = 5;
 const FRAMES = {
   robot: { eye: new THREE.Vector3(0, 0.8 * ROBOT_SCALE, 3.7), at: new THREE.Vector3(0, 0.56 * ROBOT_SCALE, 0) },
   head: { eye: new THREE.Vector3(0, 0.93 * ROBOT_SCALE, 1.55), at: new THREE.Vector3(0, 0.9 * ROBOT_SCALE, 0) },
+  /** From behind, at the shoulder blades: what's worn on the back. */
+  back: { eye: new THREE.Vector3(0.35, 0.78 * ROBOT_SCALE, -2.1), at: new THREE.Vector3(0, 0.6 * ROBOT_SCALE, 0) },
 } as const;
 /** The same, a little higher and further back, for a robot with something flying over its head. */
 const FLYING_FRAMES = {
   robot: { eye: new THREE.Vector3(0, 0.88 * ROBOT_SCALE, 4.3), at: new THREE.Vector3(0, 0.66 * ROBOT_SCALE, 0) },
   head: { eye: new THREE.Vector3(0, 1.06 * ROBOT_SCALE, 2.05), at: new THREE.Vector3(0, 1.0 * ROBOT_SCALE, 0) },
+  back: FRAMES.back,
 } as const;
 
 export function createRobotPreview(
@@ -72,7 +76,7 @@ export function createRobotPreview(
   camera.position.copy(FRAMES.robot.eye);
   const lookAt = FRAMES.robot.at.clone();
   camera.lookAt(lookAt);
-  let framing: 'robot' | 'head' = 'robot';
+  let framing: 'robot' | 'head' | 'back' = 'robot';
   let onPick: ((pick: HeadPick | null) => void) | null = null;
   let pickTarget: 'head' | 'accessory' = 'head';
   const raycaster = new THREE.Raycaster();
@@ -213,7 +217,7 @@ export function createRobotPreview(
     }
     // Fitting a head (the head framing) holds the robot still, so what is aimed at stays put: no
     // turntable, and it stays wherever a drag leaves it.
-    const still = framing === 'head';
+    const still = framing !== 'robot';
     if (!still && !onPick && !dragging && !reducedMotion && now - idleSince > 1500) spin += dt * 0.35;
     const target = (robot?.flying ? FLYING_FRAMES : FRAMES)[framing];
     const ease = reducedMotion ? 1 : 1 - Math.exp(-dt * 5);
@@ -258,8 +262,8 @@ export function createRobotPreview(
       return measureHead(gltf.scene);
     },
     setFraming(next) {
-      // Close in facing front; from then on it turns only when dragged.
-      if (next === 'head' && framing !== 'head') spin = 0;
+      // Close in square on (its face, or its back); from then on it turns only when dragged.
+      if (next !== 'robot' && framing !== next) spin = 0;
       framing = next;
     },
     setPicking(next, target = 'head') {

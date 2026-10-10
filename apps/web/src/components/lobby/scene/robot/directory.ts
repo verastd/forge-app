@@ -35,6 +35,7 @@ export function lookFrom(list: AvatarList | null, id: string, name: string): Rob
   const dressed = list?.avatars.find((avatar) => avatar.memberId === id);
   const head: AvatarHead | null = dressed?.head ? (list?.heads.find((h) => h.id === dressed.head) ?? null) : null;
   const accessory: AvatarHead | null = dressed?.accessory ? (list?.heads.find((h) => h.id === dressed.accessory) ?? null) : null;
+  const back: AvatarHead | null = dressed?.back ? (list?.heads.find((h) => h.id === dressed.back) ?? null) : null;
   return {
     id,
     name,
@@ -43,6 +44,8 @@ export function lookFrom(list: AvatarList | null, id: string, name: string): Rob
     accessory,
     chest: dressed?.chest ?? null,
     finish: dressed?.finish ?? null,
+    back,
+    cape: dressed?.cape ?? null,
   };
 }
 
