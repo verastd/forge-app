@@ -337,12 +337,16 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled, w
       const current = placementRef.current;
       if (!current || !picking) return;
       if (picking === 'ramp') {
+        const machines = current.emitter === 'machines';
         if (!pick) {
-          setNote({ tone: 'warn', text: 'That missed the model. Click on the ramp bricks come out of.' });
+          setNote({
+            tone: 'warn',
+            text: machines ? 'That missed the model. Click where machine parts fly out.' : 'That missed the model. Click on the ramp bricks come out of.',
+          });
           return;
         }
         setPlacement({ ...current, spout: pick.file });
-        setNote({ tone: 'ok', text: 'Ramp marked: new bricks drop out there.' });
+        setNote({ tone: 'ok', text: machines ? 'Marked: machine parts fly out there.' : 'Ramp marked: new bricks drop out there.' });
         setPicking(null);
         return;
       }
@@ -453,9 +457,10 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled, w
     setPlacement((current) => (current ? { ...current, motion: on ? 'arm' : null } : current));
   };
 
-  const onEmitter = (event: ChangeEvent<HTMLInputElement>): void => {
+  /** One maker at a time: bricks or machines. */
+  const onEmitter = (emitter: 'bricks' | 'machines') => (event: ChangeEvent<HTMLInputElement>): void => {
     const on = event.target.checked;
-    setPlacement((current) => (current ? { ...current, emitter: on ? 'bricks' : null } : current));
+    setPlacement((current) => (current ? { ...current, emitter: on ? emitter : null } : current));
   };
 
   const onScreenSize = (index: 0 | 1) => (event: ChangeEvent<HTMLInputElement>): void => {
@@ -499,7 +504,10 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled, w
     left: 'Click the head where its left eye goes (the robot’s left, on your right).',
     right: 'Click the head where its right eye goes (on your left).',
     hole: 'Click the middle of an eye hole: it moves over the nearest eye.',
-    ramp: 'Click the ramp (or chute) new bricks drop out of.',
+    ramp:
+      placement?.emitter === 'machines'
+        ? 'Click where machine parts fly out (an engine’s intake, say).'
+        : 'Click the ramp (or chute) new bricks drop out of.',
   };
 
   return (
@@ -747,7 +755,7 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled, w
 
         {fit === 'back' && (
           <label className={`${styles.radio} ${styles.fitFull}`}>
-            <input type="checkbox" checked={placement?.emitter === 'bricks'} onChange={onEmitter} disabled={locked} />
+            <input type="checkbox" checked={placement?.emitter === 'bricks'} onChange={onEmitter('bricks')} disabled={locked} />
             <span>
               Makes bricks
               <br />
@@ -755,6 +763,21 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled, w
                 {placement?.emitter === 'bricks'
                   ? 'Whoever wears this on their back is the Lego bot: they make building bricks (B) and remove them (X).'
                   : 'Off: an ordinary back model.'}
+              </span>
+            </span>
+          </label>
+        )}
+
+        {fit === 'back' && (
+          <label className={`${styles.radio} ${styles.fitFull}`}>
+            <input type="checkbox" checked={placement?.emitter === 'machines'} onChange={onEmitter('machines')} disabled={locked} />
+            <span>
+              Makes machines
+              <br />
+              <span className={styles.hint}>
+                {placement?.emitter === 'machines'
+                  ? 'Whoever wears this on their back is the mechanic: they build machines from a library of blueprints (3D models), their parts flying out of this model.'
+                  : 'Off: they don’t build machines.'}
               </span>
             </span>
           </label>
@@ -775,7 +798,7 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled, w
           </label>
         )}
 
-        {fit === 'back' && placement?.emitter === 'bricks' && (
+        {fit === 'back' && (placement?.emitter === 'bricks' || placement?.emitter === 'machines') && (
           <div className={styles.fitRow} data-ramp={placement.spout ? 'marked' : 'guessed'}>
             <button
               type="button"
@@ -784,7 +807,13 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled, w
               onClick={() => setPicking(picking === 'ramp' ? null : 'ramp')}
               disabled={locked}
             >
-              {placement.spout ? 'Mark the ramp again' : 'Mark the ramp'}
+              {placement.emitter === 'machines'
+                ? placement.spout
+                  ? 'Mark where parts come out again'
+                  : 'Mark where parts come out'
+                : placement.spout
+                  ? 'Mark the ramp again'
+                  : 'Mark the ramp'}
             </button>
             {placement.spout && (
               <button
@@ -792,7 +821,13 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled, w
                 className="btn btn-sm btn-ghost"
                 onClick={() => {
                   setPlacement((current) => (current ? { ...current, spout: null } : current));
-                  setNote({ tone: 'ok', text: 'Ramp cleared: bricks drop from low on the middle of its back.' });
+                  setNote({
+                    tone: 'ok',
+                    text:
+                      placement.emitter === 'machines'
+                        ? 'Cleared: parts fly from low on the middle of its back.'
+                        : 'Ramp cleared: bricks drop from low on the middle of its back.',
+                  });
                 }}
                 disabled={locked}
               >
@@ -800,9 +835,13 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled, w
               </button>
             )}
             <span className={styles.hint}>
-              {placement.spout
-                ? 'Marked: new bricks drop out of the spot you clicked.'
-                : 'Not marked: new bricks drop from low on the middle of its back.'}
+              {placement.emitter === 'machines'
+                ? placement.spout
+                  ? 'Marked: machine parts fly out of the spot you clicked.'
+                  : 'Not marked: machine parts fly from low on the middle of its back.'
+                : placement.spout
+                  ? 'Marked: new bricks drop out of the spot you clicked.'
+                  : 'Not marked: new bricks drop from low on the middle of its back.'}
             </span>
           </div>
         )}

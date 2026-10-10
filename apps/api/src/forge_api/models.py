@@ -1146,7 +1146,7 @@ _Fraction = Annotated[float, Field(ge=0, le=1, allow_inf_nan=False)]
 AvatarHeadFlyer = Literal["helicopter"]
 
 #: What a back model makes for whoever wears it on their back (bricks: the brick maker).
-AvatarHeadEmitter = Literal["bricks"]
+AvatarHeadEmitter = Literal["bricks", "machines"]
 #: How a back model moves on its own: `arm` bends it like an arm (an auto-rig), bouncing around
 #: and turning its tip (its camera) to look at people.
 AvatarHeadMotion = Literal["arm"]
@@ -1402,3 +1402,127 @@ class BrickTakenDown(BaseModel):
 
     rev: _Rev
     removed: Annotated[int, Field(ge=1)]
+
+
+# ---------------------------------------------------------------------------
+# Machines in the Apps lobby (packages/shared's Machine* schemas, field for field)
+# ---------------------------------------------------------------------------
+
+MACHINE_ID: Final = r"^[0-9a-f]{12}$"
+MACHINE_NAME_MAX: Final = 60
+MACHINE_BLUEPRINT_MAX_BYTES: Final = 24 * 1024 * 1024
+MACHINE_CHUNK_BYTES: Final = 3 * 1024 * 1024
+MACHINE_PARTS_MAX: Final = 400
+MACHINE_TURNS: Final = 24
+MACHINE_SCALE_MIN: Final = 0.5
+MACHINE_SCALE_MAX: Final = 2.0
+
+_MachineId = Annotated[str, Field(pattern=MACHINE_ID)]
+_MachineName = Annotated[str, Field(min_length=1, max_length=MACHINE_NAME_MAX)]
+_MachineSha = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
+_MachineBytes = Annotated[int, Field(ge=1, le=MACHINE_BLUEPRINT_MAX_BYTES, strict=True)]
+_MachineParts = Annotated[int, Field(ge=1, le=MACHINE_PARTS_MAX, strict=True)]
+_MachineExtent = Annotated[float, Field(gt=0, le=1e6, allow_inf_nan=False)]
+_MachineSize = tuple[_MachineExtent, _MachineExtent, _MachineExtent]
+_MachineCoord = Annotated[float, Field(ge=-100, le=100, allow_inf_nan=False)]
+_MachineTurn = Annotated[int, Field(ge=0, le=MACHINE_TURNS - 1, strict=True)]
+_MachineScale = Annotated[
+    float, Field(ge=MACHINE_SCALE_MIN, le=MACHINE_SCALE_MAX, allow_inf_nan=False)
+]
+
+
+class MachineBlueprint(BaseModel):
+    """A blueprint in the mechanic's library."""
+
+    id: _MachineId
+    name: _MachineName
+    sha256: _MachineSha
+    bytes: _MachineBytes
+    parts: _MachineParts
+    size: _MachineSize
+    uploadedBy: _AvatarMemberId
+    createdAt: str
+
+
+class MachineBlueprintList(BaseModel):
+    blueprints: list[MachineBlueprint]
+
+
+class MachineUploadStart(BaseModel):
+    """Starts a blueprint upload: the file follows in chunks, checked whole at the end."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: _MachineName
+    bytes: _MachineBytes
+    sha256: _MachineSha
+    parts: _MachineParts
+    size: _MachineSize
+
+
+class MachineUpload(BaseModel):
+    id: _MachineId
+    chunkBytes: Annotated[int, Field(ge=1)]
+    chunks: Annotated[int, Field(ge=1)]
+
+
+class MachineChunk(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    data: Annotated[str, Field(min_length=1)]
+
+
+class Machine(BaseModel):
+    """A machine in the cave: a blueprint built at (x, z), turned `turn` x 15 degrees."""
+
+    id: _MachineId
+    blueprint: _MachineId
+    name: _MachineName
+    sha256: _MachineSha
+    bytes: _MachineBytes
+    parts: _MachineParts
+    size: _MachineSize
+    x: _MachineCoord
+    z: _MachineCoord
+    turn: _MachineTurn
+    scale: _MachineScale
+    builtBy: _AvatarMemberId
+    builtAt: str
+    updatedAt: str
+
+
+class MachineList(BaseModel):
+    rev: _Rev
+    full: bool
+    machines: list[Machine]
+    gone: list[_MachineId]
+    #: The server's clock, so a build plays in step for everyone.
+    now: str
+
+
+class MachineMe(BaseModel):
+    memberId: _AvatarMemberId
+    mechanic: bool
+    canStandIn: bool
+    standIn: bool
+
+
+class MachineStandIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    on: StrictBool
+
+
+class MachineBuild(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    blueprint: _MachineId
+    x: _MachineCoord
+    z: _MachineCoord
+    turn: _MachineTurn
+    scale: _MachineScale
+
+
+class MachineChange(BaseModel):
+    rev: _Rev
+    machine: Machine | None = None

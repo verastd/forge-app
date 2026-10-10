@@ -252,6 +252,41 @@ test.describe('what a robot wears on its back', () => {
     await expect(page.locator('li', { hasText: 'Arm' }).getByText('Moves like an arm', { exact: true })).toBeVisible();
   });
 
+  test('a back model can make machines instead: the mechanic’s engine is added with it, and the library says so', async ({ page, context, baseURL }) => {
+    await signInAs(context, baseURL ?? '', { sub: '4242', login: 'trent-admin' });
+    await openEditor(page, { avatars: [ROBOT], heads: [] });
+    const upload = held();
+    let sent: { fit?: string; placement?: { emitter?: string } } | null = null;
+    await page.route('**/bff/avatars/heads/engine', async (route) => {
+      sent = route.request().postDataJSON() as typeof sent;
+      await upload.handler(route);
+    });
+    await page.getByLabel('Name').fill('Engine');
+    await page.getByRole('radio', { name: /Worn on the back/ }).check();
+    await page.getByLabel(/File \(\.glb/).setInputFiles({ name: 'engine.glb', mimeType: 'model/gltf-binary', buffer: WINGS });
+    const machines = page.getByRole('checkbox', { name: /Makes machines/ });
+    const bricks = page.getByRole('checkbox', { name: /Makes bricks/ });
+    await expect(machines).toBeEnabled({ timeout: 90_000 });
+    await expect(page.getByText('Off: they don’t build machines.')).toBeVisible();
+    await machines.check();
+    await expect(page.getByText(/is the mechanic: they build machines from a library of blueprints/)).toBeVisible();
+    // Where the parts fly out: marked the same way as a ramp, in its own words.
+    await expect(page.getByRole('button', { name: 'Mark where parts come out' })).toBeVisible();
+    await expect(page.getByText('Not marked: machine parts fly from low on the middle of its back.')).toBeVisible();
+    // One maker at a time.
+    await bricks.check();
+    await expect(machines).not.toBeChecked();
+    await machines.check();
+    await expect(bricks).not.toBeChecked();
+
+    await page.getByRole('button', { name: 'Add to library' }).click();
+    await expect(page.getByRole('button', { name: 'Uploading…' })).toBeVisible();
+    await expect.poll(() => sent).not.toBeNull();
+    expect(sent!.placement!.emitter).toBe('machines');
+    upload.release(200, { ...PACK, id: 'engine', name: 'Engine', fit: 'back', placement: sent!.placement });
+    await expect(page.locator('li', { hasText: 'Engine' }).getByText('Builds machines', { exact: true })).toBeVisible();
+  });
+
   test('a back model can make bricks: the Lego bot’s backpack is added with it, and the library says so', async ({ page, context, baseURL }) => {
     await signInAs(context, baseURL ?? '', { sub: '4242', login: 'trent-admin' });
     await openEditor(page, { avatars: [ROBOT], heads: [] });

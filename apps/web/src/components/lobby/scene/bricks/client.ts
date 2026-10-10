@@ -22,7 +22,7 @@ export class BrickRefusal extends Error {
   }
 }
 
-const PROBLEMS = new Set<string>(['shape', 'outside', 'overlap', 'floating']);
+const PROBLEMS = new Set<string>(['shape', 'outside', 'overlap', 'floating', 'machine']);
 
 /** What a refusal means, for the toast. */
 export function refusalText(status: number, code: string, problem: BrickProblem | null): string {

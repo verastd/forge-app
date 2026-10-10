@@ -1307,6 +1307,7 @@ function HeadLibrary({ member, drafted, list, setList }: HeadLibraryProps) {
               {h.fit === 'replace' && !h.eyes && <span className="chip chip-warn">No EyeL/EyeR: no eyes</span>}
               {h.placement.flyer === 'helicopter' && <span className="chip">Helicopter</span>}
               {h.placement.emitter === 'bricks' && <span className="chip">Makes bricks</span>}
+              {h.placement.emitter === 'machines' && <span className="chip">Builds machines</span>}
               {h.placement.motion === 'arm' && <span className="chip">Moves like an arm</span>}
               <span className={styles.headMeta}>{kb(h.bytes)}</span>
               <span className={styles.headMeta}>{list.avatars.filter((a) => a.head === h.id).length} wearing</span>

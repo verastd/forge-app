@@ -29,6 +29,8 @@ describe('encodeAction / parseAction', () => {
       { kind: 'bricks', rev: 7, made: '0123456789ab' },
       { kind: 'bricks', rev: 8, burst: { x: 1.25, z: -3.5 } },
       { kind: 'bricks', rev: 9, made: 'abcdefabcdef', burst: { x: 0, z: 0 } },
+      { kind: 'machines', rev: 0 },
+      { kind: 'machines', rev: 312 },
     ];
     for (const action of actions) expect(parseAction(encodeAction(action))).toEqual(action);
   });
@@ -68,6 +70,12 @@ describe('encodeAction / parseAction', () => {
     expect(parseAction(json({ ...good, d: [0, -1, 0] }))).toBeNull();
     expect(parseAction(json({ ...good, d: 'here' }))).toBeNull();
     expect(parseAction(json({ ...good, extra: true }))).toBeNull();
+  });
+
+  it('rejects a bad machines ping', () => {
+    expect(parseAction(json({ v: 1, k: 'machines', r: -1 }))).toBeNull();
+    expect(parseAction(json({ v: 1, k: 'machines', r: 1.5 }))).toBeNull();
+    expect(parseAction(json({ v: 1, k: 'machines', r: 1, m: 'x' }))).toBeNull();
   });
 
   it('rejects a bricks ping with a bad made brick or burst', () => {

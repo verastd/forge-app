@@ -89,7 +89,9 @@ import type { SelfRobotState } from './scene/peers';
 import { ViewToggle } from './ViewToggle';
 import { PlayControls, behaviorStateAttr, useBehaviorState, watchSends } from './PlayControls';
 import { BuildControls, INITIAL_BRICKS } from './BuildControls';
+import { INITIAL_MACHINES, MachineControls } from './MachineControls';
 import type { BrickCommand, BrickState, Builder } from './scene/bricks/controller';
+import type { MachineCommand, MachineState } from './scene/machines/controller';
 import type { PlayState } from './scene/play';
 import { PeopleIcon, Spinner } from './icons';
 import { VoicePanel, roomCount, useFeedState, useFeedSummary, wantMicOnEntry } from './VoicePanel';
@@ -384,6 +386,13 @@ export function Lobby({ heading, directory }: { heading: ReactNode; directory: R
     (command: BrickCommand) => setBrickPress((current) => ({ id: (current?.id ?? 0) + 1, command })),
     [],
   );
+  /** The mechanic's machines, the same way. */
+  const [machines, setMachines] = useState<MachineState>(INITIAL_MACHINES);
+  const [machinePress, setMachinePress] = useState<{ id: number; command: MachineCommand } | null>(null);
+  const pressMachine = useCallback(
+    (command: MachineCommand) => setMachinePress((current) => ({ id: (current?.id ?? 0) + 1, command })),
+    [],
+  );
   /** The 2D lobby chosen (`?view=2d`): the 3D view never starts. */
   const [flat, setFlat] = useState(false);
 
@@ -503,6 +512,7 @@ export function Lobby({ heading, directory }: { heading: ReactNode; directory: R
     onPlay: setPlay,
     onPlayEvent: say,
     onBricks: setBricks,
+    onMachines: setMachines,
   };
   /** Building needs a GitHub session: the practice account and visitors only look. */
   const builder: Builder = session === null ? 'signed-out' : session.demo ? 'practice' : 'member';
@@ -619,6 +629,7 @@ export function Lobby({ heading, directory }: { heading: ReactNode; directory: R
               wavePress={wavePress}
               builder={builder}
               brickPress={brickPress}
+              machinePress={machinePress}
               feed={feedRef}
               hud={hud}
               events={events}
@@ -693,6 +704,7 @@ export function Lobby({ heading, directory }: { heading: ReactNode; directory: R
             />
           )}
           {!fallback && live && avatars && <BuildControls state={bricks} onCommand={pressBrick} />}
+          {!fallback && live && avatars && <MachineControls state={machines} onCommand={pressMachine} />}
         </div>
         {live && <VoicePanel feed={feed} micRef={micRef} practice={practice} behavior={behavior.shown} onRejoin={rejoin} />}
       </div>

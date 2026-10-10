@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from typing import Final, Literal
 
 STUD: Final = 0.2
+#: One plate, up (metres).
+PLATE: Final = 0.08
 #: Building stays this far inside the walking disk's edge (metres).
 RADIUS: Final = 24.0
 #: The highest a brick may reach, in plates.
@@ -41,7 +43,8 @@ SHAPES: Final[dict[str, Shape]] = {
     "slope-2x2": Shape(2, 2, 3, slope=True),
 }
 
-Problem = Literal["shape", "outside", "overlap", "floating"]
+#: "machine": a machine stands there (machine_rules.brick_blocked; never said by this module).
+Problem = Literal["shape", "outside", "overlap", "floating", "machine"]
 Cell = tuple[int, int]
 
 

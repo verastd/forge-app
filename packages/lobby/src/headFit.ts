@@ -45,7 +45,7 @@ export interface HeadPlacement {
   /** What flies over the head (flyer.ts). */
   flyer?: 'helicopter' | null;
   /** What a back model makes for its wearer (bricks: they're the cave's brick maker). */
-  emitter?: 'bricks' | null;
+  emitter?: 'bricks' | 'machines' | null;
   /** Where a brick-making back model's ramp is: fractions (0–1) of its file's bounding box. */
   spout?: [number, number, number] | null;
   /** How a back model moves on its own (`arm`: rigged and bent like an arm). */

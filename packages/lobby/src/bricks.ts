@@ -83,7 +83,8 @@ export interface BrickAt {
 }
 
 /** Why a brick can't go where it's aimed; null when it can. */
-export type BrickProblem = 'shape' | 'outside' | 'overlap' | 'floating';
+/** `machine`: a machine stands there (machine.ts `brickInMachine`; the rules here never say it). */
+export type BrickProblem = 'shape' | 'outside' | 'overlap' | 'floating' | 'machine';
 
 /** What each problem is, in words (the ghost's hint). */
 export const BRICK_PROBLEM_TEXT: Readonly<Record<BrickProblem, string>> = Object.freeze({
@@ -91,6 +92,7 @@ export const BRICK_PROBLEM_TEXT: Readonly<Record<BrickProblem, string>> = Object
   outside: 'Too far out (or too high) to build there.',
   overlap: 'It would overlap a brick.',
   floating: 'Nothing to fasten it to: build on the floor or on studs.',
+  machine: 'A machine is in the way.',
 });
 
 export function brickShape(id: string): BrickShape | null {
