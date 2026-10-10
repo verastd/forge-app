@@ -27,6 +27,8 @@ import { signInAs } from './helpers/session';
 
 const ME = 'gh:4242';
 const ENGINE = readFileSync(join(__dirname, 'fixtures', 'engine.glb'));
+/** Two boxes as a STEP file: a "Block" with a "Cap" on it, each its own part. */
+const ENGINE_STEP = readFileSync(join(__dirname, 'fixtures', 'engine.step'));
 const SHA = createHash('sha256').update(ENGINE).digest('hex');
 const STAMP = '2026-10-10T00:00:00+00:00';
 
@@ -90,6 +92,8 @@ class Shop {
   admin = false;
   standIn = false;
   uploads: { name: string; parts: number; size: number[] }[] = [];
+  /** The files sent, decoded. */
+  sent: Buffer[] = [];
   made = 0;
 
   constructor(
@@ -141,7 +145,10 @@ class Shop {
       this.uploads.push({ name: body.name, parts: body.parts, size: body.size });
       return reply(200, { id: 'b00000000002', chunkBytes: 3 * 1024 * 1024, chunks: 1 });
     }
-    if (method === 'PUT' && /^blueprints\/[0-9a-f]{12}\/chunks\/0$/.test(path)) return route.fulfill({ status: 204 });
+    if (method === 'PUT' && /^blueprints\/[0-9a-f]{12}\/chunks\/0$/.test(path)) {
+      this.sent.push(Buffer.from((JSON.parse(request.postData() ?? '{}') as { data: string }).data, 'base64'));
+      return route.fulfill({ status: 204 });
+    }
     if (method === 'POST' && /^blueprints\/[0-9a-f]{12}\/finish$/.test(path)) {
       const last = this.uploads[this.uploads.length - 1]!;
       const blueprint: Blueprint = { ...V8, id: 'b00000000002', name: last.name, parts: last.parts, size: last.size as [number, number, number] };
@@ -207,11 +214,11 @@ test.describe('the mechanic’s machines', () => {
     const machines = new Shop(true);
     await enter(page, machines);
     await expect(lobbyRoot(page)).toHaveAttribute('data-mechanic', 'yes');
-    await expect(shop(page).getByText('No blueprints yet: upload a .glb to build from.')).toBeVisible();
+    await expect(shop(page).getByText('No blueprints yet: upload a .glb or a STEP file to build from.')).toBeVisible();
 
-    // Not a .glb: said so, nothing sent.
+    // Not a model: said so, nothing sent.
     const input = shop(page).locator('input[type=file]');
-    await input.setInputFiles({ name: 'engine.step', mimeType: 'application/step', buffer: Buffer.from('ISO-10303-21;') });
+    await input.setInputFiles({ name: 'engine.txt', mimeType: 'text/plain', buffer: Buffer.from('an engine') });
     await expect(shop(page).getByRole('alert')).toContainText('A blueprint is a .glb file');
     await shop(page).getByRole('button', { name: 'OK' }).click();
     await expect(shop(page).getByRole('alert')).toHaveCount(0);
@@ -230,6 +237,36 @@ test.describe('the mechanic’s machines', () => {
     expect(machines.uploads[0]!.parts).toBeGreaterThanOrEqual(3);
     // Its size, in its own units: the block is 2 wide, the head on it reaches 1.5 up, the pulley out front makes it 3.4 deep.
     expect(machines.uploads[0]!.size.map((n) => +n.toFixed(2))).toEqual([2, 1.5, 3.4]);
+  });
+
+  test('a STEP file goes through the CAD reader, keeps its own parts, and joins the library', async ({ page, context, baseURL }) => {
+    await signInAs(context, baseURL ?? '', { sub: '4242', login: 'mechanic' });
+    const machines = new Shop(true);
+    await enter(page, machines);
+    machines.hold = true;
+    await shop(page).locator('input[type=file]').setInputFiles({ name: 'engine.step', mimeType: 'model/step', buffer: ENGINE_STEP });
+    await expect(shop(page).getByRole('button', { name: 'Uploading…' })).toHaveAttribute('aria-busy', 'true');
+    // The CAD reader loads, reads and meshes it (each stage said), then it goes up like any blueprint.
+    await expect(shop(page).getByText(/Uploading engine \(2 parts\)… 0%/)).toBeVisible({ timeout: 60_000 });
+    machines.release();
+    await expect(toast(page, 'Added engine to the library: 2 parts')).toBeVisible();
+    // Its two solids stay two parts, by name, in the .glb that was sent.
+    expect(machines.uploads[0]!.parts).toBe(2);
+    const glb = machines.sent[0]!;
+    expect(glb.subarray(0, 4).toString()).toBe('glTF');
+    expect(glb.includes('"Block"')).toBe(true);
+    expect(glb.includes('"Cap"')).toBe(true);
+    // Block 200×100×300 mm with a 50 mm cap on it: 150 tall.
+    expect(machines.uploads[0]!.size.map((n) => Math.round(n))).toEqual([200, 150, 300]);
+  });
+
+  test('a STEP file the CAD reader can’t open says so', async ({ page, context, baseURL }) => {
+    await signInAs(context, baseURL ?? '', { sub: '4242', login: 'mechanic' });
+    const machines = new Shop(true);
+    await enter(page, machines);
+    await shop(page).locator('input[type=file]').setInputFiles({ name: 'broken.stp', mimeType: 'model/step', buffer: Buffer.from('ISO-10303-21;\nnot really\n') });
+    await expect(shop(page).getByRole('alert')).toContainText(/STEP/, { timeout: 60_000 });
+    expect(machines.uploads).toHaveLength(0);
   });
 
   test('the library failing to load says so and tries again', async ({ page, context, baseURL }) => {

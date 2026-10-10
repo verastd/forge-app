@@ -21,7 +21,7 @@
  *   blueprints are still on their way.
  */
 
-import { MACHINE } from '@forge/lobby';
+import { MACHINE, STEP_MAX_BYTES } from '@forge/lobby';
 import { MACHINE_BLUEPRINT_MAX_BYTES, MACHINE_SCALE_MAX, MACHINE_SCALE_MIN } from '@forge/shared';
 import { useId, useRef } from 'react';
 
@@ -55,6 +55,24 @@ export interface MachineControlsProps {
 
 const metres = (item: LibraryItem): string => item.metres.map((m) => m.toFixed(1)).join(' × ') + ' m';
 const percent = (fraction: number): string => `${Math.round(fraction * 100)}%`;
+
+/** What an upload is doing, in words. */
+function uploadText(upload: NonNullable<MachineState['upload']>): string {
+  switch (upload.stage) {
+    case 'engine':
+      return `Loading the CAD reader for ${upload.name}… (once, about 8 MB)`;
+    case 'step':
+      return `Reading ${upload.name} (STEP)…`;
+    case 'meshing':
+      return `Meshing ${upload.parts ?? ''} parts of ${upload.name}…`;
+    case 'reading':
+      return `Reading ${upload.name} and finding its parts…`;
+    case 'finishing':
+      return `Checking ${upload.name}…`;
+    case 'uploading':
+      return `Uploading ${upload.name} (${upload.parts ?? '?'} parts)… ${percent(upload.progress)}`;
+  }
+}
 
 function note(state: MachineState): string {
   if (state.sync === 'loading') return 'Loading the machines…';
@@ -122,7 +140,7 @@ export function MachineControls({ state, onCommand }: MachineControlsProps) {
             <input
               ref={fileRef}
               type="file"
-              accept=".glb,model/gltf-binary"
+              accept=".glb,.step,.stp,model/gltf-binary,model/step"
               className={styles.srOnly}
               tabIndex={-1}
               aria-hidden="true"
@@ -136,7 +154,7 @@ export function MachineControls({ state, onCommand }: MachineControlsProps) {
               type="button"
               disabled={!ready || upload !== null}
               aria-busy={upload !== null || undefined}
-              title={`A .glb model (binary glTF from Tripo, Blender or a CAD tool), up to ${MACHINE_BLUEPRINT_MAX_BYTES / 1024 / 1024} MB`}
+              title={`A .glb model (binary glTF from Tripo or Blender, up to ${MACHINE_BLUEPRINT_MAX_BYTES / 1024 / 1024} MB) or a .step / .stp file from any CAD tool (up to ${STEP_MAX_BYTES / 1024 / 1024} MB): a STEP file's parts build as they are`}
               onClick={() => fileRef.current?.click()}
             >
               {upload && <Spinner />}
@@ -147,15 +165,11 @@ export function MachineControls({ state, onCommand }: MachineControlsProps) {
           {upload && (
             <div className={styles.machineUpload} data-stage={upload.stage}>
               <span>
-                {upload.stage === 'reading'
-                  ? `Reading ${upload.name} and finding its parts…`
-                  : upload.stage === 'finishing'
-                    ? `Checking ${upload.name}…`
-                    : `Uploading ${upload.name} (${upload.parts ?? '?'} parts)… ${percent(upload.progress)}`}
+                {uploadText(upload)}
               </span>
               <progress
                 max={1}
-                value={upload.stage === 'reading' ? undefined : upload.progress}
+                value={upload.stage === 'uploading' || upload.stage === 'finishing' ? upload.progress : undefined}
                 aria-label={`Uploading ${upload.name}`}
               />
               <button type="button" onClick={() => onCommand({ kind: 'cancel-upload' })}>
@@ -187,7 +201,7 @@ export function MachineControls({ state, onCommand }: MachineControlsProps) {
             </p>
           )}
           {library.status === 'ready' && library.items.length === 0 && !upload && (
-            <p className={styles.viewNote}>No blueprints yet: upload a .glb to build from.</p>
+            <p className={styles.viewNote}>No blueprints yet: upload a .glb or a STEP file to build from.</p>
           )}
           {library.items.length > 0 && (
             <ul className={styles.machineLibrary} aria-label="Library">

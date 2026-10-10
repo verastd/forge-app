@@ -41,6 +41,7 @@ export * from './bricks.js';
 export * from './blueprint.js';
 export * from './brickDrop.js';
 export * from './machine.js';
+export * from './step.js';
 export * from './arm.js';
 export * from './flyer.js';
 export * from './cape.js';

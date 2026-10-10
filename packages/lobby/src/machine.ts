@@ -386,8 +386,9 @@ export function machineParts(meshes: readonly MachineMesh[]): MachineSplit {
     merge(pieces[nearest]!, crumb);
     pieces.splice(smallest, 1);
   }
-  // Too few: cut the biggest (by triangles) until there are enough, while it has triangles to spare.
-  while (pieces.length < MACHINE.minParts) {
+  // A fused model with too few pieces: cut the biggest (by triangles) until there are enough, while it has
+  // triangles to spare. A model that came in parts keeps them as they are, however few.
+  while (live.length === 1 && pieces.length < MACHINE.minParts) {
     let biggest = 0;
     pieces.forEach((p, i) => {
       if (p.tris.length > pieces[biggest]!.tris.length) biggest = i;

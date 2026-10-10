@@ -40,6 +40,9 @@ importers:
       next:
         specifier: ^15
         version: 15.5.23(@playwright/test@1.56.1)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      occt-import-js:
+        specifier: 0.0.23
+        version: 0.0.23
       react:
         specifier: ^19
         version: 19.2.8
@@ -1703,6 +1706,9 @@ packages:
 
   nwsapi@2.2.28:
     resolution: {integrity: sha512-IlVB7OS7qrOsVYlpnFIkETjMwT9jwvmocJmmM+GZU/PAB3uGi9Ezd7vcWhWBUnSc0ya4ppmQITOyP1ez9gg8cg==}
+
+  occt-import-js@0.0.23:
+    resolution: {integrity: sha512-RFfYQXYFX5C1mB1Aywm0ShcUKzXOr/VzTnlzhBSDJOR6YCAPt1HYCzeXWg1vwwjn/cUxwqRNhhtf1dlewoZYCQ==}
 
   optionator@0.9.4:
     resolution: {integrity: sha512-6IpQ7mKUxRcZNLIObR0hz7lxsapSSIYNZJwXPGeF0mTVqGKFIXj1DQcMoT22S3ROcLyY/rz0PWaWZ9ayWmad9g==}
@@ -3394,6 +3400,8 @@ snapshots:
       - babel-plugin-macros
 
   nwsapi@2.2.28: {}
+
+  occt-import-js@0.0.23: {}
 
   optionator@0.9.4:
     dependencies:
