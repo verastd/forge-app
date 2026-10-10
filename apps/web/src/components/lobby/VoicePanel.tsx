@@ -53,6 +53,7 @@ import type { ButtonHTMLAttributes, ChangeEvent, CSSProperties, ReactNode, RefOb
 
 import { HeadphonesIcon, MicIcon, PeopleIcon, Spinner } from './icons';
 import styles from './Lobby.module.css';
+import type { BehaviorShown } from './PlayControls';
 import { NO_VOICE } from './presence/noneFeed';
 import type { NoneReason } from './presence/noneFeed';
 import type { FeedKind, FeedStatus, MicProblem, MicState, Person, PresenceFeed, VoiceSnapshot } from './presence/types';
@@ -403,11 +404,13 @@ export interface VoicePanelProps {
   practice: boolean;
   /** Joins again: "Rejoin here" (takes the seat back from the other tab), "Rejoin" and "Try again". */
   onRejoin(): Promise<void> | void;
+  /** The latest throw or wave and its catalog state: a `rejected` one is announced here, with its reason. */
+  behavior?: BehaviorShown | null;
 }
 
 type NoticeKind = 'elsewhere' | 'status' | 'problem' | null;
 
-export function VoicePanel({ feed, micRef, practice, onRejoin }: VoicePanelProps) {
+export function VoicePanel({ feed, micRef, practice, onRejoin, behavior = null }: VoicePanelProps) {
   const state = useFeedState(feed);
   const { status, voice } = state;
   const room = roomCount(state);
@@ -519,6 +522,15 @@ export function VoicePanel({ feed, micRef, practice, onRejoin }: VoicePanelProps
           <p role="status" data-live="problem">
             {problem}
           </p>
+        </div>
+        {/* A throw or wave that didn't happen, and why, in the catalog's words. Keyed by the
+            change, so a second miss in a row is read out again. */}
+        <div className={styles.srOnly} role="status" aria-live="polite" data-live="behavior">
+          {behavior?.state === 'rejected' && (
+            <p key={behavior.seq}>
+              {behavior.entry.title}: {behavior.entry.states.rejected}
+            </p>
+          )}
         </div>
       </div>
 

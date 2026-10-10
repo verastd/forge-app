@@ -1475,6 +1475,34 @@
   animation: none;
 }
 
+/* The latest throw or wave in its catalog state: amber while it's out, red when it didn't happen. */
+.behaviorState {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 280px;
+  margin: 0;
+  padding: 4px 8px;
+  border: 1px solid rgba(var(--cave-line-rgb), 0.35);
+  background: rgba(var(--cave-ink-rgb), 0.6);
+  color: var(--cave-text);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+}
+
+.behaviorTitle {
+  color: rgba(var(--cave-text-rgb), 0.6);
+}
+
+.behaviorState[data-state='requested'] {
+  color: var(--cave-accent);
+}
+
+.behaviorState[data-state='rejected'] {
+  border-color: var(--danger-line);
+  color: var(--danger);
+}
+
 /* ---- building: the Lego bot's maker row and everyone's hands, under play ---- */
 
 .buildPick {

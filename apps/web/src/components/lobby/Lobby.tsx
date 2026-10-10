@@ -49,8 +49,10 @@
  * is the page), `data-focus`, `data-motion`, `data-peers`,
  * `data-voice` (unavailable, off or on), `data-feed`, `data-sound`
  * (blocked, on, or none without voice), `data-room-sound` and
- * `data-deafened` here, and `data-x/y/z/yaw/pitch`, which the scene writes
- * itself ten times a second.
+ * `data-deafened` here, `data-behavior-state` (`<kind>:<state>` for the
+ * latest throw or wave, the kind its catalog id: `wave:confirmed`,
+ * `catch-and-throw:rejected`; see PlayControls) and `data-x/y/z/yaw/pitch`,
+ * which the scene writes itself ten times a second.
  */
 
 import { useFlags } from '@forge/flags/react';
@@ -85,7 +87,7 @@ import type { PresenceFeed } from './presence/types';
 import type { Hit } from './scene/controls';
 import type { SelfRobotState } from './scene/peers';
 import { ViewToggle } from './ViewToggle';
-import { PlayControls } from './PlayControls';
+import { PlayControls, behaviorStateAttr, useBehaviorState, watchSends } from './PlayControls';
 import { BuildControls, INITIAL_BRICKS } from './BuildControls';
 import type { BrickCommand, BrickState, Builder } from './scene/bricks/controller';
 import type { PlayState } from './scene/play';
@@ -403,13 +405,17 @@ export function Lobby({ heading, directory }: { heading: ReactNode; directory: R
     }
   }, [enabled, webgl]);
 
-  // One presence feed while the 3D view is up.
+  /** The latest throw or wave in its catalog state, from the press to the outcome. */
+  const behavior = useBehaviorState(play, feed, peerCount);
+  const behaviorSent = behavior.sent;
+
+  // One presence feed while the 3D view is up, its sends watched for the throw and wave states.
   const login = session?.login ?? null;
   useEffect(() => {
     if (!live) {
       return undefined;
     }
-    const next = createPresenceFeed({ demo: isDemoMode(), me: login === null ? null : { name: login } });
+    const next = watchSends(createPresenceFeed({ demo: isDemoMode(), me: login === null ? null : { name: login } }), behaviorSent);
     feedRef.current = next;
     setFeed(next);
     // The feed says what changed (onVoice): the panel and the root's attributes read it as a store.
@@ -423,7 +429,7 @@ export function Lobby({ heading, directory }: { heading: ReactNode; directory: R
       setPeerCount(0);
       setFocus('');
     };
-  }, [live, login]);
+  }, [live, login, behaviorSent]);
 
   const presence = useFeedSummary(feed);
   const practice = isDemoMode();
@@ -598,6 +604,7 @@ export function Lobby({ heading, directory }: { heading: ReactNode; directory: R
       data-sound={presence.sound}
       data-room-sound={presence.roomSound}
       data-deafened={String(presence.deafened)}
+      data-behavior-state={live ? behaviorStateAttr(behavior.shown) : undefined}
     >
       {live && (
         <SceneBoundary onError={() => setBroken(true)}>
@@ -672,11 +679,22 @@ export function Lobby({ heading, directory }: { heading: ReactNode; directory: R
             />
           )}
           {!fallback && live && avatars && (
-            <PlayControls state={play} onBall={() => setBallPress((n) => n + 1)} onWave={() => setWavePress((n) => n + 1)} />
+            <PlayControls
+              state={play}
+              behavior={behavior.shown}
+              onBall={() => {
+                behavior.pressBall();
+                setBallPress((n) => n + 1);
+              }}
+              onWave={() => {
+                behavior.pressWave();
+                setWavePress((n) => n + 1);
+              }}
+            />
           )}
           {!fallback && live && avatars && <BuildControls state={bricks} onCommand={pressBrick} />}
         </div>
-        {live && <VoicePanel feed={feed} micRef={micRef} practice={practice} onRejoin={rejoin} />}
+        {live && <VoicePanel feed={feed} micRef={micRef} practice={practice} behavior={behavior.shown} onRejoin={rejoin} />}
       </div>
 
       {live && (
