@@ -434,15 +434,140 @@ test.describe('F5b · the floor is paused (rules M1)', () => {
 });
 
 test.describe('bringing a proposal', () => {
-  async function onForm(page: Page, context: BrowserContext, baseURL: string | undefined): Promise<void> {
-    await signInAs(context, baseURL ?? '', MEMBER);
+  async function onForm(page: Page, context: BrowserContext, baseURL: string | undefined, who = MEMBER): Promise<void> {
+    await signInAs(context, baseURL ?? '', who);
     await serviceDown(page);
     await openProposals(page);
     await serve(page, '**/bff/notifications', { notifications: [], unread: 0 });
-    await serve(page, '**/bff/proposals/me', { isAdmin: false, testTimers: false });
+    await serve(page, '**/bff/proposals/me', { isAdmin: who === ADMIN, testTimers: false });
     await page.goto('/propose/new');
     await expect(page.getByRole('heading', { name: 'Bring a proposal', level: 1 })).toBeVisible();
   }
+
+  test('a member’s pitch counts to 4,000, and one longer is caught before it goes', async ({ page, context, baseURL }) => {
+    await onForm(page, context, baseURL);
+    const created = await answer(page, '**/bff/proposals', () => ({ status: 500, body: {} }));
+    await expect(page.getByText('0 / 4000')).toBeVisible();
+    await expect(page.getByText(/As an admin/)).toHaveCount(0);
+    await page.getByLabel('Title').fill('A map view');
+    await page.getByLabel('Your pitch').fill('y'.repeat(4001));
+    await expect(page.getByText('4001 / 4000')).toBeVisible();
+    await page.getByRole('button', { name: 'Put it on the floor' }).click();
+    await expect(page.getByText('Keep the pitch to 4000 characters (it has 4001).')).toBeVisible();
+    await expect(page.getByLabel('Your pitch')).toBeFocused();
+    expect(created).toEqual([]);
+  });
+
+  test('an admin’s pitch counts to 50,000, the form says so, and only past that is it caught', async ({ page, context, baseURL }) => {
+    await onForm(page, context, baseURL, ADMIN);
+    const created = await answer(page, '**/bff/proposals', () => ({
+      status: 201,
+      body: detail({ proposal: { id: 12, title: 'A research pitch', state: 'submitted', seconder: undefined, deadline: at(168) }, comments: [] }),
+    }));
+    await serve(page, '**/api/proposals/12', publicOf(detail({ proposal: { id: 12, title: 'A research pitch', state: 'submitted', seconder: undefined } })));
+    await serve(page, '**/bff/proposals/12', detail({ proposal: { id: 12, title: 'A research pitch', state: 'submitted', seconder: undefined }, you: { isAdmin: true } }));
+    await expect(page.getByText('0 / 50,000')).toBeVisible();
+    await expect(page.getByText("As an admin, you can write up to 50,000 characters; everyone else's pitch stops at 4,000.")).toBeVisible();
+
+    await page.getByLabel('Title').fill('A research pitch');
+    await page.getByLabel('Your pitch').fill('🏛'.repeat(50001));
+    await expect(page.getByText('50,001 / 50,000')).toBeVisible();
+    await page.getByRole('button', { name: 'Put it on the floor' }).click();
+    await expect(page.getByText('Keep the pitch to 50,000 characters (it has 50,001).')).toBeVisible();
+    expect(created).toEqual([]);
+
+    await page.getByLabel('Your pitch').fill('🏛'.repeat(50000));
+    await page.getByRole('button', { name: 'Put it on the floor' }).click();
+    await expect(page).toHaveURL(/\/propose\/12$/);
+    expect(created).toEqual([{ method: 'POST', path: '/bff/proposals', query: '', body: { title: 'A research pitch', pitch: '🏛'.repeat(50000) } }]);
+  });
+
+  test('an admin’s refusal naming the pitch gives the admin’s limit', async ({ page, context, baseURL }) => {
+    await onForm(page, context, baseURL, ADMIN);
+    await answer(page, '**/bff/proposals', () => ({ status: 400, body: { error: 'invalid_request', fields: ['pitch'] } }));
+    await page.getByLabel('Title').fill('A research pitch');
+    await page.getByLabel('Your pitch').fill('\u200b'.repeat(10));
+    await page.getByRole('button', { name: 'Put it on the floor' }).click();
+    await expect(page.locator('main').getByRole('alert')).toContainText('Check the pitch (1 to 50,000 characters). Nothing was saved.');
+    await expect(page.getByLabel('Your pitch')).toHaveAttribute('aria-invalid', 'true');
+  });
+
+  /** The form with `GET /bff/proposals/me` failing (502) until the test says the API is back, and then answering `me`. */
+  async function onFormWithoutMe(page: Page, context: BrowserContext, baseURL: string | undefined, who: typeof MEMBER, me: Json) {
+    const api = { up: false };
+    await signInAs(context, baseURL ?? '', who);
+    await serviceDown(page);
+    await openProposals(page);
+    await serve(page, '**/bff/notifications', { notifications: [], unread: 0 });
+    const reads = await answer(page, '**/bff/proposals/me', () =>
+      api.up ? { body: me } : { status: 502, body: { error: 'service_unreachable' } },
+    );
+    await page.goto('/propose/new');
+    await expect(page.getByRole('heading', { name: 'Bring a proposal', level: 1 })).toBeVisible();
+    return { api, reads };
+  }
+
+  test('review: with `me` failing, an admin’s form says it counts to 4000, and "Try again" brings the admin’s limit back, the pitch kept', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    const pitch = 'Why this research matters to FORGE. '.repeat(1000).slice(0, 34990);
+    const { api, reads } = await onFormWithoutMe(page, context, baseURL, ADMIN, { isAdmin: true, testTimers: false });
+    const created = await answer(page, '**/bff/proposals', () => ({
+      status: 201,
+      body: detail({ proposal: { id: 12, title: 'A research pitch', state: 'submitted', seconder: undefined, deadline: at(168) }, comments: [] }),
+    }));
+    await serve(page, '**/api/proposals/12', publicOf(detail({ proposal: { id: 12, title: 'A research pitch', state: 'submitted', seconder: undefined } })));
+    await serve(page, '**/bff/proposals/12', detail({ proposal: { id: 12, title: 'A research pitch', state: 'submitted', seconder: undefined }, you: { isAdmin: true } }));
+
+    // The safe limit, and why: never a quiet 4000.
+    const unchecked = page.locator('#proposal-unchecked');
+    await expect(unchecked).toHaveText("FORGE couldn't check your account just now, so this form counts the pitch to 4000 characters.");
+    await expect(unchecked).toHaveAttribute('role', 'status');
+    await expect(page.getByText('0 / 4000')).toBeVisible();
+    await expect(page.getByText(/As an admin/)).toHaveCount(0);
+    await page.getByLabel('Title').fill('A research pitch');
+    await page.getByLabel('Your pitch').fill(pitch);
+    await expect(page.getByText('34990 / 4000')).toBeVisible();
+
+    // Still down: it says so again.
+    const retry = page.getByRole('button', { name: 'Try again' });
+    await retry.click();
+    await expect(unchecked).toHaveText("FORGE still couldn't check your account, so this form counts the pitch to 4000 characters.");
+    expect(reads).toHaveLength(2);
+
+    // Back: the admin's limit, the pitch as it was, and the pitch field next.
+    api.up = true;
+    await retry.click();
+    await expect(unchecked).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Try again' })).toHaveCount(0);
+    await expect(page.getByText('34,990 / 50,000')).toBeVisible();
+    await expect(page.getByText("As an admin, you can write up to 50,000 characters; everyone else's pitch stops at 4,000.")).toBeVisible();
+    await expect(page.getByLabel('Your pitch')).toHaveValue(pitch);
+    await expect(page.getByLabel('Your pitch')).toBeFocused();
+    expect(created).toEqual([]);
+
+    await page.getByRole('button', { name: 'Put it on the floor' }).click();
+    await expect(page).toHaveURL(/\/propose\/12$/);
+    expect(created).toEqual([{ method: 'POST', path: '/bff/proposals', query: '', body: { title: 'A research pitch', pitch } }]);
+  });
+
+  test('review: "Try again" that finds your proposal already on the floor points at it and keeps what you typed', async ({ page, context, baseURL }) => {
+    const { api } = await onFormWithoutMe(page, context, baseURL, MEMBER, { isAdmin: false, activeProposalId: 3, testTimers: false });
+    await page.getByLabel('Title').fill('A second idea');
+    await page.getByLabel('Your pitch').fill('Pins on a map.');
+    api.up = true;
+    await page.getByRole('button', { name: 'Try again' }).click();
+    const problem = page.locator('main').getByRole('alert');
+    await expect(problem).toContainText(describeProposalError('one_active_proposal', 'create'));
+    await expect(problem).toBeFocused();
+    await expect(problem.getByRole('link', { name: 'See your proposal' })).toHaveAttribute('href', '/propose/3');
+    await expect(page.locator('#proposal-unchecked')).toHaveCount(0);
+    await expect(page.getByLabel('Title')).toHaveValue('A second idea');
+    await expect(page.getByLabel('Your pitch')).toHaveValue('Pins on a map.');
+    await expect(page.getByText('14 / 4000')).toBeVisible();
+  });
 
   test('sends the title and pitch, trimmed, and opens the new proposal', async ({ page, context, baseURL }) => {
     await onForm(page, context, baseURL);
@@ -769,6 +894,95 @@ test.describe('a proposal, as a member', () => {
     await page.getByRole('button', { name: 'Yes, withdraw it' }).click();
     await expect(page.getByText('Withdrawn', { exact: true })).toBeVisible();
     expect(withdrawals).toEqual([{ method: 'POST', path: '/bff/proposals/7/withdraw', query: '', body: {} }]);
+  });
+
+  /** Proposal 7 waiting for a second, moved by `who`, who may edit it. */
+  const waitingBy = (who: typeof MEMBER, pitch = 'A map with a pin for each property.') =>
+    detail({
+      proposal: { state: 'submitted', seconder: undefined, mover: who.login, deadline: at(160) },
+      comments: [],
+      you: { canEdit: true, canWithdraw: true, isAdmin: who === ADMIN },
+      extra: { pitch, eligibleCount: undefined, consentCount: undefined },
+    });
+
+  test('a member editing counts the pitch to 4,000, and one longer is caught before it goes', async ({ page, context, baseURL }) => {
+    await onProposal(page, context, baseURL, waitingBy(MEMBER));
+    const edits = await answer(page, '**/bff/proposals/7', () => ({ body: waitingBy(MEMBER) }));
+    await page.getByRole('button', { name: 'Edit' }).click();
+    await expect(page.getByText('35 / 4000')).toBeVisible();
+    await expect(page.getByText(/As an admin/)).toHaveCount(0);
+    await page.getByLabel('Your pitch').fill('y'.repeat(4001));
+    await page.getByRole('button', { name: 'Save changes' }).click();
+    await expect(page.getByText('Keep the pitch to 4000 characters (it has 4001).')).toBeVisible();
+    expect(edits.filter((entry) => entry.method === 'PATCH')).toEqual([]);
+  });
+
+  test('an admin editing counts the pitch to 50,000, and sends one that long', async ({ page, context, baseURL }) => {
+    const pitch = '🏛'.repeat(50000);
+    await onProposal(page, context, baseURL, waitingBy(ADMIN), ADMIN);
+    const edits = await answer(page, '**/bff/proposals/7', (sent) =>
+      sent.method === 'PATCH' ? { body: waitingBy(ADMIN, pitch) } : { body: waitingBy(ADMIN) },
+    );
+    await page.getByRole('button', { name: 'Edit' }).click();
+    await expect(page.getByText('35 / 50,000')).toBeVisible();
+    await expect(page.getByText("As an admin, you can write up to 50,000 characters; everyone else's pitch stops at 4,000.")).toBeVisible();
+    await page.getByLabel('Your pitch').fill(`${pitch}🏛`);
+    await page.getByRole('button', { name: 'Save changes' }).click();
+    await expect(page.getByText('Keep the pitch to 50,000 characters (it has 50,001).')).toBeVisible();
+    expect(edits.filter((entry) => entry.method === 'PATCH')).toEqual([]);
+
+    await page.getByLabel('Your pitch').fill(pitch);
+    await page.getByRole('button', { name: 'Save changes' }).click();
+    await expect(outcome(page, 'part')).toContainText('Saved. The floor sees your changes.');
+    expect(edits.filter((entry) => entry.method === 'PATCH')).toEqual([
+      { method: 'PATCH', path: '/bff/proposals/7', query: '', body: { title: 'Show my properties on a map', pitch } },
+    ]);
+  });
+
+  test('an admin’s edit refused for its pitch gives the admin’s limit', async ({ page, context, baseURL }) => {
+    await onProposal(page, context, baseURL, waitingBy(ADMIN), ADMIN);
+    await answer(page, '**/bff/proposals/7', (sent) =>
+      sent.method === 'PATCH' ? { status: 400, body: { error: 'invalid_request', fields: ['pitch'] } } : { body: waitingBy(ADMIN) },
+    );
+    await page.getByRole('button', { name: 'Edit' }).click();
+    await page.getByLabel('Your pitch').fill('A longer pitch.');
+    await page.getByRole('button', { name: 'Save changes' }).click();
+    await expect(outcome(page, 'part')).toContainText('Check the pitch (1 to 50,000 characters). Nothing was saved.');
+  });
+
+  test('an admin’s long pitch opens with its first 4,000 characters, and the rest is a button away', async ({ page, context, baseURL }) => {
+    const paragraph = 'Why this research matters to FORGE, said plainly. '.repeat(20).trim();
+    const pitch = Array.from({ length: 40 }, () => paragraph).join('\n\n').slice(0, 34990);
+    await onProposal(page, context, baseURL, detail({ extra: { pitch } }));
+    const section = page.getByRole('region', { name: 'The pitch' });
+    const text = section.locator('#pitch-text');
+    const more = section.getByRole('button', { name: 'Read the whole pitch (34,990 characters)' });
+    await expect(more).toHaveAttribute('aria-expanded', 'false');
+    await expect(more).toHaveAttribute('aria-controls', 'pitch-text');
+    const opening = (await text.textContent()) ?? '';
+    expect(opening.endsWith('…')).toBe(true);
+    expect(pitch.startsWith(opening.slice(0, -1))).toBe(true);
+    expect(Array.from(opening).length).toBeLessThanOrEqual(4001);
+    // The rest of the page is still within reach: your part sits right below.
+    await expect(yourPart(page)).toBeVisible();
+
+    await more.click();
+    const less = section.getByRole('button', { name: 'Show less of the pitch' });
+    await expect(less).toHaveAttribute('aria-expanded', 'true');
+    await expect(less).toBeFocused();
+    expect(await text.textContent()).toBe(pitch);
+    await less.click();
+    await expect(more).toBeFocused();
+    await expect(more).toBeInViewport();
+    expect(await text.textContent()).toBe(opening);
+  });
+
+  test('a pitch a member may write shows whole, with no button', async ({ page, context, baseURL }) => {
+    const pitch = `${'y'.repeat(1999)}\n\n${'z'.repeat(1999)}`;
+    await onProposal(page, context, baseURL, detail({ extra: { pitch } }));
+    const section = page.getByRole('region', { name: 'The pitch' });
+    await expect(section.getByRole('button')).toHaveCount(0);
+    expect(await section.locator('p').textContent()).toBe(pitch);
   });
 
   test('every refusal code comes back as its own sentence, and the page reads the proposal again when it may be behind', async ({
@@ -1637,6 +1851,92 @@ test.describe('at 390 px, signed in', () => {
 
     await page.getByRole('button', { name: 'Notifications: 1 unread' }).click();
     await expect(page.getByRole('link', { name: new RegExp(title) })).toBeVisible();
+    expect(await width()).toBeLessThanOrEqual(390);
+  });
+
+  /** The operator's research pitch: 34,990 characters in paragraphs. */
+  const researchPitch = (): string => {
+    const paragraph = 'Why this research matters to FORGE, said plainly. '.repeat(20).trim();
+    return Array.from({ length: 60 }, () => paragraph).join('\n\n').slice(0, 34990);
+  };
+
+  test('review: an admin’s long pitch fits the screen folded and open, and its button’s whole label shows', async ({ page, context, baseURL }) => {
+    await onProposal(page, context, baseURL, detail({ extra: { pitch: researchPitch() } }));
+    const width = () => page.evaluate(() => document.documentElement.scrollWidth);
+    const section = page.getByRole('region', { name: 'The pitch' });
+    const more = section.getByRole('button', { name: 'Read the whole pitch (34,990 characters)' });
+    await expect(more).toBeVisible();
+    expect(await width()).toBeLessThanOrEqual(390);
+    const box = await more.boundingBox();
+    expect((box?.x ?? 0) + (box?.width ?? Infinity)).toBeLessThanOrEqual(390);
+    expect(await more.evaluate((button) => button.scrollWidth <= button.clientWidth)).toBe(true);
+
+    await more.click();
+    await expect(section.getByRole('button', { name: 'Show less of the pitch' })).toBeFocused();
+    expect(await width()).toBeLessThanOrEqual(390);
+  });
+
+  test('review: an open long pitch can be folded from anywhere in it, and folding it lands on its button, clear of the nav', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    await onProposal(page, context, baseURL, detail({ extra: { pitch: researchPitch() } }));
+    const section = page.getByRole('region', { name: 'The pitch' });
+    const more = section.getByRole('button', { name: 'Read the whole pitch (34,990 characters)' });
+    await more.click();
+    const less = section.getByRole('button', { name: 'Show less of the pitch' });
+    await expect(less).toHaveAttribute('aria-expanded', 'true');
+    await expect(less).toHaveAttribute('aria-controls', 'pitch-text');
+
+    // Near the top of the open pitch and halfway down it, the button is on screen, at its foot.
+    for (const share of [0.05, 0.5]) {
+      await section.evaluate((element, at) => {
+        const box = element.getBoundingClientRect();
+        window.scrollTo(0, window.scrollY + box.top + box.height * at);
+      }, share);
+      await expect(less).toBeInViewport();
+      const stuck = await less.boundingBox();
+      expect(stuck?.y ?? 0).toBeGreaterThan(844 / 2);
+      expect((stuck?.y ?? 0) + (stuck?.height ?? Infinity)).toBeLessThanOrEqual(844);
+    }
+
+    await less.click();
+    await expect(more).toBeFocused();
+    await expect(more).toHaveAttribute('aria-expanded', 'false');
+    await expect(more).toBeInViewport();
+    const nav = await page.getByRole('banner').boundingBox();
+    const back = await more.boundingBox();
+    expect(back?.y ?? 0).toBeGreaterThanOrEqual((nav?.y ?? 0) + (nav?.height ?? Infinity));
+    // Folded, the rest of the page is close again: your part starts within a screen of the button.
+    const part = await yourPart(page).boundingBox();
+    expect((part?.y ?? Infinity) - (back?.y ?? 0)).toBeLessThan(844);
+  });
+
+  test('review: the admin’s edit and draft-task views under a long pitch fit the screen', async ({ page, context, baseURL }) => {
+    const pitch = researchPitch();
+    const width = () => page.evaluate(() => document.documentElement.scrollWidth);
+    await onProposal(
+      page,
+      context,
+      baseURL,
+      detail({
+        proposal: { state: 'submitted', seconder: undefined, mover: ADMIN.login, deadline: at(160) },
+        comments: [],
+        you: { canEdit: true, canWithdraw: true, isAdmin: true },
+        extra: { pitch, eligibleCount: undefined, consentCount: undefined },
+      }),
+      ADMIN,
+    );
+    await page.getByRole('button', { name: 'Edit' }).click();
+    await expect(page.getByText('34,990 / 50,000')).toBeVisible();
+    expect(await width()).toBeLessThanOrEqual(390);
+
+    await page.unroute('**/bff/proposals/7');
+    await serve(page, '**/bff/proposals/7', passedWith(undefined, { draft: { ...PLAIN_DRAFT, civilianSummary: pitch.replace(/\n+/g, ' ') }, extra: { pitch } }));
+    await page.reload();
+    await expect(adminPanel(page)).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Read the whole pitch (34,990 characters)' })).toBeVisible();
     expect(await width()).toBeLessThanOrEqual(390);
   });
 });

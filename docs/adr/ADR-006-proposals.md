@@ -99,6 +99,13 @@ any other.
 > model drafts what done means (the criteria, with the title, summary and
 > size), and the admin checks every line before publishing it.
 
+> Amended on 2026-10-10, the operator's decision: an admin's pitch may run
+> to 50,000 characters, bringing a proposal or editing it, so the operator
+> can put a long research pitch on the floor; everyone else's stays at
+> 4,000. The API decides who is an admin on each request, as it does for
+> everything here. A long pitch is still its draft task's summary, whole,
+> which the admin cuts to 500 characters before publishing.
+
 **An in-app bell.** Members hear about the floor inside FORGE: a bell in
 the site header (and in an app's bar) for members signed in with GitHub,
 with an unread count read every 60 seconds while the tab is visible. It

@@ -15,6 +15,7 @@ from forge_api.models import (
     CONSENT_CHOICES,
     ELIGIBLE_ACTIVITY_DAYS,
     NOTIFICATION_KINDS,
+    PITCH_LIMIT_CONTEXT,
     PROPOSAL_EVENT_KINDS,
     PROPOSAL_LIMITS,
     PROPOSAL_STATES,
@@ -208,6 +209,7 @@ def test_the_limits_are_the_contract_numbers_and_cannot_change() -> None:
     assert dict(PROPOSAL_LIMITS) == {
         "title": 100,
         "pitch": 4000,
+        "adminPitch": 50000,
         "comment": 2000,
         "summary": 500,
         "criteria": 10,
@@ -310,6 +312,8 @@ def test_a_draft_starts_as_the_whole_pitch_and_no_criteria() -> None:
         "acceptanceCriteria": [],
     }
     DraftTask.model_validate(fresh)
+    # An admin's pitch too, however long: the admin cuts it to a summary before publishing.
+    DraftTask.model_validate({**fresh, "civilianSummary": "p" * PROPOSAL_LIMITS["adminPitch"]})
 
 
 @pytest.mark.parametrize(
@@ -363,6 +367,41 @@ def test_a_draft_lists_one_to_ten_criteria_of_one_to_300_characters(char: str) -
     assert takes(DraftTaskRequest, DRAFT_REQUEST, field, [char * longest])
     assert not takes(DraftTaskRequest, DRAFT_REQUEST, field, [char * (longest + 1)])
     assert not takes(DraftTaskRequest, DRAFT_REQUEST, field, ["Fine", ""])
+
+
+def admin_takes(pitch: str, limit: object = PROPOSAL_LIMITS["adminPitch"]) -> bool:
+    """Whether NewProposal takes `pitch` validated for a caller whose limit is `limit`."""
+    try:
+        NewProposal.model_validate({**NEW, "pitch": pitch}, context={PITCH_LIMIT_CONTEXT: limit})
+    except ValidationError:
+        return False
+    return True
+
+
+@pytest.mark.parametrize("char", ["a", ASTRAL])
+def test_an_admins_pitch_takes_up_to_the_admin_limit_and_no_more(char: str) -> None:
+    """The wire's ceiling is the admin's (50,000 characters, counted as code points); only
+    a caller the service names an admin gets past the member limit."""
+    most = PROPOSAL_LIMITS["adminPitch"]
+    assert admin_takes(char * most)
+    assert not admin_takes(char * (most + 1))
+    # No context, or the member limit named: 4,000, as always.
+    assert not takes(NewProposal, NEW, "pitch", char * (PROPOSAL_LIMITS["pitch"] + 1))
+    assert not admin_takes(char * (PROPOSAL_LIMITS["pitch"] + 1), PROPOSAL_LIMITS["pitch"])
+    assert admin_takes(char * PROPOSAL_LIMITS["pitch"], PROPOSAL_LIMITS["pitch"])
+
+
+def test_a_pitch_limit_that_is_not_a_number_takes_nothing() -> None:
+    assert not admin_takes("A pitch.", "50000")
+    assert not admin_takes("A pitch.", None)
+
+
+def test_a_members_pitch_over_its_limit_is_named_beside_the_title() -> None:
+    """Past 4,000 characters with no admin context, the pitch is named as it always was,
+    with any other field at fault."""
+    with pytest.raises(ValidationError) as caught:
+        NewProposal.model_validate({"title": "t" * 101, "pitch": "y" * 4001})
+    assert [error["loc"] for error in caught.value.errors()] == [("title",), ("pitch",)]
 
 
 def test_a_too_long_title_and_an_empty_pitch_are_both_named() -> None:

@@ -33,25 +33,35 @@ const SEGMENT = /^[a-z0-9_-]{1,64}$/;
 const MAX_SEGMENTS = 3;
 const ID = '[1-9][0-9]{0,8}';
 /**
- * A proposal's pitch is up to 4,000 characters and a draft task's text about
+ * A member's pitch is up to 4,000 characters and a draft task's text about
  * 3,600: as UTF-8 (4 bytes a character at most, 6 for an escaped control
  * character) either runs past the default 16 KB, so these routes allow 32 KB.
  */
 const PROPOSAL_BODY_BYTES = 32 * 1024;
+/**
+ * Bringing a proposal and editing it: an admin's pitch is up to 50,000
+ * characters (`PROPOSAL_LIMITS.adminPitch`), which with the title is 300,600
+ * bytes at 6 a character, so these two routes allow 320 KB. Who is an admin is
+ * the API's to decide, not this file's, so the cap is the same for everyone;
+ * the API holds everyone else's body to its own 64 KB and their pitch to 4,000.
+ */
+const PITCH_BODY_BYTES = 320 * 1024;
 
 interface Route {
   method: ForwardSpec['method'];
   path: RegExp;
   identity: ForwardSpec['identity'];
+  /** The body cap, when it isn't {@link PROPOSAL_BODY_BYTES}. */
+  maxBodyBytes?: number;
 }
 
 const ROUTES: readonly Route[] = [
   { method: 'GET', path: /^$/, identity: 'optional' },
-  { method: 'POST', path: /^$/, identity: 'required' },
+  { method: 'POST', path: /^$/, identity: 'required', maxBodyBytes: PITCH_BODY_BYTES },
   { method: 'GET', path: /^me$/, identity: 'required' },
   { method: 'PUT', path: /^settings$/, identity: 'required' },
   { method: 'GET', path: new RegExp(`^${ID}$`), identity: 'optional' },
-  { method: 'PATCH', path: new RegExp(`^${ID}$`), identity: 'required' },
+  { method: 'PATCH', path: new RegExp(`^${ID}$`), identity: 'required', maxBodyBytes: PITCH_BODY_BYTES },
   { method: 'POST', path: new RegExp(`^${ID}/(?:withdraw|second|consent|comments|vote)$`), identity: 'required' },
   // `house-draft` is "Draft it again" (Phase 6 contract §1): the house model drafts the task once more. No body.
   { method: 'POST', path: new RegExp(`^${ID}/admin/(?:end-debate|close-vote|publish-task|house-draft)$`), identity: 'required' },
@@ -92,6 +102,6 @@ async function handle(request: NextRequest, { params }: Context, method: Route['
     method,
     upstreamPath: `/api/proposals${suffix}`,
     identity: route.identity,
-    maxBodyBytes: PROPOSAL_BODY_BYTES,
+    maxBodyBytes: route.maxBodyBytes ?? PROPOSAL_BODY_BYTES,
   });
 }

@@ -47,8 +47,11 @@ const OBJECT_SCHEMAS = new Map<string, z.AnyZodObject>(
 );
 const NAMES = new Map<z.ZodTypeAny, string>([...OBJECT_SCHEMAS].map(([name, schema]) => [schema, name]));
 
-/** More characters than any limit on the wire allows: a string that takes this many has no maximum. */
-const UNLIMITED = 1 << 14;
+/**
+ * More characters than any limit on the wire allows: a string that takes this
+ * many has no maximum. The highest limit is an admin's pitch (50,000).
+ */
+const UNLIMITED = 1 << 17;
 /** No minimum on the wire is above this. */
 const MOST_MIN = 16;
 /** One character that is two UTF-16 units. */
@@ -227,5 +230,8 @@ describe('wire shapes, against tests/fixtures/wire-golden.json', () => {
       maxItems: 3,
     });
     expect(shapeOf(shared.NewProposalSchema.shape.title)).toEqual({ type: 'string', minLength: 1, maxLength: 100 });
+    // The highest limit on the wire, an admin's pitch, is read as a limit, not as none.
+    expect(shapeOf(shared.NewProposalSchema.shape.pitch)).toEqual({ type: 'string', minLength: 1, maxLength: 50000 });
+    expect(UNLIMITED).toBeGreaterThan(shared.PROPOSAL_LIMITS.adminPitch);
   });
 });

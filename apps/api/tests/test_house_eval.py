@@ -15,6 +15,7 @@ from typing import Any
 
 import pytest
 
+from forge_api.models import PROPOSAL_LIMITS
 from forge_api.services import house
 from forge_api.tools import house_eval
 from forge_api.tools.house_eval import Case, CaseError, load_cases, main
@@ -112,6 +113,13 @@ def test_a_case_reads_as_the_floor_would_store_it() -> None:
     assert (proposal.title, proposal.pitch) == ("Dark mode now", "A\n\nB")
     assert proposal.comments == (("carol-dev", "Keep the charts readable."),)
     assert proposal.comment_count == 1
+
+
+def test_a_case_keeps_a_pitch_as_long_as_an_admins() -> None:
+    """The floor keeps an admin's pitch of up to 50,000 characters whole, so a case does."""
+    most = PROPOSAL_LIMITS["adminPitch"]
+    assert Case.model_validate({**READY, "pitch": "y" * most}).proposal().pitch == "y" * most
+    assert len(Case.model_validate({**READY, "pitch": "y" * (most + 1)}).proposal().pitch) == most
 
 
 @pytest.mark.parametrize(

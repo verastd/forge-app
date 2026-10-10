@@ -644,7 +644,13 @@ export type ConsentChoice = z.infer<typeof ConsentChoiceSchema>;
  */
 export const PROPOSAL_LIMITS = {
   title: 100,
+  /** A pitch, for everyone but an admin. */
   pitch: 4000,
+  /**
+   * An admin's pitch (FORGE_ADMIN_IDS on the API, `isAdmin` on the wire): the
+   * operator's exception of 2026-10-10. See {@link pitchLimit}.
+   */
+  adminPitch: 50000,
   comment: 2000,
   /** A draft task's civilianSummary. */
   summary: 500,
@@ -653,6 +659,17 @@ export const PROPOSAL_LIMITS = {
   /** Characters per acceptance criterion. */
   criterion: 300,
 } as const;
+
+/**
+ * The most characters (textLength) a pitch may have when an admin writes it
+ * (`PROPOSAL_LIMITS.adminPitch`) or anyone else does (`PROPOSAL_LIMITS.pitch`),
+ * bringing a proposal or editing it. Whether the caller is an admin is the
+ * API's to say (ProposalMe.isAdmin, ProposalYou.isAdmin), and the API holds
+ * every pitch to it again: a page uses this for its counter and its check.
+ */
+export function pitchLimit(isAdmin: boolean): number {
+  return isAdmin ? PROPOSAL_LIMITS.adminPitch : PROPOSAL_LIMITS.pitch;
+}
 
 /**
  * A proposal's eligible set, frozen at its second, is the members seen in the
@@ -915,11 +932,16 @@ export const ProposalCommentPageSchema = z.object({
 });
 export type ProposalCommentPage = z.infer<typeof ProposalCommentPageSchema>;
 
-/** POST /api/proposals, and PATCH /api/proposals/{id} (the mover, until seconded). */
+/**
+ * POST /api/proposals, and PATCH /api/proposals/{id} (the mover, until seconded).
+ * The wire takes a pitch up to the admin maximum; the API holds everyone who
+ * isn't an admin to PROPOSAL_LIMITS.pitch ({@link pitchLimit}), refusing a longer
+ * one as it refuses any pitch over its limit (400 invalid_request naming `pitch`).
+ */
 export const NewProposalSchema = z.object({
   title: characters(1, PROPOSAL_LIMITS.title),
   /** Plain English, plain text. */
-  pitch: characters(1, PROPOSAL_LIMITS.pitch),
+  pitch: characters(1, PROPOSAL_LIMITS.adminPitch),
 });
 export type NewProposal = z.infer<typeof NewProposalSchema>;
 

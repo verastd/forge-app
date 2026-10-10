@@ -139,11 +139,31 @@ test.describe('the Proposals and notifications BFFs refuse before they forward',
     }
   });
 
-  test('a body over 32 KB is 413, and one that is not JSON is 415', async ({ context, baseURL }) => {
-    await signInAs(context, baseURL ?? '', { sub: '4200103', login: 'body-check' });
-    const big = await send(context.request, baseURL ?? '', 'POST', '/bff/proposals', { title: 'A', pitch: 'x'.repeat(33 * 1024) });
-    expect(big.status()).toBe(413);
-    expect(await big.json()).toEqual({ error: 'too_large' });
+  test('a body over 32 KB is 413, 320 KB bringing or editing a proposal, and one that is not JSON is 415', async ({
+    context,
+    baseURL,
+  }) => {
+    const base = baseURL ?? '';
+    await signInAs(context, base, { sub: '4200103', login: 'body-check' });
+    // Past an admin's 50,000-character pitch at 6 bytes a character: refused by anyone, before it goes up.
+    const over = { title: 'A', pitch: 'x'.repeat(320 * 1024) };
+    for (const [method, path] of [
+      ['POST', '/bff/proposals'],
+      ['PATCH', '/bff/proposals/7'],
+    ] as const) {
+      const big = await send(context.request, base, method, path, over);
+      expect(big.status(), method).toBe(413);
+      expect(await big.json()).toEqual({ error: 'too_large' });
+    }
+    // Every other route keeps 32 KB.
+    for (const [method, path, data] of [
+      ['POST', '/bff/proposals/7/comments', { text: 'x'.repeat(33 * 1024) }],
+      ['PUT', '/bff/proposals/7/admin/draft-task', { ...DRAFT, civilianSummary: 'x'.repeat(33 * 1024) }],
+    ] as const) {
+      const big = await send(context.request, base, method, path, data);
+      expect(big.status(), path).toBe(413);
+      expect(await big.json()).toEqual({ error: 'too_large' });
+    }
 
     const form = await context.request.post('/bff/proposals/7/comments', { form: { text: 'hi' }, headers: { origin: baseURL ?? '' } });
     expect(form.status()).toBe(415);
@@ -341,6 +361,34 @@ test.describe('with a stand-in API on the demo server’s API port', () => {
         const response = await send(context.request, base, 'POST', '/bff/proposals', proposal);
         expect(response.status()).toBe(201);
         expect(JSON.parse(seen[0]?.body ?? 'null')).toEqual(proposal);
+      },
+    );
+  });
+
+  test("an admin's 50,000-character pitch fits through, bringing it and editing it, unchanged", async ({ context, baseURL }) => {
+    const base = baseURL ?? '';
+    await signInAs(context, base, { sub: '4200207', login: 'long-admin-pitch' });
+    // Four bytes a character as UTF-8, and six for one the browser escapes (a control character).
+    const astral = { title: '🏛'.repeat(100), pitch: '🏛'.repeat(50000) };
+    const escaped = { title: '\u0001'.repeat(100), pitch: '\u0001'.repeat(50000) };
+    expect(Buffer.byteLength(JSON.stringify(astral))).toBeGreaterThan(32 * 1024);
+    expect(Buffer.byteLength(JSON.stringify(escaped))).toBeGreaterThan(300_000);
+    expect(Buffer.byteLength(JSON.stringify(escaped))).toBeLessThanOrEqual(320 * 1024);
+    await withStandIn(
+      (request) =>
+        (request.method === 'POST' && request.path === '/api/proposals') || (request.method === 'PATCH' && request.path === '/api/proposals/7')
+          ? json(request.method === 'POST' ? 201 : 200, { ok: true })
+          : undefined,
+      async (seen) => {
+        for (const proposal of [astral, escaped]) {
+          const brought = await send(context.request, base, 'POST', '/bff/proposals', proposal);
+          expect(brought.status()).toBe(201);
+          const edited = await send(context.request, base, 'PATCH', '/bff/proposals/7', proposal);
+          expect(edited.status()).toBe(200);
+        }
+        expect(seen.map((request) => JSON.parse(request.body) as unknown)).toEqual([astral, astral, escaped, escaped]);
+        // Who may write that much is the API's to say: the BFF sends it up as the caller.
+        expect(assertionClaims(seen[0]?.authorization)).toMatchObject({ sub: '4200207', login: 'long-admin-pitch' });
       },
     );
   });

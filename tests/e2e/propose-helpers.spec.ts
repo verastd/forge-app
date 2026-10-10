@@ -8,8 +8,10 @@ import {
   HouseDraftSchema,
   NotificationListSchema,
   PROPOSAL_EVENT_KINDS,
+  PROPOSAL_LIMITS,
   PROPOSAL_STATES,
   ProposalDetailSchema,
+  pitchLimit,
 } from '../../packages/shared/dist/index.js';
 import type { HouseDraft, HouseSpec, ProposalCard, ProposalDetail, ProposalList } from '../../packages/shared/dist/index.js';
 import { HELLO_TIMEOUT_MS, MEMBERS_HELLO_PATH, sayHello } from '../../apps/web/src/app/auth/callback/members-hello';
@@ -36,6 +38,7 @@ import {
   HOUSE_VERDICT_TONE,
   OPEN_TIER_FLOOR,
   PROPOSAL_ERROR_CODES,
+  adminPitchNote,
   checkComment,
   checkDraft,
   checkProposal,
@@ -70,6 +73,9 @@ import {
   nextDeadlineRead,
   notReadBack,
   pausedLabel,
+  pitchOpening,
+  pitchToggleText,
+  pitchUncheckedNote,
   publishTitleProblem,
   quorumLine,
   quorumNeeded,
@@ -369,10 +375,64 @@ test.describe('the error map', () => {
     );
   });
 
+  test("a refusal naming the pitch gives the reader's own limit: an admin's is 50,000", () => {
+    const failure = { code: 'invalid_request', fields: ['title', 'pitch'] };
+    expect(describeProposalError(failure, 'create', pitchLimit(true))).toBe(
+      'Check the title (1 to 100 characters) and the pitch (1 to 50,000 characters). Nothing was saved.',
+    );
+    expect(describeProposalError(failure, 'edit', pitchLimit(false))).toBe(
+      'Check the title (1 to 100 characters) and the pitch (1 to 4000 characters). Nothing was saved.',
+    );
+    // A schema path ending in `pitch` is the pitch too, and with no limit given it is a member's.
+    expect(describeProposalError({ code: 'invalid_request', fields: ['body.pitch'] }, 'edit', pitchLimit(true))).toBe(
+      'Check the pitch (1 to 50,000 characters). Nothing was saved.',
+    );
+    expect(describeProposalError({ code: 'invalid_request', fields: ['body.pitch'] }, 'edit')).toBe(
+      'Check the pitch (1 to 4000 characters). Nothing was saved.',
+    );
+    // Nothing else changes with it.
+    expect(describeProposalError({ code: 'invalid_request', fields: ['body.text'] }, 'comment', pitchLimit(true))).toBe(
+      'Check the comment (1 to 2000 characters). Nothing was saved.',
+    );
+  });
+
   test('no answer is not a "no"; an unreachable service is', () => {
     expect(describeProposalError('upstream_timeout', 'second')).toContain('it may have gone through');
     expect(describeProposalError('service_unreachable', 'second')).toContain('so nothing changed');
     expect(describeProposalError('service_unreachable', 'load')).not.toContain('nothing changed');
+  });
+});
+
+test.describe('a long pitch on its page', () => {
+  test('a pitch a member may write shows whole', () => {
+    expect(pitchOpening('A short pitch.')).toBeNull();
+    expect(pitchOpening('y'.repeat(4000))).toBeNull();
+    // 4,000 astral characters are 8,000 UTF-16 units, and still a member's length.
+    expect(pitchOpening('🏛'.repeat(4000))).toBeNull();
+  });
+
+  test("an admin's opens with its first 4,000 characters, cut at a paragraph where one falls late enough", () => {
+    const paragraph = `${'Why this research matters. '.repeat(40).trim()}`;
+    const pitch = Array.from({ length: 40 }, () => paragraph).join('\n\n');
+    const opening = pitchOpening(pitch);
+    expect(opening?.total).toBe(pitch.length);
+    expect(opening?.text.endsWith('matters.…')).toBe(true);
+    expect(pitch.startsWith(opening?.text.slice(0, -1) ?? 'x')).toBe(true);
+    expect(Array.from(opening?.text ?? '').length).toBeLessThanOrEqual(4001);
+    expect(Array.from(opening?.text ?? '').length).toBeGreaterThan(2000);
+    expect(pitch.slice((opening?.text.length ?? 1) - 1).startsWith('\n\n')).toBe(true);
+  });
+
+  test('without a break late enough it is cut at 4,000 characters, never inside a character', () => {
+    const astral = pitchOpening('🏛'.repeat(34990));
+    expect(astral).toEqual({ text: `${'🏛'.repeat(4000)}…`, total: 34990 });
+    const words = pitchOpening(`${'y'.repeat(3000)} ${'z'.repeat(2000)}`);
+    expect(words?.text).toBe(`${'y'.repeat(3000)}…`);
+  });
+
+  test('its button says how long the whole pitch is, and folds it again', () => {
+    expect(pitchToggleText(34990, false)).toBe('Read the whole pitch (34,990 characters)');
+    expect(pitchToggleText(34990, true)).toBe('Show less of the pitch');
   });
 });
 
@@ -397,6 +457,52 @@ test.describe('what members send', () => {
       errors: { pitch: 'Keep the pitch to 4000 characters (it has 4001).' },
     });
     expect(counterText('🏛🏛 ok', 100)).toBe('5 / 100');
+  });
+
+  test("an admin's pitch is held to 50,000 characters, everyone else's to 4,000", () => {
+    expect(PROPOSAL_LIMITS.adminPitch).toBe(50000);
+    expect([pitchLimit(false), pitchLimit(true)]).toEqual([4000, 50000]);
+    expect(checkProposal({ title: 'A', pitch: 'y'.repeat(4001) }, pitchLimit(false))).toEqual({
+      ok: false,
+      errors: { pitch: 'Keep the pitch to 4000 characters (it has 4001).' },
+    });
+    expect(checkProposal({ title: 'A', pitch: '🏛'.repeat(50000) }, pitchLimit(true))).toEqual({
+      ok: true,
+      value: { title: 'A', pitch: '🏛'.repeat(50000) },
+    });
+    expect(checkProposal({ title: 'A', pitch: '🏛'.repeat(50001) }, pitchLimit(true))).toEqual({
+      ok: false,
+      errors: { pitch: 'Keep the pitch to 50,000 characters (it has 50,001).' },
+    });
+    expect(counterText('🏛'.repeat(50000), pitchLimit(true))).toBe('50,000 / 50,000');
+  });
+
+  test("an admin's five-digit limit is written with separators; every member's number stays as it was", () => {
+    // The admin's counter and refusal, whatever the count.
+    expect(counterText('🏛'.repeat(34990), pitchLimit(true))).toBe('34,990 / 50,000');
+    expect(counterText('abc', pitchLimit(true))).toBe('3 / 50,000');
+    // A member's are byte for byte what they were, even with five digits typed.
+    expect(counterText('y'.repeat(12345), pitchLimit(false))).toBe('12345 / 4000');
+    expect(checkProposal({ title: 'A', pitch: 'y'.repeat(12345) }, pitchLimit(false))).toEqual({
+      ok: false,
+      errors: { pitch: 'Keep the pitch to 4000 characters (it has 12345).' },
+    });
+    expect(checkComment('y'.repeat(20001))).toEqual({
+      ok: false,
+      errors: { text: 'Keep it to 2000 characters (it has 20001).' },
+    });
+  });
+
+  test("the new-proposal form's line when it couldn't check who is writing", () => {
+    expect(pitchUncheckedNote(false)).toBe("FORGE couldn't check your account just now, so this form counts the pitch to 4000 characters.");
+    expect(pitchUncheckedNote(true)).toBe("FORGE still couldn't check your account, so this form counts the pitch to 4000 characters.");
+  });
+
+  test("an admin's pitch field says how far theirs runs; nobody else's says anything new", () => {
+    expect(adminPitchNote(pitchLimit(false))).toBeNull();
+    expect(adminPitchNote(pitchLimit(true))).toBe(
+      "As an admin, you can write up to 50,000 characters; everyone else's pitch stops at 4,000.",
+    );
   });
 
   test('a comment, and an objection’s reason', () => {
