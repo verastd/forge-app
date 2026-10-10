@@ -181,3 +181,46 @@ def test_an_arm_moves_on_its_own_only_on_the_back(
     client.put("/api/avatars/heads/arm/placement", headers=admin_headers, json={"placement": arm})
     assert client.delete("/api/avatars/heads/arm", headers=admin_headers).status_code == 204
     assert get_state_db().query_all("SELECT * FROM avatars_head_motions") == []
+
+
+def test_a_replacing_head_can_have_a_talking_mouth(
+    client: TestClient, admin_headers: dict[str, str]
+) -> None:
+    assert add(client, admin_headers, "poop", "replace").status_code == 200
+    mouth = {"center": [0.42, 0.17, 0.6], "size": [0.46, 0.08], "color": "#8a4b2c"}
+    talking = {"scale": 0.36, "offset": [0.0, 0.02, 0.01], "mouth": mouth}
+    refit = client.put(
+        "/api/avatars/heads/poop/placement", headers=admin_headers, json={"placement": talking}
+    )
+    assert refit.status_code == 200 and refit.json()["placement"]["mouth"] == mouth
+    listed = client.get("/api/avatars").json()["heads"]
+    assert [h["placement"].get("mouth") for h in listed if h["id"] == "poop"] == [mouth]
+    # Fractions and a hex colour only.
+    for odd in (
+        {**mouth, "center": [1.2, 0.1, 0.1]},
+        {**mouth, "size": [0.0, 0.1]},
+        {**mouth, "color": "brown"},
+    ):
+        refused = client.put(
+            "/api/avatars/heads/poop/placement",
+            headers=admin_headers,
+            json={"placement": {**talking, "mouth": odd}},
+        )
+        assert refused.status_code in (400, 422)
+    # Only a replacing head talks.
+    assert add(client, admin_headers, "pack", "back").status_code == 200
+    on_back = client.put(
+        "/api/avatars/heads/pack/placement", headers=admin_headers, json={"placement": talking}
+    )
+    assert on_back.status_code == 400 and on_back.json()["error"] == "mouth_head_only"
+    # Refitted without it, the row goes; deleted, too.
+    quiet = {"scale": 0.36, "offset": [0.0, 0.02, 0.01]}
+    client.put(
+        "/api/avatars/heads/poop/placement", headers=admin_headers, json={"placement": quiet}
+    )
+    assert get_state_db().query_all("SELECT * FROM avatars_head_mouths") == []
+    client.put(
+        "/api/avatars/heads/poop/placement", headers=admin_headers, json={"placement": talking}
+    )
+    assert client.delete("/api/avatars/heads/poop", headers=admin_headers).status_code == 204
+    assert get_state_db().query_all("SELECT * FROM avatars_head_mouths") == []

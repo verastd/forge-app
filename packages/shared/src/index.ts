@@ -1438,6 +1438,20 @@ export type AvatarHeadEmitter = (typeof AVATAR_HEAD_EMITTERS)[number];
 export const AVATAR_HEAD_MOTIONS = ['arm'] as const;
 export type AvatarHeadMotion = (typeof AVATAR_HEAD_MOTIONS)[number];
 
+/**
+ * A talking mouth (`placement.mouth`, replacing heads): where the model's
+ * mouth opening is, as fractions (0–1) of the model file's own bounding box
+ * (its middle along x, y and z; its width and height along x and y), and the
+ * colour of the plate that shuts it. While the wearer talks the plate drops
+ * open and green blocks pour out.
+ */
+export const AvatarHeadMouthSchema = z.object({
+  center: z.tuple([z.number().min(0).max(1), z.number().min(0).max(1), z.number().min(0).max(1)]),
+  size: z.tuple([z.number().min(0.01).max(1), z.number().min(0.01).max(1)]),
+  color: z.string().regex(/^#[0-9a-f]{6}$/),
+});
+export type AvatarHeadMouth = z.infer<typeof AvatarHeadMouthSchema>;
+
 export const AvatarHeadPlacementSchema = z.object({
   scale: z.number().min(AVATAR_PLACEMENT_SCALE_MIN).max(AVATAR_PLACEMENT_SCALE_MAX),
   offset: placementPoint,
@@ -1502,6 +1516,12 @@ export const AvatarHeadPlacementSchema = z.object({
    * to look at whoever is near. Back models only. Absent: it holds still.
    */
   motion: z.enum(AVATAR_HEAD_MOTIONS).nullish(),
+  /**
+   * A talking mouth (replacing heads only): shut while its wearer is quiet,
+   * open and pouring green blocks while they talk. Absent: the mouth stays as
+   * the model has it.
+   */
+  mouth: AvatarHeadMouthSchema.nullish(),
 });
 export type AvatarHeadPlacement = z.infer<typeof AvatarHeadPlacementSchema>;
 

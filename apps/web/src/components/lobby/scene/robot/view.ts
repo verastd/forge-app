@@ -58,6 +58,8 @@ import type { ChestClip, RobotAssets, RobotBody } from './assets';
 import { createCape } from './cape';
 import type { CapeView } from './cape';
 import { createHelicopter } from './helicopter';
+import { createTalkingMouth } from './mouth';
+import type { MouthLook, TalkingMouth } from './mouth';
 import type { Helicopter } from './helicopter';
 import { JOINT_COLOR, createBodyMaterial, finish, paint } from './material';
 
@@ -133,8 +135,8 @@ export function lookKey(look: RobotLook): string {
 /** A head's placement, to tell when only that changed. */
 function placementKey(head: AvatarHead | null): string {
   if (!head) return '';
-  const { scale, offset, eyes, eyeAngles, angles, eyeScale, screen, flyer, spout, motion } = head.placement;
-  return JSON.stringify([scale, offset, eyes ?? null, eyeAngles ?? null, angles ?? null, eyeScale ?? null, screen ?? null, flyer ?? null, spout ?? null, motion ?? null]);
+  const { scale, offset, eyes, eyeAngles, angles, eyeScale, screen, flyer, spout, motion, mouth } = head.placement;
+  return JSON.stringify([scale, offset, eyes ?? null, eyeAngles ?? null, angles ?? null, eyeScale ?? null, screen ?? null, flyer ?? null, spout ?? null, motion ?? null, mouth ?? null]);
 }
 
 /** Where `node` sits in `ancestor`'s frame (ancestor's own transform left out). */
@@ -168,6 +170,8 @@ export interface RobotFrame extends Omit<MotionInput, 'phase'> {
   people?: readonly Vec3[];
   /** Whether a back model that moves like an arm holds still; absent: as `reducedMotion` says. */
   armStill?: boolean;
+  /** Whether a talking mouth's blocks hold still (one at the lip); absent: as `reducedMotion` says. */
+  mouthStill?: boolean;
 }
 
 export interface RobotView {
@@ -200,6 +204,14 @@ export interface RobotView {
    * else low on the middle of its back. False with no back model worn.
    */
   spout(at: THREE.Vector3, dir: THREE.Vector3): boolean;
+  /** A worn head's talking mouth: shut, open, or pouring blocks; 'none' without one. */
+  readonly mouth: MouthLook | 'none';
+  /**
+   * The colour of the worn head's surface seen straight on at (x, y) in its
+   * file's own frame (its texture, or its material's colour), as '#rrggbb';
+   * null where nothing's there.
+   */
+  headColorAt(x: number, y: number): string | null;
   dispose(): void;
 }
 
@@ -610,6 +622,12 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
   let look = initial;
   let key = '';
   let headObject: THREE.Object3D | null = null;
+  /** The worn head's bounding box in its own file's frame (a talking mouth is marked in fractions of it). */
+  const headFileBox = new THREE.Box3();
+  /** A talking mouth on the worn head, and how it looks now. */
+  let mouth: TalkingMouth | null = null;
+  let mouthLook: MouthLook | 'none' = 'none';
+  const mouthSeed = Math.floor(Math.random() * 1e9);
   let headMaterials: THREE.Material[] = [];
   // What flies over the head (placement.flyer), where it may fly, and the roofs it shines on.
   let flyer: Helicopter | null = null;
@@ -835,15 +853,34 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
     placeEyes(fittedSockets);
   };
 
+  /** Puts a talking mouth on the worn head as its placement marks it, or takes it off. */
+  const placeMouth = (head: AvatarHead): void => {
+    const marked = head.fit === 'replace' ? head.placement.mouth : null;
+    if (!marked || !headObject || headFileBox.isEmpty()) {
+      mouth?.dispose();
+      mouth = null;
+      mouthLook = 'none';
+      return;
+    }
+    mouth ??= createTalkingMouth(assets.envMap, mouthSeed);
+    if (mouth.plate.parent !== headObject) headObject.add(mouth.plate);
+    mouth.fit(marked, headFileBox);
+    if (mouthLook === 'none') mouthLook = 'shut';
+  };
+
   /** Fits the worn head as `head.placement` says, and puts what flies over it. */
   const placeHead = (head: AvatarHead): void => {
     fitHead(head);
+    placeMouth(head);
     placeFlyer('head', head);
   };
 
   const dropHead = (): void => {
     const hadFlyer = flyerOver === 'head';
     if (hadFlyer) dropFlyer();
+    mouth?.dispose();
+    mouth = null;
+    mouthLook = 'none';
     if (headObject) {
       headObject.removeFromParent();
       // Geometry and textures belong to the cached head; the materials are this robot's.
@@ -1042,6 +1079,8 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
         const { object, materials } = cloneModel(gltf.scene, (material, toRoot) => cutHeadMaterial(material, headCut, toRoot));
         headObject = object;
         headMaterials = materials;
+        object.updateMatrixWorld(true);
+        headFileBox.setFromObject(object);
         tintHead();
         headPivot.add(object);
         if (head.fit === 'replace') uniforms.uHideHead.value = 1;
@@ -1222,6 +1261,41 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
     return true;
   };
 
+  const colorRay = new THREE.Raycaster();
+  const colorCanvas = typeof document === 'undefined' ? null : document.createElement('canvas');
+  const headColorAt = (x: number, y: number): string | null => {
+    if (!headObject || headFileBox.isEmpty()) return null;
+    headObject.updateWorldMatrix(true, true);
+    // Straight on from in front of the model, in its own frame, then into the cave.
+    const from = new THREE.Vector3(x, y, headFileBox.max.z + 1).applyMatrix4(headObject.matrixWorld);
+    const to = new THREE.Vector3(x, y, headFileBox.min.z - 1).applyMatrix4(headObject.matrixWorld);
+    colorRay.set(from, to.clone().sub(from).normalize());
+    // The model's own surface, never the mouth's plate on it.
+    const onPlate = (object: THREE.Object3D): boolean => {
+      for (let o: THREE.Object3D | null = object; o; o = o.parent) if (o === mouth?.plate) return true;
+      return false;
+    };
+    const hit = colorRay.intersectObject(headObject, true).find((h) => (h.object as THREE.Mesh).isMesh && !onPlate(h.object));
+    if (!hit) return null;
+    const material = (hit.object as THREE.Mesh).material as THREE.MeshStandardMaterial | THREE.MeshStandardMaterial[];
+    const surface = Array.isArray(material) ? material[0]! : material;
+    const colour = surface.color?.clone() ?? new THREE.Color(1, 1, 1);
+    const image = surface.map?.image as (CanvasImageSource & { width: number; height: number }) | undefined;
+    if (hit.uv && image && image.width > 0 && colorCanvas) {
+      colorCanvas.width = 1;
+      colorCanvas.height = 1;
+      const ctx = colorCanvas.getContext('2d', { willReadFrequently: true });
+      if (ctx) {
+        const uv = hit.uv.clone();
+        surface.map!.transformUv(uv);
+        ctx.drawImage(image, Math.floor(uv.x * image.width), Math.floor(uv.y * image.height), 1, 1, 0, 0, 1, 1);
+        const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data;
+        colour.multiply(new THREE.Color().setRGB(r! / 255, g! / 255, b! / 255, THREE.SRGBColorSpace));
+      }
+    }
+    return `#${colour.getHexString(THREE.SRGBColorSpace)}`;
+  };
+
   const pickHead = (raycaster: THREE.Raycaster, target: 'head' | 'accessory' | 'back' = 'head'): HeadPick | null => {
     if (target === 'back') return pickBack(raycaster);
     const head = target === 'head' ? look.head : (look.accessory ?? null);
@@ -1324,6 +1398,10 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
     hand,
     pickHead,
     spout,
+    headColorAt,
+    get mouth() {
+      return mouthLook;
+    },
     get look() {
       return look;
     },
@@ -1399,6 +1477,11 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
       }
       clip?.want(viewer, chestPlays({ viewerDistance: frame.chestDistance ?? frame.viewerDistance, reducedMotion: frame.reducedMotion }));
       if (flyer && flight) flyer.fly(flight.area, flight.grid, frame.t, flyerStart, frame.reducedMotion);
+      if (mouth) {
+        // The blocks fly in whatever the robot stands in.
+        if (root.parent && mouth.stream.parent !== root.parent) root.parent.add(mouth.stream);
+        mouthLook = mouth.update(frame.talking, frame.t, frame.dt, frame.mouthStill ?? frame.reducedMotion);
+      }
       return p;
     },
     dispose() {

@@ -1176,6 +1176,20 @@ AvatarHeadEmitter = Literal["bricks", "machines"]
 AvatarHeadMotion = Literal["arm"]
 
 
+_MouthSide = Annotated[float, Field(ge=0.01, le=1, allow_inf_nan=False)]
+
+
+class AvatarHeadMouth(BaseModel):
+    """A talking mouth: where the model's mouth opening is, as fractions of the model file's
+    bounding box (its middle; its width and height), and the plate's colour."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    center: tuple[_Fraction, _Fraction, _Fraction]
+    size: tuple[_MouthSide, _MouthSide]
+    color: Annotated[str, Field(pattern=r"^#[0-9a-f]{6}$")]
+
+
 class AvatarHeadPlacement(BaseModel):
     """How a library head is worn: its file scaled by `scale` about its origin, then moved
     by `offset` (metres from the neck, the robot's unscaled frame); `eyes`, when set, are
@@ -1216,6 +1230,9 @@ class AvatarHeadPlacement(BaseModel):
     spout: tuple[_Fraction, _Fraction, _Fraction] | None = None
     #: How a back model moves on its own (`arm`); None: it holds still. Back models only.
     motion: AvatarHeadMotion | None = None
+    #: A talking mouth: shut while quiet, open and pouring blocks while its wearer talks.
+    #: Replacing heads only. None: the mouth stays as the model has it.
+    mouth: AvatarHeadMouth | None = None
 
 
 #: A head worn as its file says.

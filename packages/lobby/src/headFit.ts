@@ -50,6 +50,8 @@ export interface HeadPlacement {
   spout?: [number, number, number] | null;
   /** How a back model moves on its own (`arm`: rigged and bent like an arm). */
   motion?: 'arm' | null;
+  /** A talking mouth (mouth.ts): its opening, as fractions (0–1) of its file's bounding box, and its plate's colour. */
+  mouth?: { center: [number, number, number]; size: [number, number]; color: string } | null;
 }
 
 export interface HeadScreen {
