@@ -29,6 +29,7 @@ from typing import Any, Final
 from forge_api.models import (
     AVATAR_CHEST_MAX_BYTES,
     AVATAR_CHEST_MAX_PIXELS,
+    AVATAR_CHEST_VIDEO_MAX_BYTES,
     AVATAR_EYE_NODES,
     AVATAR_HEAD_MAX_BYTES,
     AVATAR_PLACEMENT_AS_IS,
@@ -246,6 +247,27 @@ def _webp_size(raw: bytes) -> tuple[int, int] | None:
 _SNIFFERS: Final = {"image/png": _png_size, "image/jpeg": _jpeg_size, "image/webp": _webp_size}
 
 
+def _is_mp4(raw: bytes) -> bool:
+    # An ISO media file opens with its `ftyp` box; QuickTime's own brand plays unreliably in
+    # browsers, so a .mov renamed is refused.
+    return len(raw) >= 12 and raw[4:8] == b"ftyp" and raw[8:12] != b"qt  "
+
+
+def _is_webm(raw: bytes) -> bool:
+    # An EBML document whose header names the `webm` doctype (Matroska's is `matroska`).
+    return raw[:4] == b"\x1a\x45\xdf\xa3" and b"webm" in raw[:64]
+
+
+_VIDEO_SNIFFERS: Final = {"video/mp4": _is_mp4, "video/webm": _is_webm}
+
+
+def check_video(raw: bytes, claimed: str) -> None:
+    """Nothing when the clip's bytes are the type it claims; 400 invalid_request otherwise.
+    (Its length and size are the editor's to check: the browser plays it there first.)"""
+    if not _VIDEO_SNIFFERS[claimed](raw):
+        raise _invalid("data", "not_" + claimed.split("/")[1])
+
+
 def check_image(raw: bytes, claimed: str) -> tuple[int, int]:
     """The image's (width, height), when its bytes are the type it claims and it is no
     bigger than AVATAR_CHEST_MAX_PIXELS either way; 400 invalid_request otherwise."""
@@ -380,6 +402,7 @@ def _avatar(row: dict[str, Any]) -> Avatar:
         head=row["head_id"],
         accessory=row["x_accessory"],
         chest=row["chest_sha256"],
+        chestType=row["c_chest_type"],
         finish=row["l_finish"],
         back=row["b_back"],
         cape=(
@@ -489,11 +512,13 @@ def _head_row(db: StateDB, head_id: str) -> dict[str, Any] | None:
 #: A dressed robot with its face accessory, right eye and finish (NULL when it has none).
 _MEMBER_SELECT: Final = (
     "SELECT m.*, x.head_id AS x_accessory, l.eye_right AS l_eye_right, l.finish AS l_finish, "
-    "b.head_id AS b_back, b.cape_outer AS b_cape_outer, b.cape_lining AS b_cape_lining "
+    "b.head_id AS b_back, b.cape_outer AS b_cape_outer, b.cape_lining AS b_cape_lining, "
+    "c.content_type AS c_chest_type "
     "FROM avatars_members m "
     "LEFT JOIN avatars_member_accessories x ON x.member_id = m.member_id "
     "LEFT JOIN avatars_member_looks l ON l.member_id = m.member_id "
-    "LEFT JOIN avatars_member_backs b ON b.member_id = m.member_id"
+    "LEFT JOIN avatars_member_backs b ON b.member_id = m.member_id "
+    "LEFT JOIN avatars_assets c ON c.sha256 = m.chest_sha256"
 )
 
 
@@ -603,8 +628,12 @@ def reset_avatar(db: StateDB, member_id: str) -> None:
 def set_chest(db: StateDB, member_id: str, upload: AvatarChestUpload, now: datetime) -> Avatar:
     """Gives a dressed robot its chestplate image; 404 avatar_not_found for an undressed one
     (the editor saves the colours first)."""
-    raw = decode_base64(upload.data, AVATAR_CHEST_MAX_BYTES)
-    check_image(raw, upload.contentType)
+    if upload.contentType in _VIDEO_SNIFFERS:
+        raw = decode_base64(upload.data, AVATAR_CHEST_VIDEO_MAX_BYTES)
+        check_video(raw, upload.contentType)
+    else:
+        raw = decode_base64(upload.data, AVATAR_CHEST_MAX_BYTES)
+        check_image(raw, upload.contentType)
     with db.transaction():
         row = _avatar_row(db, member_id)
         if row is None:

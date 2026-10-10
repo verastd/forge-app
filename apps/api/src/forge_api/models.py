@@ -1032,8 +1032,13 @@ AVATAR_SHA256: Final = r"^[0-9a-f]{64}$"
 AVATAR_HEAD_NAME_MAX: Final = 40
 AVATAR_CHEST_MAX_BYTES: Final = 1024 * 1024
 AVATAR_CHEST_MAX_PIXELS: Final = 2048
+#: The most a chestplate clip may weigh, decoded (its base64 stays under a 4.5 MB request).
+AVATAR_CHEST_VIDEO_MAX_BYTES: Final = 3 * 1024 * 1024
 AVATAR_HEAD_MAX_BYTES: Final = 3 * 1024 * 1024
 AvatarChestType = Literal["image/png", "image/jpeg", "image/webp"]
+#: A chestplate may be a short clip instead: muted, looping.
+AvatarChestVideoType = Literal["video/mp4", "video/webm"]
+AvatarChestMediaType = AvatarChestType | AvatarChestVideoType
 AVATAR_EYE_NODES: Final = ("EyeL", "EyeR")
 #: replace: the robot's own head is hidden; accessory: a face accessory worn over it (a
 #: mask, a visor, a helmet), the eyes staying where they always are.
@@ -1095,6 +1100,8 @@ class Avatar(BaseModel):
     #: A face accessory worn over the head; None: none.
     accessory: _AvatarHeadId | None = None
     chest: _Sha256 | None = None
+    #: What the chestplate is (an image, or a clip it plays); None with no chestplate.
+    chestType: AvatarChestMediaType | None = None
     #: What the armour is made of; None: paint.
     finish: AvatarFinish | None = None
     #: On its back, at most one of: a library model (fit `back`)...
@@ -1195,7 +1202,7 @@ class AvatarUpdate(BaseModel):
 class AvatarChestUpload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    contentType: AvatarChestType
+    contentType: AvatarChestMediaType
     data: Annotated[str, Field(min_length=1)]
 
 

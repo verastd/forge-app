@@ -16,13 +16,15 @@
 import dynamic from 'next/dynamic';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent, FormEvent } from 'react';
-import { AVATAR_FINISHES, AVATAR_PALETTES, defaultColors, emblemInitials } from '@forge/lobby';
+import { AVATAR_FINISHES, AVATAR_PALETTES, CHEST_VIDEO, chestVideoProblem, defaultColors, emblemInitials } from '@forge/lobby';
 import type { AvatarColors, AvatarFinish } from '@forge/lobby';
 import {
   AVATAR_CAPE_DEFAULT,
   AVATAR_CHEST_MAX_BYTES,
   AVATAR_CHEST_MAX_PIXELS,
   AVATAR_CHEST_TYPES,
+  AVATAR_CHEST_VIDEO_MAX_BYTES,
+  AVATAR_CHEST_VIDEO_TYPES,
   AVATAR_HEAD_ID,
   AVATAR_HEAD_MAX_BYTES,
   AVATAR_HEAD_NAME_MAX,
@@ -142,6 +144,108 @@ function sameDraft(a: Draft, b: Draft): boolean {
   const colours = (['shell', 'trim', 'accent', 'eye'] as const).every((k) => a.colors[k] === b.colors[k]);
   const capes = a.cape === null || b.cape === null ? a.cape === b.cape : a.cape.outer === b.cape.outer && a.cape.lining === b.cape.lining;
   return colours && (a.colors.eyeRight ?? null) === (b.colors.eyeRight ?? null) && a.head === b.head && a.accessory === b.accessory && a.finish === b.finish && a.back === b.back && capes;
+}
+
+/**
+ * Reads a clip's size and length in the browser (which must be able to play it), to refuse
+ * one the lobby couldn't show before uploading it.
+ */
+function videoFacts(file: File): Promise<{ width: number; height: number; duration: number }> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const video = document.createElement('video');
+    const done = (): void => {
+      clearTimeout(timer);
+      video.removeAttribute('src');
+      video.load();
+      URL.revokeObjectURL(url);
+    };
+    const timer = setTimeout(() => {
+      done();
+      reject(new Error('timeout'));
+    }, 15_000);
+    video.preload = 'metadata';
+    video.muted = true;
+    video.addEventListener(
+      'loadedmetadata',
+      () => {
+        const facts = { width: video.videoWidth, height: video.videoHeight, duration: video.duration };
+        done();
+        resolve(facts);
+      },
+      { once: true },
+    );
+    video.addEventListener(
+      'error',
+      () => {
+        done();
+        reject(new Error('unplayable'));
+      },
+      { once: true },
+    );
+    video.src = url;
+  });
+}
+
+/**
+ * A saved chestplate clip, playing in its thumbnail: fetched whole and played from memory (the
+ * asset route sends no byte ranges, which Safari's <video> needs to stream), still for anyone
+ * who'd rather nothing moved, a spinner while it comes, a mark if it can't.
+ */
+function ChestClipThumb({ sha }: { sha: string }) {
+  const [state, setState] = useState<{ kind: 'loading' } | { kind: 'ready'; url: string } | { kind: 'error' }>({ kind: 'loading' });
+  const [still, setStill] = useState(false);
+  useEffect(() => {
+    const query = window.matchMedia('(prefers-reduced-motion: reduce)');
+    setStill(query.matches);
+    const changed = (event: MediaQueryListEvent): void => setStill(event.matches);
+    query.addEventListener('change', changed);
+    return () => query.removeEventListener('change', changed);
+  }, []);
+  useEffect(() => {
+    let url: string | null = null;
+    let gone = false;
+    setState({ kind: 'loading' });
+    fetch(`/bff/avatars/assets/${sha}`)
+      .then((response) => {
+        if (!response.ok) throw new Error(String(response.status));
+        return response.blob();
+      })
+      .then(
+        (blob) => {
+          if (gone) return;
+          url = URL.createObjectURL(blob);
+          setState({ kind: 'ready', url });
+        },
+        () => {
+          if (!gone) setState({ kind: 'error' });
+        },
+      );
+    return () => {
+      gone = true;
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [sha]);
+  if (state.kind === 'loading') return <span className="spinner" aria-hidden="true" />;
+  if (state.kind === 'error') return <span title="The clip couldn’t load">!</span>;
+  return <video key={String(still)} className={styles.chestClip} src={state.url} muted loop playsInline autoPlay={!still} preload="auto" />;
+}
+
+/** What's wrong with a clip, in words; null when nothing is. */
+function clipProblemText(problem: ReturnType<typeof chestVideoProblem>): string | null {
+  if (!problem) return null;
+  switch (problem.reason) {
+    case 'type':
+      return 'Use an MP4 or WebM clip.';
+    case 'too_big':
+      return `That clip is ${kb(problem.bytes)}. The most is ${kb(problem.max)}.`;
+    case 'too_long':
+      return `That clip is ${Math.round(problem.seconds * 10) / 10} s. The most is ${problem.max} s (it loops).`;
+    case 'too_many_pixels':
+      return `That clip is ${problem.width}×${problem.height}. The most is ${problem.max} pixels each way.`;
+    case 'unreadable':
+      return 'That clip couldn’t be read. Try an MP4 (H.264) or a WebM.';
+  }
 }
 
 /** Reads an image's size in the browser, to refuse one the API would before uploading it. */
@@ -403,11 +507,12 @@ function RobotEditor({ member, list, setList, onDirty, onDraft }: RobotEditorPro
       head,
       accessory,
       chest: saved?.chest ?? null,
+      chestType: saved?.chestType ?? null,
       finish: draft.finish,
       back,
       cape: draft.cape,
     }),
-    [member.memberId, member.login, draft.colors, head, accessory, saved?.chest, draft.finish, back, draft.cape],
+    [member.memberId, member.login, draft.colors, head, accessory, saved?.chest, saved?.chestType, draft.finish, back, draft.cape],
   );
 
   const commit = useCallback(async (): Promise<Avatar> => {
@@ -454,17 +559,38 @@ function RobotEditor({ member, list, setList, onDirty, onDraft }: RobotEditorPro
     const file = event.target.files?.[0];
     event.target.value = '';
     if (!file) return;
-    if (!(AVATAR_CHEST_TYPES as readonly string[]).includes(file.type)) {
-      setChestUpload({ kind: 'error', message: 'Use a PNG, JPEG or WebP image.' });
+    const isClip = (AVATAR_CHEST_VIDEO_TYPES as readonly string[]).includes(file.type);
+    if (!isClip && !(AVATAR_CHEST_TYPES as readonly string[]).includes(file.type)) {
+      setChestUpload({ kind: 'error', message: 'Use a PNG, JPEG or WebP image. (Or a short MP4 or WebM clip.)' });
       return;
     }
-    if (file.size > AVATAR_CHEST_MAX_BYTES) {
+    if (isClip) {
+      if (file.size > AVATAR_CHEST_VIDEO_MAX_BYTES) {
+        setChestUpload({ kind: 'error', message: `That clip is ${kb(file.size)}. The most is ${kb(AVATAR_CHEST_VIDEO_MAX_BYTES)}.` });
+        return;
+      }
+      setChestUpload({ kind: 'preparing', what: 'Checking the clip…' });
+      let problem: string | null;
+      try {
+        const facts = await videoFacts(file);
+        problem = clipProblemText(chestVideoProblem({ type: file.type, bytes: file.size, ...facts }));
+      } catch (error) {
+        problem =
+          error instanceof Error && error.message === 'timeout'
+            ? 'That clip took too long to read. Try again, or a smaller file.'
+            : 'This browser couldn’t play that clip. Try an MP4 (H.264) or a WebM.';
+      }
+      if (problem) {
+        setChestUpload({ kind: 'error', message: problem });
+        return;
+      }
+    } else if (file.size > AVATAR_CHEST_MAX_BYTES) {
       setChestUpload({ kind: 'error', message: `That image is ${kb(file.size)}. The most is ${kb(AVATAR_CHEST_MAX_BYTES)}.` });
       return;
     }
-    setChestUpload({ kind: 'preparing', what: 'Checking the image…' });
+    if (!isClip) setChestUpload({ kind: 'preparing', what: 'Checking the image…' });
     try {
-      const { width, height } = await imageSize(file);
+      const { width, height } = isClip ? { width: 0, height: 0 } : await imageSize(file);
       if (width > AVATAR_CHEST_MAX_PIXELS || height > AVATAR_CHEST_MAX_PIXELS) {
         setChestUpload({
           kind: 'error',
@@ -509,6 +635,7 @@ function RobotEditor({ member, list, setList, onDirty, onDraft }: RobotEditorPro
 
   const uploading = chestUpload.kind === 'preparing' || chestUpload.kind === 'uploading' || chestUpload.kind === 'processing';
   const working = busy.kind === 'saving' || busy.kind === 'resetting' || uploading || removingChest;
+  const chestIsClip = Boolean(saved?.chestType?.startsWith('video/'));
   const missingHead = saved?.head && !list.heads.some((h) => h.id === saved.head);
   // A head is made for one member: only theirs are offered.
   const ownHeads = list.heads.filter((h) => h.owner === member.memberId);
@@ -770,21 +897,26 @@ function RobotEditor({ member, list, setList, onDirty, onDraft }: RobotEditorPro
             <span
               className={styles.chestThumb}
               style={
-                saved?.chest
+                saved?.chest && !chestIsClip
                   ? { backgroundImage: `url("/bff/avatars/assets/${saved.chest}")` }
-                  : { color: draft.colors.eye, borderColor: draft.colors.accent }
+                  : saved?.chest
+                    ? {}
+                    : { color: draft.colors.eye, borderColor: draft.colors.accent }
               }
               aria-hidden="true"
             >
+              {chestIsClip && saved?.chest && <ChestClipThumb sha={saved.chest} />}
               {!saved?.chest && emblemInitials(member.login)}
             </span>
             <div className="stack" style={{ gap: 6 }}>
-              <span className="muted">{saved?.chest ? 'An uploaded image' : 'Their initials (no image yet)'}</span>
+              <span className="muted">
+                {saved?.chest ? (chestIsClip ? 'An uploaded clip (it loops, silently)' : 'An uploaded image') : 'Their initials (no image yet)'}
+              </span>
               <div className={styles.actions}>
                 <input
                   ref={fileRef}
                   type="file"
-                  accept={AVATAR_CHEST_TYPES.join(',')}
+                  accept={[...AVATAR_CHEST_TYPES, ...AVATAR_CHEST_VIDEO_TYPES].join(',')}
                   className={styles.visuallyHidden}
                   onChange={(event) => void onChestFile(event)}
                   tabIndex={-1}
@@ -798,18 +930,20 @@ function RobotEditor({ member, list, setList, onDirty, onDraft }: RobotEditorPro
                   aria-busy={uploading}
                 >
                   {uploading && <span className="spinner" aria-hidden="true" />}
-                  {uploading ? 'Uploading…' : saved?.chest ? 'Replace image' : 'Upload image'}
+                  {uploading ? 'Uploading…' : saved?.chest ? (chestIsClip ? 'Replace clip' : 'Replace image') : 'Upload image or clip'}
                 </button>
                 {saved?.chest && (
                   <button type="button" className="btn btn-sm btn-ghost" onClick={dropChest} disabled={working} aria-busy={removingChest}>
                     {removingChest && <span className="spinner" aria-hidden="true" />}
-                    {removingChest ? 'Removing…' : 'Remove image'}
+                    {removingChest ? 'Removing…' : chestIsClip ? 'Remove clip' : 'Remove image'}
                   </button>
                 )}
               </div>
               <span className={styles.hint}>
-                PNG, JPEG or WebP, up to {kb(AVATAR_CHEST_MAX_BYTES)} and {AVATAR_CHEST_MAX_PIXELS}px. Square-ish works best: it is
-                cropped to fill the plate.
+                PNG, JPEG or WebP, up to {kb(AVATAR_CHEST_MAX_BYTES)} and {AVATAR_CHEST_MAX_PIXELS}px; or a short clip that loops
+                silently: MP4 (H.264) or WebM, up to {kb(AVATAR_CHEST_VIDEO_MAX_BYTES)}, {CHEST_VIDEO.maxSeconds} s and{' '}
+                {CHEST_VIDEO.maxPixels}px (a GIF or APNG: convert it to MP4 first). Square-ish works best: it is cropped to fill the
+                plate. In the lobby a clip plays when you’re near.
               </span>
             </div>
           </div>

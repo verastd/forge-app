@@ -451,6 +451,8 @@ export function createPeers(
           // Nobody to look at: your robot looks where you do.
           viewerBearing: 0,
           viewerDistance: Infinity,
+          // Your own chestplate: always near enough that a clip on it plays.
+          chestDistance: 0,
           reducedMotion,
           talking: self.talking,
           act: self.act,

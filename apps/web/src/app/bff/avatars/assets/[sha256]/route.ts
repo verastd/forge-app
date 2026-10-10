@@ -1,11 +1,11 @@
 /**
- * A robot's stored file (a chestplate image or a library head), by its
+ * A robot's stored file (a chestplate image or clip, or a library head), by its
  * sha256: `GET /bff/avatars/assets/<sha256>`, fetched from
  * `${FORGE_API_URL}/api/avatars/assets/<sha256>` with no identity (they are
  * public: everyone in the lobby sees everyone's robot).
  *
  * Unlike the JSON forwards (`lib/bff-forward.ts`), this answers with the
- * file's own type, from an allowlist of the four the API stores (anything
+ * file's own type, from an allowlist of the six the API stores (anything
  * else is a 502), and lets the browser keep it forever: a new upload is a
  * new hash, so a cached copy is never stale. No cookies or other headers go
  * either way.
@@ -18,7 +18,7 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
 
 const SHA256 = /^[0-9a-f]{64}$/;
-const TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'model/gltf-binary']);
+const TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'video/mp4', 'video/webm', 'model/gltf-binary']);
 const TIMEOUT_MS = 25_000;
 
 interface Context {

@@ -15,7 +15,7 @@
  * listed is a 404, and no query string is forwarded. Stored files are served
  * by `assets/[sha256]/route.ts`.
  */
-import { AVATAR_CHEST_MAX_BYTES, AVATAR_HEAD_MAX_BYTES } from '@forge/shared';
+import { AVATAR_CHEST_VIDEO_MAX_BYTES, AVATAR_HEAD_MAX_BYTES } from '@forge/shared';
 import type { NextRequest } from 'next/server';
 
 import { bffError, forward } from '../../../../lib/bff-forward';
@@ -49,7 +49,8 @@ const ROUTES: readonly Route[] = [
     method: 'PUT',
     path: new RegExp(`^members/${MEMBER}/chest$`),
     identity: 'required',
-    maxBodyBytes: uploadCap(AVATAR_CHEST_MAX_BYTES),
+    // A clip may be bigger than an image: the cap is the bigger of the two.
+    maxBodyBytes: uploadCap(AVATAR_CHEST_VIDEO_MAX_BYTES),
   },
   { method: 'DELETE', path: new RegExp(`^members/${MEMBER}/chest$`), identity: 'required' },
   {

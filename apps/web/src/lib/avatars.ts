@@ -18,7 +18,7 @@ import {
 } from '@forge/shared';
 import type {
   Avatar,
-  AvatarChestType,
+  AvatarChestMediaType,
   AvatarHead,
   AvatarHeadFit,
   AvatarHeadPlacement,
@@ -191,7 +191,7 @@ export async function uploadChest(memberId: string, file: File, onProgress: OnPr
   const data = await fileToBase64(file);
   return upload(
     `/members/${encodeURIComponent(memberId)}/chest`,
-    { contentType: file.type as AvatarChestType, data },
+    { contentType: file.type as AvatarChestMediaType, data },
     AvatarSchema,
     onProgress,
   );
@@ -226,6 +226,8 @@ const REASONS: Record<string, string> = {
   not_png: 'That file isn’t really a PNG.',
   not_jpeg: 'That file isn’t really a JPEG.',
   not_webp: 'That file isn’t really a WebP.',
+  not_mp4: 'That file isn’t really an MP4 (a QuickTime .mov won’t do: export it as MP4).',
+  not_webm: 'That file isn’t really a WebM.',
   too_many_pixels: 'That image is too big: 2048 pixels across and down at most.',
   not_glb: 'That isn’t a binary glTF 2.0 file (.glb).',
   not_gltf2: 'That file doesn’t say it is glTF 2.0 inside. Export it again as glTF 2.0 (.glb).',
