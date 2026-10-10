@@ -27,6 +27,8 @@ import * as THREE from 'three';
 import {
   MACHINE,
   MACHINE_PROBLEM_TEXT,
+  STEP_ERROR_TEXT,
+  STEP_MAX_BYTES,
   aimFloor,
   buildOrder,
   buildTime,
@@ -35,8 +37,10 @@ import {
   machineFootprint,
   machineProblem,
   machineUnderRay,
+  isStepFile,
   partFrame,
   partStart,
+  stepName,
 } from '@forge/lobby';
 import type { BrickAt, LobbyAction, MachineSpot, Ray } from '@forge/lobby';
 import { MACHINE_BLUEPRINT_MAX_BYTES, MACHINE_NAME_MAX, MACHINE_SCALE_MAX, MACHINE_SCALE_MIN, MACHINE_TURNS } from '@forge/shared';
@@ -48,6 +52,7 @@ import type { Builder } from '../bricks/controller';
 import { MachineRefusal, createMachineClient } from './client';
 import type { MachineClient } from './client';
 import { drawScale, readMachineModel } from './model';
+import { StepFailure, stepToGlb } from './step';
 import type { MachineModel } from './model';
 import { createSparks } from './sparks';
 
@@ -81,7 +86,18 @@ export interface MachineState {
   /** The mechanic's library: not asked for yet, loading, there, or failed to load. */
   library: { status: 'idle' | 'loading' | 'ready' | 'error'; items: LibraryItem[] };
   /** A blueprint on its way up: reading the file (and finding its parts), then sending it. */
-  upload: { name: string; stage: 'reading' | 'uploading' | 'finishing'; progress: number; parts: number | null } | null;
+  /**
+   * A blueprint on its way up. A STEP file first goes through the CAD reader:
+   * it loads (`engine`), reads the file (`step`) and meshes its parts
+   * (`meshing`). Then every blueprint is read and split into parts
+   * (`reading`), sent (`uploading`, with progress) and checked (`finishing`).
+   */
+  upload: {
+    name: string;
+    stage: 'engine' | 'step' | 'meshing' | 'reading' | 'uploading' | 'finishing';
+    progress: number;
+    parts: number | null;
+  } | null;
   /** Why the last upload failed (shown until the next one, or dismissed). */
   uploadError: string | null;
   /** The blueprint being deleted from the library. */
@@ -644,24 +660,44 @@ export function createMachines(
 
   const startUpload = async (file: File): Promise<void> => {
     uploadError = null;
-    if (!/\.glb$/i.test(file.name)) {
-      uploadError = 'A blueprint is a .glb file (binary glTF): export one from Tripo, Blender or your CAD tool.';
+    const step = isStepFile(file.name);
+    if (!step && !/\.glb$/i.test(file.name)) {
+      uploadError = 'A blueprint is a .glb file (binary glTF, from Tripo or Blender) or a .step / .stp file (from any CAD tool).';
       changed = true;
       return;
     }
-    if (file.size > MACHINE_BLUEPRINT_MAX_BYTES) {
+    if (step && file.size > STEP_MAX_BYTES) {
+      uploadError = STEP_ERROR_TEXT['too-big'];
+      changed = true;
+      return;
+    }
+    if (!step && file.size > MACHINE_BLUEPRINT_MAX_BYTES) {
       uploadError = `That file is too big (${Math.round(file.size / 1024 / 1024)} MB; the most is ${MACHINE_BLUEPRINT_MAX_BYTES / 1024 / 1024} MB).`;
       changed = true;
       return;
     }
-    const name = file.name.replace(/\.glb$/i, '').replace(/[_-]+/g, ' ').trim().slice(0, MACHINE_NAME_MAX) || 'Blueprint';
+    const name = stepName(file.name).replace(/\.glb$/i, '').replace(/[_-]+/g, ' ').trim().slice(0, MACHINE_NAME_MAX) || 'Blueprint';
     const controller = new AbortController();
     uploading = controller;
-    upload = { name, stage: 'reading', progress: 0, parts: null };
+    upload = { name, stage: step ? 'engine' : 'reading', progress: 0, parts: null };
     changed = true;
     let read: MachineModel | null = null;
     try {
-      const data = await file.arrayBuffer();
+      let data = await file.arrayBuffer();
+      if (step) {
+        // CAD's own format: meshed in a worker, one mesh per part, written out as a .glb.
+        const made = await stepToGlb(
+          data,
+          (at) => {
+            upload = { name, stage: at.stage === 'reading' ? 'step' : at.stage, progress: 0, parts: at.stage === 'meshing' ? at.parts : null };
+            changed = true;
+          },
+          controller.signal,
+        );
+        data = made.glb;
+        upload = { name, stage: 'reading', progress: 0, parts: made.parts };
+        changed = true;
+      }
       try {
         read = await readMachineModel(data, envMap);
       } catch {
@@ -687,7 +723,7 @@ export function createMachines(
     } catch (error) {
       if (disposed) return;
       if ((error as Error).name === 'AbortError') events.onEvent('Upload cancelled');
-      else uploadError = error instanceof MachineRefusal ? error.message : 'Couldn’t upload that: try again.';
+      else uploadError = error instanceof MachineRefusal || error instanceof StepFailure ? error.message : 'Couldn’t upload that: try again.';
     } finally {
       read?.dispose();
       if (uploading === controller) uploading = null;
