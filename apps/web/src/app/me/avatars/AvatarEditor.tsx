@@ -20,7 +20,7 @@ import { AVATAR_FINISHES, AVATAR_PALETTES, CHEST_VIDEO, chestVideoProblem, defau
 import type { AvatarColors, AvatarFinish } from '@forge/lobby';
 import {
   AVATAR_CAPE_DEFAULT,
-  AVATAR_CHEST_GLOW_DEFAULT,
+  AVATAR_CHEST_BLENDS,
   AVATAR_CHEST_MAX_BYTES,
   AVATAR_CHEST_MAX_PIXELS,
   AVATAR_CHEST_TYPES,
@@ -30,7 +30,7 @@ import {
   AVATAR_HEAD_MAX_BYTES,
   AVATAR_HEAD_NAME_MAX,
 } from '@forge/shared';
-import type { Avatar, AvatarCape, AvatarHead, AvatarHeadFit, AvatarHeadPlacement, AvatarList, AvatarMember } from '@forge/shared';
+import type { Avatar, AvatarCape, AvatarChestBlend, AvatarHead, AvatarHeadFit, AvatarHeadPlacement, AvatarList, AvatarMember } from '@forge/shared';
 
 import {
   AvatarsError,
@@ -126,8 +126,9 @@ interface Draft {
   /** On its back: a library model, or the cape (never both). */
   back: string | null;
   cape: AvatarCape | null;
-  /** How much an uploaded chestplate glows, 0–1. */
-  chestGlow: number;
+  /** How an uploaded chestplate blends over the armour (a CSS mix-blend-mode), and its opacity (0–1). */
+  chestBlend: AvatarChestBlend;
+  chestOpacity: number;
 }
 
 function draftFor(memberId: string, list: AvatarList): Draft {
@@ -139,22 +140,16 @@ function draftFor(memberId: string, list: AvatarList): Draft {
     finish: saved?.finish ?? 'paint',
     back: saved?.back ?? null,
     cape: saved?.cape ?? null,
-    chestGlow: saved?.chestGlow ?? AVATAR_CHEST_GLOW_DEFAULT,
+    chestBlend: saved?.chestBlend ?? 'normal',
+    chestOpacity: saved?.chestOpacity ?? 1,
   };
-}
-
-/** What a glow level looks like, in words. */
-function glowWords(glow: number): string {
-  if (glow <= 0.15) return 'Printed on the armour, lit by the cave';
-  if (glow < 0.7) return 'A soft glow';
-  return 'A bright screen';
 }
 
 /** Every key, by name: a right eye on only one side is a change too. */
 function sameDraft(a: Draft, b: Draft): boolean {
   const colours = (['shell', 'trim', 'accent', 'eye'] as const).every((k) => a.colors[k] === b.colors[k]);
   const capes = a.cape === null || b.cape === null ? a.cape === b.cape : a.cape.outer === b.cape.outer && a.cape.lining === b.cape.lining;
-  return colours && (a.colors.eyeRight ?? null) === (b.colors.eyeRight ?? null) && a.head === b.head && a.accessory === b.accessory && a.finish === b.finish && a.back === b.back && capes && a.chestGlow === b.chestGlow;
+  return colours && (a.colors.eyeRight ?? null) === (b.colors.eyeRight ?? null) && a.head === b.head && a.accessory === b.accessory && a.finish === b.finish && a.back === b.back && capes && a.chestBlend === b.chestBlend && a.chestOpacity === b.chestOpacity;
 }
 
 /**
@@ -522,9 +517,10 @@ function RobotEditor({ member, list, setList, onDirty, onDraft }: RobotEditorPro
       finish: draft.finish,
       back,
       cape: draft.cape,
-      chestGlow: draft.chestGlow,
+      chestBlend: draft.chestBlend,
+      chestOpacity: draft.chestOpacity,
     }),
-    [member.memberId, member.login, draft.colors, head, accessory, saved?.chest, saved?.chestType, draft.finish, back, draft.cape, draft.chestGlow],
+    [member.memberId, member.login, draft.colors, head, accessory, saved?.chest, saved?.chestType, draft.finish, back, draft.cape, draft.chestBlend, draft.chestOpacity],
   );
 
   const commit = useCallback(async (): Promise<Avatar> => {
@@ -537,8 +533,9 @@ function RobotEditor({ member, list, setList, onDirty, onDraft }: RobotEditorPro
       ...(draft.finish !== 'paint' ? { finish: draft.finish } : {}),
       // On its back, one or the other (or neither): a model, or the cape.
       ...(draft.back ? { back: draft.back } : draft.cape ? { cape: draft.cape } : {}),
-      // The glow is sent only when it isn't the default, as the finish is.
-      ...(draft.chestGlow !== AVATAR_CHEST_GLOW_DEFAULT ? { chestGlow: draft.chestGlow } : {}),
+      // The blend and opacity are sent only when they aren't the defaults, as the finish is.
+      ...(draft.chestBlend !== 'normal' ? { chestBlend: draft.chestBlend } : {}),
+      ...(draft.chestOpacity !== 1 ? { chestOpacity: draft.chestOpacity } : {}),
     });
     setList((current) => ({ ...current, avatars: [...current.avatars.filter((a) => a.memberId !== result.memberId), result] }));
     return result;
@@ -562,7 +559,7 @@ function RobotEditor({ member, list, setList, onDirty, onDraft }: RobotEditorPro
     resetAvatar(member.memberId).then(
       () => {
         setList((current) => ({ ...current, avatars: current.avatars.filter((a) => a.memberId !== member.memberId) }));
-        setDraft({ colors: defaultColors(member.memberId), head: null, accessory: null, finish: 'paint', back: null, cape: null, chestGlow: AVATAR_CHEST_GLOW_DEFAULT });
+        setDraft({ colors: defaultColors(member.memberId), head: null, accessory: null, finish: 'paint', back: null, cape: null, chestBlend: 'normal', chestOpacity: 1 });
         setBusy({ kind: 'idle' });
       },
       (error: unknown) => setBusy({ kind: 'error', message: describeAvatarsError(error), retry: reset }),
@@ -961,27 +958,44 @@ function RobotEditor({ member, list, setList, onDirty, onDraft }: RobotEditorPro
               </span>
             </div>
           </div>
-          <label className={styles.label}>
-            <span className={styles.sliderHead} aria-hidden="true">
-              Glow <span className={styles.sliderValue}>{Math.round(draft.chestGlow * 100)}%</span>
-            </span>
-            <input
-              type="range"
-              min={0}
-              max={100}
-              step={5}
-              value={Math.round(draft.chestGlow * 100)}
-              onChange={(event) => setDraft((d) => ({ ...d, chestGlow: Number(event.target.value) / 100 }))}
-              disabled={working || !saved?.chest}
-              aria-label="Chestplate glow"
-              aria-valuetext={`${Math.round(draft.chestGlow * 100)}%: ${glowWords(draft.chestGlow)}`}
-            />
+          <div className={styles.blendRow}>
+            <label className={styles.label}>
+              <span>Blend</span>
+              <select
+                value={draft.chestBlend}
+                onChange={(event) => setDraft((d) => ({ ...d, chestBlend: event.target.value as AvatarChestBlend }))}
+                disabled={working || !saved?.chest}
+                aria-label="Chestplate blend mode"
+              >
+                {AVATAR_CHEST_BLENDS.map((mode) => (
+                  <option key={mode} value={mode}>
+                    {mode}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className={styles.label}>
+              <span className={styles.sliderHead} aria-hidden="true">
+                Opacity <span className={styles.sliderValue}>{Math.round(draft.chestOpacity * 100)}%</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                step={1}
+                value={Math.round(draft.chestOpacity * 100)}
+                onChange={(event) => setDraft((d) => ({ ...d, chestOpacity: Number(event.target.value) / 100 }))}
+                disabled={working || !saved?.chest}
+                aria-label="Chestplate opacity"
+                aria-valuetext={`${Math.round(draft.chestOpacity * 100)}%`}
+              />
+            </label>
             <span className={styles.hint}>
               {saved?.chest
-                ? `${glowWords(draft.chestGlow)}. The preview shows it as you drag; Save to keep it.`
+                ? 'A CSS mix-blend-mode over the armour’s colour (multiply darkens, screen lightens, overlay keeps both), lit by the cave like paint. The preview shows it as you change it; Save to keep it.'
                 : 'Upload an image or clip first: the initials always glow.'}
             </span>
-          </label>
+          </div>
           <UploadStatus upload={chestUpload} label="the chestplate" />
         </fieldset>
 

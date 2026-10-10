@@ -56,19 +56,25 @@ const chestInput = (page: Page) => page.locator('input[type=file][accept*="video
 test.describe('a chestplate that plays', () => {
   test.describe.configure({ timeout: 120_000 });
 
-  test('the chestplate’s glow is a slider, shown as you drag, sent on Save (Saving… then Saved)', async ({ page, context, baseURL }) => {
+  test('the chestplate’s CSS blend mode and opacity, shown as you change them, sent on Save (Saving… then Saved)', async ({ page, context, baseURL }) => {
     await signInAs(context, baseURL ?? '', { sub: '4242', login: 'trent-admin' });
     await openEditor(page, { ...ROBOT, chest: SHA, chestType: 'video/webm' });
-    const glow = page.getByRole('slider', { name: 'Chestplate glow' });
-    await expect(glow).toBeEnabled();
-    await expect(glow).toHaveValue('40');
-    await expect(glow).toHaveAttribute('aria-valuetext', '40%: A soft glow');
-    await glow.fill('10');
-    await expect(glow).toHaveAttribute('aria-valuetext', '10%: Printed on the armour, lit by the cave');
+    const blend = page.getByRole('combobox', { name: 'Chestplate blend mode' });
+    const opacity = page.getByRole('slider', { name: 'Chestplate opacity' });
+    await expect(blend).toBeEnabled();
+    await expect(blend).toHaveValue('normal');
+    // Every CSS mix-blend-mode, multiply, screen and overlay among them.
+    for (const mode of ['multiply', 'screen', 'overlay', 'soft-light', 'luminosity']) {
+      await expect(blend.locator(`option[value="${mode}"]`)).toHaveCount(1);
+    }
+    await expect(opacity).toHaveValue('100');
+    await blend.selectOption('overlay');
+    await opacity.fill('70');
+    await expect(opacity).toHaveAttribute('aria-valuetext', '70%');
     await expect(page.getByText('Unsaved changes')).toBeVisible();
 
     const save = held();
-    let sent: { chestGlow?: number } | null = null;
+    let sent: { chestBlend?: string; chestOpacity?: number } | null = null;
     await page.route('**/bff/avatars/members/gh%3A1001', async (route) => {
       sent = route.request().postDataJSON() as typeof sent;
       await save.handler(route);
@@ -76,15 +82,17 @@ test.describe('a chestplate that plays', () => {
     await page.getByRole('button', { name: 'Save', exact: true }).click();
     await expect(page.getByRole('button', { name: 'Saving…' })).toHaveAttribute('aria-busy', 'true');
     await expect.poll(() => sent).not.toBeNull();
-    expect(sent!.chestGlow).toBe(0.1);
-    save.release(200, { ...ROBOT, chest: SHA, chestType: 'video/webm', chestGlow: 0.1 });
+    expect(sent!.chestBlend).toBe('overlay');
+    expect(sent!.chestOpacity).toBe(0.7);
+    save.release(200, { ...ROBOT, chest: SHA, chestType: 'video/webm', chestBlend: 'overlay', chestOpacity: 0.7 });
     await expect(page.getByText('✓ Saved.')).toBeVisible();
   });
 
-  test('without an upload there is nothing to dim: the glow waits for one', async ({ page, context, baseURL }) => {
+  test('without an upload there is nothing to blend: the controls wait for one', async ({ page, context, baseURL }) => {
     await signInAs(context, baseURL ?? '', { sub: '4242', login: 'trent-admin' });
     await openEditor(page);
-    await expect(page.getByRole('slider', { name: 'Chestplate glow' })).toBeDisabled();
+    await expect(page.getByRole('combobox', { name: 'Chestplate blend mode' })).toBeDisabled();
+    await expect(page.getByRole('slider', { name: 'Chestplate opacity' })).toBeDisabled();
     await expect(page.getByText('Upload an image or clip first: the initials always glow.')).toBeVisible();
   });
 
