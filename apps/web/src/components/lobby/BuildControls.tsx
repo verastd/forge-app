@@ -87,7 +87,7 @@ function note(state: BrickState): string {
   }
   if (state.blueprint) {
     const { aim } = state.blueprint;
-    if (!aim) return 'Aim at the floor (or a build) to place the blueprint.';
+    if (!aim) return 'Aim at the floor to place the blueprint.';
     if (aim.fits) return `It fits: E builds all ${state.blueprint.bricks.toLocaleString('en')} bricks, R turns it, Q puts it away.`;
     return `${aim.blocked.toLocaleString('en')} brick${aim.blocked === 1 ? '' : 's'} won’t fit here: ${aim.why ?? ''}`;
   }

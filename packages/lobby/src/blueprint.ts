@@ -336,16 +336,16 @@ export function placeBlueprint(blueprint: Blueprint, x: number, y: number, z: nu
 /**
  * Why each brick of a build can't go where it says, among the cave's
  * `placed` bricks (null where it can): a shape we don't have, out of the
- * build circle, overlapping a brick (of the cave or of the build), or part
- * of a group that rests on nothing (neither the floor nor a placed brick,
- * through the build's own fastenings).
+ * build circle (or too high), or overlapping a brick (of the cave or of the
+ * build). A blueprint needs no support: a brick that sat on a part we don't
+ * make stays where the model puts it.
  */
 export function blueprintProblems(bricks: readonly BrickAt[], placed: readonly BrickAt[]): (BrickProblem | null)[] {
-  const all: { brick: BrickAt; mine: number }[] = [...bricks.map((brick, mine) => ({ brick, mine })), ...placed.map((brick) => ({ brick, mine: -1 }))];
+  const all: BrickAt[] = [...bricks, ...placed];
   // Who covers which column, to find neighbours without comparing every pair.
   const columns = new Map<string, number[]>();
   const valid = (brick: BrickAt): boolean => brickShape(brick.shape) !== null && [0, 1, 2, 3].includes(brick.rot);
-  all.forEach(({ brick }, index) => {
+  all.forEach((brick, index) => {
     if (!valid(brick)) return;
     for (const [x, z] of brickCells(brick)) {
       const list = columns.get(key(x, z));
@@ -353,61 +353,23 @@ export function blueprintProblems(bricks: readonly BrickAt[], placed: readonly B
       else columns.set(key(x, z), [index]);
     }
   });
-  const studSet = (brick: BrickAt): Set<string> => new Set(brickStuds(brick).map(([x, z]) => key(x, z)));
-  const problems: (BrickProblem | null)[] = bricks.map(() => null);
-  const links: number[][] = bricks.map(() => []);
-  const grounded: boolean[] = bricks.map((brick) => brick.y === 0);
-  bricks.forEach((brick, i) => {
+  const reach = BRICK.radius / BRICK.stud;
+  return bricks.map((brick, i): BrickProblem | null => {
     const shape = brickShape(brick.shape);
-    if (!shape || !valid(brick)) {
-      problems[i] = 'shape';
-      return;
-    }
+    if (!shape || !valid(brick)) return 'shape';
     const top = brick.y + shape.h;
-    if (brick.y < 0 || top > BRICK.maxPlates || ![brick.x, brick.y, brick.z].every(Number.isInteger)) {
-      problems[i] = 'outside';
-      return;
-    }
-    const reach = BRICK.radius / BRICK.stud;
+    if (brick.y < 0 || top > BRICK.maxPlates || ![brick.x, brick.y, brick.z].every(Number.isInteger)) return 'outside';
     const cells = brickCells(brick);
-    if (cells.some(([x, z]) => [[x, z], [x + 1, z], [x, z + 1], [x + 1, z + 1]].some(([cx, cz]) => Math.hypot(cx!, cz!) > reach))) {
-      problems[i] = 'outside';
-      return;
-    }
-    const mineStuds = studSet(brick);
-    const seen = new Set<number>();
+    if (cells.some(([x, z]) => [[x, z], [x + 1, z], [x, z + 1], [x + 1, z + 1]].some(([cx, cz]) => Math.hypot(cx!, cz!) > reach))) return 'outside';
     for (const [x, z] of cells) {
       for (const j of columns.get(key(x, z)) ?? []) {
-        if (j === i || seen.has(j)) continue;
-        seen.add(j);
-        const other = all[j]!.brick;
-        const otherTop = other.y + brickHeight(other);
-        if (brick.y < otherTop && other.y < top) {
-          problems[i] = 'overlap';
-          continue;
-        }
-        // Fastened: it sits on the other's studs, or the other sits on its.
-        const onIt = brick.y === otherTop && cells.some(([cx, cz]) => studSet(other).has(key(cx, cz)));
-        const underIt = other.y === top && brickCells(other).some(([cx, cz]) => mineStuds.has(key(cx, cz)));
-        if (!onIt && !underIt) continue;
-        if (all[j]!.mine < 0) grounded[i] = true;
-        else links[i]!.push(all[j]!.mine);
+        if (j === i) continue;
+        const other = all[j]!;
+        if (brick.y < other.y + brickHeight(other) && other.y < top) return 'overlap';
       }
     }
+    return null;
   });
-  // Everything fastened (through the build) to something grounded stands.
-  const stands = [...grounded];
-  const queue = stands.flatMap((on, i) => (on ? [i] : []));
-  while (queue.length > 0) {
-    const i = queue.pop()!;
-    for (const j of links[i]!) {
-      if (!stands[j]) {
-        stands[j] = true;
-        queue.push(j);
-      }
-    }
-  }
-  return problems.map((problem, i) => problem ?? (stands[i] ? null : 'floating'));
 }
 
 /** The shapes a blueprint can use, by LDraw part number (for the panel's help). */

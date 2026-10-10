@@ -136,75 +136,39 @@ def frozen(brick: At, placed: Sequence[At]) -> bool:
     return any(other is not brick and connected(brick, other) for other in placed)
 
 
-def _studs_set(brick: At) -> set[Cell]:
-    return set(studs(brick))
+def _blueprint_problem(
+    i: int, brick: At, everything: Sequence[At], columns: dict[Cell, list[int]]
+) -> Problem | None:
+    if brick.shape not in SHAPES or brick.rot not in (0, 1, 2, 3):
+        return "shape"
+    top = brick.y + height(brick)
+    if brick.y < 0 or top > MAX_PLATES:
+        return "outside"
+    mine = cells(brick)
+    reach = RADIUS / STUD
+    corners = ((x + dx, z + dz) for x, z in mine for dx in (0, 1) for dz in (0, 1))
+    if any(math.hypot(cx, cz) > reach for cx, cz in corners):
+        return "outside"
+    for cell in mine:
+        for j in columns.get(cell, []):
+            other = everything[j]
+            if j != i and brick.y < other.y + height(other) and other.y < top:
+                return "overlap"
+    return None
 
 
 def blueprint_problems(bricks: Sequence[At], placed: Sequence[At]) -> list[Problem | None]:
     """Why each brick of a build can't go where it says among `placed` (None where it
-    can): a shape we don't have, out of the build circle, overlapping a brick (of the cave
-    or of the build), or in a group that rests on nothing (neither the floor nor a placed
-    brick, through the build's own fastenings). @forge/lobby's `blueprintProblems`."""
-    everything: list[tuple[At, int]] = [(brick, i) for i, brick in enumerate(bricks)]
-    everything += [(brick, -1) for brick in placed]
-
-    def valid(brick: At) -> bool:
-        return brick.shape in SHAPES and brick.rot in (0, 1, 2, 3)
-
+    can): a shape we don't have, out of the build circle (or too high), or overlapping a
+    brick (of the cave or of the build). A blueprint needs no support: a brick that sat on a
+    part we don't make stays where the model puts it. @forge/lobby's `blueprintProblems`."""
+    everything = [*bricks, *placed]
     columns: dict[Cell, list[int]] = {}
-    for index, (brick, _) in enumerate(everything):
-        if valid(brick):
+    for index, brick in enumerate(everything):
+        if brick.shape in SHAPES and brick.rot in (0, 1, 2, 3):
             for cell in cells(brick):
                 columns.setdefault(cell, []).append(index)
-    problems: list[Problem | None] = [None] * len(bricks)
-    links: list[list[int]] = [[] for _ in bricks]
-    grounded = [brick.y == 0 for brick in bricks]
-    reach = RADIUS / STUD
-    for i, brick in enumerate(bricks):
-        if not valid(brick):
-            problems[i] = "shape"
-            continue
-        top = brick.y + height(brick)
-        if brick.y < 0 or top > MAX_PLATES:
-            problems[i] = "outside"
-            continue
-        mine = cells(brick)
-        corners = ((x + dx, z + dz) for x, z in mine for dx in (0, 1) for dz in (0, 1))
-        if any(math.hypot(cx, cz) > reach for cx, cz in corners):
-            problems[i] = "outside"
-            continue
-        my_studs = _studs_set(brick)
-        seen: set[int] = set()
-        for cell in mine:
-            for j in columns.get(cell, []):
-                if j == i or j in seen:
-                    continue
-                seen.add(j)
-                other, theirs = everything[j]
-                other_top = other.y + height(other)
-                if brick.y < other_top and other.y < top:
-                    problems[i] = "overlap"
-                    continue
-                on_it = brick.y == other_top and not _studs_set(other).isdisjoint(mine)
-                under_it = other.y == top and not my_studs.isdisjoint(cells(other))
-                if not on_it and not under_it:
-                    continue
-                if theirs < 0:
-                    grounded[i] = True
-                else:
-                    links[i].append(theirs)
-    stands = list(grounded)
-    queue = [i for i, on in enumerate(stands) if on]
-    while queue:
-        i = queue.pop()
-        for j in links[i]:
-            if not stands[j]:
-                stands[j] = True
-                queue.append(j)
-    return [
-        problem if problem is not None or stands[i] else "floating"
-        for i, problem in enumerate(problems)
-    ]
+    return [_blueprint_problem(i, brick, everything, columns) for i, brick in enumerate(bricks)]
 
 
 def floor_spot(shape: str, rot: int, x: int, z: int, placed: Sequence[At]) -> At | None:
