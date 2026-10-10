@@ -277,7 +277,7 @@ export function createBricks(
     if (action.kind !== 'bricks') return;
     // Someone else's new brick drops out of their ramp once it's read; their build's burst, now.
     if (action.made) arriving.set(action.made, { from, at: performance.now() });
-    if (action.burst) burstFrom(frame?.robotOf(from) ?? null, action.burst, action.rev);
+    if (action.burst) burstFrom(rampOf(frame?.robotOf(from) ?? null), action.burst, action.rev);
     if (rev === null || action.rev > rev) void read();
   };
   const ping = (change: { rev: number }, extra: { made?: string; burst?: { x: number; z: number } } = {}): void => {
@@ -349,8 +349,7 @@ export function createBricks(
     if (!ramp || still()) return;
     drops.drop({ id: brick.id, color: brick.color, ...atOf(brick) }, ramp.from, ramp.dir);
   };
-  const burstFrom = (robot: RobotView | null, at: { x: number; z: number }, seed: number): void => {
-    const ramp = rampOf(robot);
+  const burstFrom = (ramp: { from: THREE.Vector3; dir: THREE.Vector3 } | null, at: { x: number; z: number }, seed: number): void => {
     if (!ramp || still()) return;
     drops.burst(ramp.from, ramp.dir, burstTargets({ x: at.x, y: 0.05, z: at.z }, BURST_RADIUS, seed), BURST_COLORS);
   };
@@ -824,7 +823,8 @@ export function createBricks(
                 middle.x += (box.min[0] + box.max[0]) / 2 / pieces.length;
                 middle.z += (box.min[2] + box.max[2]) / 2 / pieces.length;
               }
-              burstFrom(frame?.selfRobot ?? null, middle, built.rev);
+              // From your own ramp (or, in first person, just behind and below your eye).
+              burstFrom(myRamp(), middle, built.rev);
               ping(built, { burst: middle });
               planKey = '';
               void read();

@@ -130,8 +130,8 @@ export function lookKey(look: RobotLook): string {
 /** A head's placement, to tell when only that changed. */
 function placementKey(head: AvatarHead | null): string {
   if (!head) return '';
-  const { scale, offset, eyes, eyeAngles, angles, eyeScale, screen, flyer } = head.placement;
-  return JSON.stringify([scale, offset, eyes ?? null, eyeAngles ?? null, angles ?? null, eyeScale ?? null, screen ?? null, flyer ?? null]);
+  const { scale, offset, eyes, eyeAngles, angles, eyeScale, screen, flyer, spout } = head.placement;
+  return JSON.stringify([scale, offset, eyes ?? null, eyeAngles ?? null, angles ?? null, eyeScale ?? null, screen ?? null, flyer ?? null, spout ?? null]);
 }
 
 /** Where `node` sits in `ancestor`'s frame (ancestor's own transform left out). */
