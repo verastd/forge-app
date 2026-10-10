@@ -11,6 +11,9 @@
  * - `armWeights`: which bone each vertex follows, all of it (rigid: each part
  *   of the arm moves as one solid piece and only turns at a joint).
  * - `clearOf`: whether a point keeps out of the robot (boxes in its frame).
+ * - `armLens`, `lensShare`, `lensZoom`: its camera's lens (the front of the
+ *   piece past its last joint, the way the model faces) zooming in and out:
+ *   the lens itself moves wholly, the barrel behind it stretches.
  * - `stepArmLook`: where the tip aims, frame by frame: now at someone near
  *   (followed as they move), now somewhere around its rest direction (a quick
  *   hop to each new spot, a little bob while it holds); a few seconds each,
@@ -30,6 +33,16 @@ export const ARM = Object.freeze({
   /** Slices its thickness is measured in, and how much narrower than the thick parts either side a joint must be. */
   profileSlices: 40,
   jointDip: 0.18,
+  /**
+   * Its lens: the front `lensFront` of the camera piece's depth (the way the model faces, +z)
+   * moves wholly, the barrel behind it out to `lensNeck` stretches; it zooms out as far as
+   * `lensReach` of that depth, to a new depth every `zoomEvery` seconds, taking `zoomTime` to get there.
+   */
+  lensFront: 0.22,
+  lensNeck: 0.45,
+  lensReach: 0.28,
+  zoomEvery: 3,
+  zoomTime: 0.7,
   /** How many spots it tries before it gives up on wandering (each a straight line from its base that mustn't cross the robot). */
   wanderTries: 8,
   /** How near someone must be for it to look at them (metres from its base). */
@@ -192,6 +205,65 @@ export function armWeights(positions: ArrayLike<number>, axis: ArmAxis, joints: 
     weights[i * 4] = 1;
   }
   return { joints: bones, weights };
+}
+
+/** The camera's lens, along the model's forward (z, in its own frame): where the barrel starts to stretch, where the lens itself starts, and how far it zooms out. */
+export interface ArmLens {
+  neck: number;
+  full: number;
+  reach: number;
+}
+
+/**
+ * Its camera's lens among `positions`: the front of the camera piece (past
+ * the last of `joints`) along +z. Null when there's no camera piece.
+ */
+export function armLens(positions: ArrayLike<number>, axis: ArmAxis, joints: readonly number[]): ArmLens | null {
+  const last = joints.length > 0 ? joints[joints.length - 1]! : 0;
+  let back = Infinity;
+  let front = -Infinity;
+  const count = Math.floor(positions.length / 3);
+  for (let i = 0; i < count; i += 1) {
+    const p = at(positions, i);
+    if (fraction(p, axis) < last) continue;
+    back = Math.min(back, p.z);
+    front = Math.max(front, p.z);
+  }
+  const depth = front - back;
+  if (!(depth > 0)) return null;
+  return { neck: front - depth * ARM.lensNeck, full: front - depth * ARM.lensFront, reach: depth * ARM.lensReach };
+}
+
+/** How much of the lens's zoom a vertex at depth `z` follows: none behind the neck, all of it at the lens, eased between. */
+export function lensShare(z: number, lens: ArmLens): number {
+  if (z <= lens.neck) return 0;
+  if (z >= lens.full) return 1;
+  const f = (z - lens.neck) / (lens.full - lens.neck);
+  return f * f * (3 - 2 * f);
+}
+
+const hashed = (seed: number, k: number): number => {
+  let x = (Math.imul(seed | 0, 2654435761) ^ Math.imul(k | 0, 2246822519)) >>> 0;
+  x ^= x >>> 15;
+  x = Math.imul(x, 2246822519) >>> 0;
+  x ^= x >>> 13;
+  x = Math.imul(x, 3266489917) >>> 0;
+  x ^= x >>> 16;
+  return (x >>> 0) / 0x100000000;
+};
+
+/**
+ * How far out the lens is at `t` seconds (0 all the way in, 1 all the way
+ * out): every ARM.zoomEvery seconds it eases to a new depth (its own, from
+ * `seed`) over ARM.zoomTime, and holds it.
+ */
+export function lensZoom(t: number, seed: number): number {
+  const time = Number.isFinite(t) ? Math.max(0, t) : 0;
+  const k = Math.floor(time / ARM.zoomEvery);
+  const from = k === 0 ? 0 : hashed(seed, k - 1);
+  const to = hashed(seed, k);
+  const f = Math.min(1, (time - k * ARM.zoomEvery) / ARM.zoomTime);
+  return from + (to - from) * f * f * (3 - 2 * f);
 }
 
 /** A box the arm keeps out of (in the robot's own frame). */

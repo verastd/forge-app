@@ -11,6 +11,9 @@
  * (the piece past its last joint) always faces the way the robot's eyes do,
  * and only that way: it turns at its last joint to the model's own forward,
  * turned as far as the head is turned (`gaze`), whatever the rest is doing.
+ * Its lens (the front of the camera, the way it faces) zooms in and out on a
+ * bone of its own (@forge/lobby's `armLens`, `lensZoom`): the lens moves
+ * wholly and the barrel behind it stretches.
  *
  * It keeps out of the robot wearing it: `keepOut` gives boxes (the torso,
  * the head) in the robot body's own frame (`body`). A wander never picks a
@@ -21,7 +24,7 @@
  */
 
 import * as THREE from 'three';
-import { ARM, armAxis, armJoints, armWeights, clearOf, createArmLook, stepArmLook } from '@forge/lobby';
+import { ARM, armAxis, armJoints, armLens, armWeights, clearOf, createArmLook, lensShare, lensZoom, stepArmLook } from '@forge/lobby';
 import type { ArmBox, Vec3 } from '@forge/lobby';
 
 export interface BackArm {
@@ -91,6 +94,7 @@ export function createBackArm(model: THREE.Object3D, mount: THREE.Vector3, seed:
   const axis = armAxis(sample, anchor);
   if (!axis) return null;
   const bends = armJoints(sample, axis);
+  const lens = armLens(sample, axis, bends);
   // How thick it is, about its middle line (the average distance of its points from the axis), in its own frame.
   const along = new THREE.Vector3(axis.tip.x - axis.base.x, axis.tip.y - axis.base.y, axis.tip.z - axis.base.z).normalize();
   const point = new THREE.Vector3();
@@ -115,11 +119,28 @@ export function createBackArm(model: THREE.Object3D, mount: THREE.Vector3, seed:
   });
   const last = bones.length - 1;
   model.updateWorldMatrix(false, true);
-  const skeleton = new THREE.Skeleton(bones);
+  // The lens: on the camera piece, at its joint, slid out along its forward (+z) as it zooms.
+  const lensBone = new THREE.Bone();
+  lensBone.name = 'arm-lens';
+  bones[last - 1]!.add(lensBone);
+  model.updateWorldMatrix(false, true);
+  const skeleton = new THREE.Skeleton([...bones, lensBone]);
 
   // Each mesh swapped for a skinned copy (its geometry cloned, its material shared).
   const swaps = meshes.map((mesh, i) => {
     const { joints, weights } = armWeights(inModel[i]!, axis, bends);
+    // The camera piece's front shares in the lens's zoom (the lens wholly, the barrel eased).
+    if (lens) {
+      const positions = inModel[i]!;
+      for (let v = 0; v < joints.length / 4; v += 1) {
+        if (joints[v * 4] !== last - 1) continue;
+        const share = lensShare(positions[v * 3 + 2]!, lens);
+        if (share <= 0) continue;
+        joints[v * 4 + 1] = bones.length;
+        weights[v * 4] = 1 - share;
+        weights[v * 4 + 1] = share;
+      }
+    }
     const geometry = mesh.geometry.clone();
     geometry.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(joints, 4));
     geometry.setAttribute('skinWeight', new THREE.Float32BufferAttribute(weights, 4));
@@ -218,6 +239,7 @@ export function createBackArm(model: THREE.Object3D, mount: THREE.Vector3, seed:
 
   return {
     update(t, dt, people, reducedMotion, gaze) {
+      lensBone.position.set(0, 0, lens && !reducedMotion ? lens.reach * lensZoom(t, seed) : 0);
       for (const bone of bones) bone.quaternion.identity();
       model.updateWorldMatrix(true, true);
       if (keepOut) {

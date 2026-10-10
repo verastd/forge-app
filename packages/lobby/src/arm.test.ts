@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { ARM, armAxis, armJoints, armWeights, clearOf, createArmLook, stepArmLook } from './arm.js';
+import { ARM, armAxis, armJoints, armLens, armWeights, clearOf, createArmLook, lensShare, lensZoom, stepArmLook } from './arm.js';
 import type { ArmLookInput } from './arm.js';
 
 /** A thin rod of points from (0, 0, 0) to (0, 1, 0), a little wide. */
@@ -111,6 +111,50 @@ describe('armWeights', () => {
   it('survives an axis with no length', () => {
     const { joints } = armWeights([0, 0, 0], { base: { x: 0, y: 0, z: 0 }, tip: { x: 0, y: 0, z: 0 } }, [0.5]);
     expect(joints[0]).toBe(0);
+  });
+});
+
+describe('the lens', () => {
+  // A camera piece past a joint at 0.7: from z = -0.1 to z = 0.3 at the far end, nothing forward before it.
+  const positions = [0, 0.2, 0, 0, 0.5, 0.05, 0, 0.8, -0.1, 0, 0.9, 0.1, 0, 1, 0.3];
+  it('is the front of the camera piece, the way the model faces', () => {
+    const lens = armLens(positions, UP, [0.35, 0.7])!;
+    expect(lens.full).toBeCloseTo(0.3 - 0.4 * ARM.lensFront);
+    expect(lens.neck).toBeCloseTo(0.3 - 0.4 * ARM.lensNeck);
+    expect(lens.reach).toBeCloseTo(0.4 * ARM.lensReach);
+    // With no camera piece to speak of (a flat one, or none at all), none.
+    expect(armLens([0, 0.9, 0.1, 0, 1, 0.1], UP, [0.5])).toBeNull();
+    expect(armLens([0, 0.2, 0], UP, [])).toBeNull();
+  });
+
+  it('moves the lens wholly, the barrel behind it partly (eased), and nothing behind that', () => {
+    const lens = { neck: 0.1, full: 0.2, reach: 0.05 };
+    expect(lensShare(0.05, lens)).toBe(0);
+    expect(lensShare(0.1, lens)).toBe(0);
+    expect(lensShare(0.15, lens)).toBeCloseTo(0.5);
+    expect(lensShare(0.12, lens)).toBeLessThan(0.2);
+    expect(lensShare(0.2, lens)).toBe(1);
+    expect(lensShare(0.25, lens)).toBe(1);
+  });
+
+  it('zooms in and out: in at first, then to a new depth every few seconds, eased, held between', () => {
+    expect(lensZoom(0, 7)).toBe(0);
+    for (let t = 0; t < 60; t += 0.1) {
+      const z = lensZoom(t, 7);
+      expect(z).toBeGreaterThanOrEqual(0);
+      expect(z).toBeLessThanOrEqual(1);
+    }
+    // Held once it gets there…
+    const settle = ARM.zoomEvery + ARM.zoomTime + 0.1;
+    expect(lensZoom(settle, 7)).toBeCloseTo(lensZoom(2 * ARM.zoomEvery - 0.01, 7));
+    // …and it does move: not the same depth all the time.
+    const depths = new Set(Array.from({ length: 10 }, (_, k) => lensZoom(k * ARM.zoomEvery + ARM.zoomTime + 0.1, 7).toFixed(3)));
+    expect(depths.size).toBeGreaterThan(5);
+    // Each robot's its own, and the same for everyone; nonsense times are the start.
+    expect(lensZoom(10, 7)).toBe(lensZoom(10, 7));
+    expect(lensZoom(10, 7)).not.toBe(lensZoom(10, 8));
+    expect(lensZoom(Number.NaN, 7)).toBe(0);
+    expect(lensZoom(-5, 7)).toBe(0);
   });
 });
 
