@@ -29,6 +29,7 @@ from pydantic import (
     SecretStr,
     StrictBool,
     StrictInt,
+    ValidationInfo,
     field_validator,
 )
 
@@ -199,7 +200,8 @@ ACTIVE_PROPOSAL_STATES: tuple[ProposalState, ...] = ("submitted", "debate", "vot
 PROPOSAL_LIMITS: Final[Mapping[str, int]] = MappingProxyType(
     {
         "title": 100,
-        "pitch": 4000,
+        "pitch": 4000,  # a pitch, for everyone but an admin
+        "adminPitch": 50000,  # an admin's pitch (FORGE_ADMIN_IDS), from 2026-10-10
         "comment": 2000,
         "summary": 500,  # a draft task's civilianSummary
         "criteria": 10,  # acceptance criteria per draft task
@@ -213,7 +215,9 @@ PROPOSAL_LIMITS: Final[Mapping[str, int]] = MappingProxyType(
 ELIGIBLE_ACTIVITY_DAYS: Final = 30
 
 _Title = Annotated[str, Field(min_length=1, max_length=PROPOSAL_LIMITS["title"])]
-_Pitch = Annotated[str, Field(min_length=1, max_length=PROPOSAL_LIMITS["pitch"])]
+#: A pitch as the wire takes it: up to an admin's limit. NewProposal holds it to the
+#: caller's own limit (PITCH_LIMIT_CONTEXT).
+_Pitch = Annotated[str, Field(min_length=1, max_length=PROPOSAL_LIMITS["adminPitch"])]
 _CommentText = Annotated[str, Field(min_length=1, max_length=PROPOSAL_LIMITS["comment"])]
 _Summary = Annotated[str, Field(min_length=1, max_length=PROPOSAL_LIMITS["summary"])]
 _Criterion = Annotated[str, Field(min_length=1, max_length=PROPOSAL_LIMITS["criterion"])]
@@ -734,11 +738,31 @@ class ProposalCommentPage(BaseModel):
     moreComments: bool  # true: even older comments exist
 
 
+#: The validation context key that names the caller's pitch limit (services/proposals.py
+#: `pitch_limit`): PROPOSAL_LIMITS["adminPitch"] for an admin. Without it, a pitch is held
+#: to PROPOSAL_LIMITS["pitch"].
+PITCH_LIMIT_CONTEXT: Final = "pitchLimit"
+
+
 class NewProposal(BaseModel):
-    """POST /api/proposals, and PATCH /api/proposals/{id} (the mover, until seconded)."""
+    """POST /api/proposals, and PATCH /api/proposals/{id} (the mover, until seconded).
+
+    The wire takes a pitch of up to PROPOSAL_LIMITS["adminPitch"] characters, but only the
+    caller's own limit passes: the one named in the validation context (an admin's), else
+    PROPOSAL_LIMITS["pitch"]. A pitch over it fails like any other over-long field, so the
+    refusal is the same 400 invalid_request naming `pitch`, beside any other field at fault."""
 
     title: _Title
     pitch: _Pitch  # plain English, plain text
+
+    @field_validator("pitch")
+    @classmethod
+    def _within_callers_limit(cls, pitch: str, info: ValidationInfo) -> str:
+        context = info.context if isinstance(info.context, Mapping) else {}
+        limit = context.get(PITCH_LIMIT_CONTEXT, PROPOSAL_LIMITS["pitch"])
+        if not isinstance(limit, int) or len(pitch) > limit:
+            raise ValueError("the pitch is longer than the caller may write")
+        return pitch
 
 
 class SecondRequest(BaseModel):

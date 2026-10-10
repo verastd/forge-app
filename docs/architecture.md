@@ -1450,8 +1450,8 @@ acting on it needs GitHub sign-in.
   goes through the same-origin BFF, `/bff/proposals*` and
   `/bff/notifications*`, which mints the assertion as `/bff/bridge/*` does
   (see [Identity](#identity)): the practice account is refused, writes must
-  come from this origin, and bodies are capped at 32 KB (16 KB for the
-  bell).
+  come from this origin, and bodies are capped at 32 KB (320 KB to bring or
+  edit a proposal, for an admin's longer pitch; 16 KB for the bell).
 - `apps/api`: `routers/proposals.py` and `services/proposals.py` (the
   rules, the timeline, the draft task and the ticker), `routers/members.py`
   and `services/members.py` (who counts), and `routers/notifications.py`
@@ -1501,7 +1501,8 @@ the second as its own line.
 **The rules, as built.**
 
 - **Motion.** A title (1 to 100 characters) and a pitch in plain English
-  (1 to 4,000), both plain text. A member with a proposal in an active
+  (1 to 4,000; an admin's, 1 to 50,000: see **Admins** below), both
+  plain text. A member with a proposal in an active
   state can't bring another (`409 one_active_proposal`, with its id), and
   nobody can bring more than 3 in 24 hours (`429 rate_limited`). The mover
   can edit the title and pitch until it is seconded, at most 10 times an
@@ -1608,6 +1609,23 @@ configuration fails closed (which turns every flag off).
 anyone else (they can bring, second, consent and vote, and count in
 eligible sets), and also:
 
+- may write a **pitch of up to 50,000 characters**, bringing a proposal or
+  editing it before it is seconded (the operator's exception of
+  2026-10-10, for a long research pitch); everyone else's stops at 4,000.
+  Characters are counted, and invisible text refused, as for anyone. The
+  API decides by who is asking at that moment: a longer pitch from anyone
+  else is `400 invalid_request` naming `pitch`, as any pitch over its limit
+  always was, and only an admin's proposal body may run to 640 KB. The
+  forms count to 50,000 only when the API says so (`isAdmin` from
+  `GET /api/proposals/me` on the new-proposal form, `you.isAdmin` on the
+  edit); when that read fails, the new-proposal form counts to 4,000 and
+  says why under the pitch, with "Try again". A pitch longer than 4,000
+  opens on its page with its first 4,000 characters and a "Read the whole
+  pitch" button, which stays at the foot of the screen while the open pitch
+  is in view; as its draft task's
+  summary it is kept whole, so the admin cuts it to 500 before publishing
+  (below), and the house model reads it whole;
+
 - switches **Test timers** on or off (the switch on `/propose`,
   `PUT /api/proposals/settings`). The setting is stored in the database.
   While it is on, every visitor sees "Test timers are on: deadlines are
@@ -1625,7 +1643,9 @@ eligible sets), and also:
 **From passed to shipped.**
 
 1. Passing (by consent, by silence or by the vote) makes a **draft task**:
-   the proposal's title, its pitch on one line as the summary, no
+   the proposal's title, its whole pitch on one line as the summary (never
+   cut, so an admin's long pitch is far over the summary's 500 until an
+   admin shortens it, and publishing refuses it until then), no
    acceptance criteria yet, size S, tier floor T0 and reward class `none`.
    Only admins see it. While the house model is on, the pass also queues a
    job for it, and the house's spec then fills this draft's title, summary,
@@ -1730,7 +1750,7 @@ No JSON answer holds a `null`. Every refusal is a flat
 | `403` | `admin_only`, `not_mover`, `own_proposal` |
 | `404` | `proposals-disabled`, `proposal_not_found` (a missing proposal, or a number that isn't one) |
 | `409` | `wrong_state` (with `state`), `one_active_proposal` (with `proposalId`), `already_seconded`, `already_decided_consent`, `not_eligible`, `proposal_changed` (with `revision`), `edit_limit`, `test_mode_off`, `house_busy` |
-| `413` | `body_too_large`: the API reads bodies up to 64 KB |
+| `413` | `body_too_large`: the API reads bodies up to 64 KB (an admin's proposal, brought or edited, up to 640 KB), with `limit` |
 | `429` | `rate_limited`, with `Retry-After` (from `…/admin/house-draft`, also with `retryAfter`, `limit` and `scope` in the body: `proposal` for the 5 drafts of one proposal in 24 hours, `daily` for `FORGE_HOUSE_DAILY_LIMIT`) |
 | `503` | `house_off` (with `reason`: `not_configured` or `switched_off`) |
 
@@ -1814,7 +1834,8 @@ database: the API runs as one process, never with `--workers N`.
    run, logs it in `house_runs`. A first run when `FORGE_HOUSE_DAILY_LIMIT`
    runs have already started this UTC day fails the job with `daily_limit`
    instead, before any call. One job runs per beat.
-3. **Read.** The proposal's title, pitch and the debate's newest 50
+3. **Read.** The proposal's title, whole pitch (an admin's may run to
+   50,000 characters) and the debate's newest 50
    comments, at most 5 from any one member, oldest first, each with its
    author's login. From here until the result is written, no transaction
    is held.
@@ -1848,7 +1869,9 @@ database: the API runs as one process, never with `--workers N`.
    - **At most 640 KB a message.** Over it, the first call's file list is
      cut, and the second call drops picked files from the last, then
      `AGENTS.md`. A proposal over it by itself is `too_large`, which the
-     floor's own limits never reach.
+     floor's own limits never reach: an admin's 50,000-character pitch and
+     50 comments of 2,000, all of four-byte characters, come to about
+     600 KB. The proposal itself is never cut.
 5. **Two calls** (below): pick the files, then write the spec. Before
    each call, second tries included, the job checks it is still wanted:
    its proposal still `passed`, the house still on, and the job still its

@@ -74,6 +74,7 @@ from pydantic import BaseModel, ValidationError
 from forge_api.models import (
     ACTIVE_PROPOSAL_STATES,
     ELIGIBLE_ACTIVITY_DAYS,
+    PITCH_LIMIT_CONTEXT,
     PROPOSAL_EVENT_KINDS,
     PROPOSAL_LIMITS,
     PROPOSAL_STATES,
@@ -435,10 +436,12 @@ def error_fields(exc: ValidationError) -> list[str]:
     )
 
 
-def parse_request[ModelT: BaseModel](raw: bytes, model: type[ModelT]) -> ModelT:
-    """A JSON request body as `model`, or 400 invalid_request naming the fields at fault
-    ("body" when it isn't a JSON object). An empty body is `{}`. Read here, not by FastAPI,
-    whose 422 would echo the input back."""
+def parse_request[ModelT: BaseModel](
+    raw: bytes, model: type[ModelT], context: Mapping[str, Any] | None = None
+) -> ModelT:
+    """A JSON request body as `model` (validated with `context`, if any), or 400
+    invalid_request naming the fields at fault ("body" when it isn't a JSON object). An
+    empty body is `{}`. Read here, not by FastAPI, whose 422 would echo the input back."""
     try:
         data: Any = parse_json(raw) if raw.strip() else {}
     except ValueError:  # not JSON, not UTF-8 (UnicodeDecodeError), or nested too deep
@@ -446,9 +449,33 @@ def parse_request[ModelT: BaseModel](raw: bytes, model: type[ModelT]) -> ModelT:
     if not isinstance(data, dict):
         raise invalid_request(["body"])
     try:
-        return model.model_validate(data)
+        return model.model_validate(data, context=context)
     except ValidationError as exc:
         raise invalid_request(error_fields(exc)) from None
+
+
+def pitch_limit(identity: Identity) -> int:
+    """The most characters `identity` may write in a pitch, bringing or editing a proposal:
+    PROPOSAL_LIMITS["adminPitch"] for an admin (FORGE_ADMIN_IDS), PROPOSAL_LIMITS["pitch"]
+    for everyone else."""
+    admin = identity.sub in admin_ids()
+    return PROPOSAL_LIMITS["adminPitch"] if admin else PROPOSAL_LIMITS["pitch"]
+
+
+def parse_proposal(raw: bytes, identity: Identity) -> NewProposal:
+    """A POST or PATCH body (NewProposal) from `identity`, its pitch held to their
+    `pitch_limit`: one over it is 400 invalid_request naming `pitch`, with any other field
+    at fault, exactly as a pitch over the member limit always was."""
+    return parse_request(raw, NewProposal, {PITCH_LIMIT_CONTEXT: pitch_limit(identity)})
+
+
+def _pitch_of(identity: Identity, request: NewProposal) -> str:
+    """The pitch as stored, held to `identity`'s own limit whatever `request` was validated
+    against (400 invalid_request naming `pitch` over it)."""
+    limit = pitch_limit(identity)
+    if len(request.pitch) > limit:
+        raise invalid_request(["pitch"])
+    return clean_paragraphs(request.pitch, limit)
 
 
 def parse_id(raw: str) -> int:
@@ -1100,8 +1127,10 @@ class Proposals:
             )
 
     def _draft_task(self, row: Row, at: datetime) -> None:
-        """A passed proposal's draft task: its title, the pitch (on one line) as the
-        summary, no criteria yet, and the plainest size, tier floor and reward."""
+        """A passed proposal's draft task: its title, the whole pitch (on one line) as the
+        summary, no criteria yet, and the plainest size, tier floor and reward. An admin's
+        pitch may run to PROPOSAL_LIMITS["adminPitch"], far past a summary's limit: it is
+        kept whole, never cut, and publishing refuses it until an admin has shortened it."""
         self.db.execute(
             "INSERT OR IGNORE INTO proposal_drafts (proposal_id, title, civilian_summary, "
             "acceptance_criteria, size, tier_floor, reward_class, updated_at) "
@@ -1109,7 +1138,7 @@ class Proposals:
             (
                 row["id"],
                 row["title"],
-                clean_line(row["pitch"], PROPOSAL_LIMITS["pitch"]),
+                clean_line(row["pitch"], PROPOSAL_LIMITS["adminPitch"]),
                 DRAFT_SIZE,
                 DRAFT_TIER_FLOOR,
                 DRAFT_REWARD_CLASS,
@@ -1299,9 +1328,10 @@ class Proposals:
     # a member's actions
 
     def move(self, identity: Identity, request: NewProposal) -> ProposalDetail:
-        """Bring a proposal: one active proposal per member, MOVE_LIMIT a day."""
+        """Bring a proposal: one active proposal per member, MOVE_LIMIT a day. The pitch is
+        held to the mover's `pitch_limit` (an admin's is longer)."""
         title = clean_line(request.title, PROPOSAL_LIMITS["title"])
-        pitch = clean_paragraphs(request.pitch, PROPOSAL_LIMITS["pitch"])
+        pitch = _pitch_of(identity, request)
         _cleaned({"title": title, "pitch": pitch})
         with self.db.transaction():
             # A pause the floor is coming out of ends first, so it moves only the deadlines
@@ -1354,9 +1384,10 @@ class Proposals:
 
     def edit(self, identity: Identity, proposal_id: int, request: NewProposal) -> ProposalDetail:
         """The mover changes the title and pitch, until someone seconds it: MAX_EDITS times
-        in all (409 edit_limit), EDIT_LIMIT an hour. Each edit adds 1 to the revision."""
+        in all (409 edit_limit), EDIT_LIMIT an hour. Each edit adds 1 to the revision. The
+        pitch is held to the mover's `pitch_limit` now (an admin's is longer)."""
         title = clean_line(request.title, PROPOSAL_LIMITS["title"])
-        pitch = clean_paragraphs(request.pitch, PROPOSAL_LIMITS["pitch"])
+        pitch = _pitch_of(identity, request)
         _cleaned({"title": title, "pitch": pitch})
         with self.db.transaction():
             row = self._current(proposal_id)
