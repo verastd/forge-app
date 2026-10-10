@@ -21,7 +21,7 @@
 import Link from 'next/link';
 import { useState } from 'react';
 import type { FormEvent } from 'react';
-import { ELIGIBLE_ACTIVITY_DAYS, PROPOSAL_LIMITS, VOTE_CHOICES } from '@forge/shared';
+import { ELIGIBLE_ACTIVITY_DAYS, PROPOSAL_LIMITS, VOTE_CHOICES, pitchLimit } from '@forge/shared';
 import type { NewProposal, VoteChoice } from '@forge/shared';
 
 import type { DisplayDetail } from '../../../lib/proposals';
@@ -156,6 +156,8 @@ function MemberActions({
   if (you === undefined) return null;
 
   const working = busy !== null;
+  // The API says who is an admin, and holds the pitch to the same limit again.
+  const pitchMax = pitchLimit(you.isAdmin);
   const mover = login !== null && login.toLowerCase() === proposal.mover.toLowerCase();
   const consentAnswer = yourConsentLine(you.consent, proposal.state, mover);
   const nothing =
@@ -177,7 +179,7 @@ function MemberActions({
   const saveEdit = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
     if (working) return;
-    const checked = checkProposal({ title, pitch });
+    const checked = checkProposal({ title, pitch }, pitchMax);
     if (!checked.ok) {
       setEditErrors(checked.errors);
       document.getElementById(checked.errors.title === undefined ? 'edit-pitch' : 'edit-title')?.focus();
@@ -381,6 +383,7 @@ function MemberActions({
               onTitle={setTitle}
               onPitch={setPitch}
               errors={editErrors}
+              pitchMax={pitchMax}
               readOnly={working}
             />
             <div className="row">

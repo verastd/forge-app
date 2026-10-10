@@ -8,7 +8,8 @@ count in the eligible set of any proposal seconded from then on. 204, no body.
 The dependencies below make every identity-bearing Phase 5 route record its caller as a
 member first (`touch_member`), and read JSON bodies themselves: a bad one is
 `400 invalid_request` naming the fields, never FastAPI's 422 (which echoes the input),
-and one over MAX_BODY is `413 body_too_large`.
+and one over MAX_BODY is `413 body_too_large`. A proposal (`proposal_body`: bringing one,
+or editing it) from an admin may be up to ADMIN_PROPOSAL_BODY, for an admin's longer pitch.
 """
 
 from collections.abc import Awaitable, Callable
@@ -18,14 +19,20 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, Header, Request, Response
 from pydantic import BaseModel
 
+from forge_api.models import NewProposal
 from forge_api.services import members as members_service
 from forge_api.services import proposals as proposals_service
 from forge_api.services.errors import ApiError
-from forge_api.services.identity import Identity, require_admin, require_identity
+from forge_api.services.identity import Identity, is_admin, require_admin, require_identity
 from forge_api.services.state import StateDB, get_state_db
 
-#: The largest body read: a 4000-character pitch, every character escaped, fits easily.
+#: The largest body read (but an admin's proposal, below): a 4000-character pitch, every
+#: character escaped, fits easily.
 MAX_BODY = 64 * 1024
+#: The largest proposal an admin may send (POST /api/proposals, PATCH /api/proposals/{id}):
+#: a 50,000-character pitch and a 100-character title fit with every character escaped as
+#: a surrogate pair (12 bytes: 601,200 in all). Everyone else stays at MAX_BODY.
+ADMIN_PROPOSAL_BODY = 640 * 1024
 
 Db = Annotated[StateDB, Depends(get_state_db)]
 Now = Annotated[datetime, Depends(members_service.current_time)]
@@ -78,6 +85,15 @@ def json_body[ModelT: BaseModel](model: type[ModelT]) -> Callable[[Request], Awa
         return proposals_service.parse_request(await read_capped(request), model)
 
     return read
+
+
+async def proposal_body(request: Request, user: Member) -> NewProposal:
+    """A proposal's body (bringing one, or editing it), read up to the caller's cap
+    (ADMIN_PROPOSAL_BODY for an admin, MAX_BODY otherwise) with its pitch held to the
+    caller's limit (proposals.parse_proposal). Resolved after `member`, so a request with
+    no identity is 401 before its body is read."""
+    limit = ADMIN_PROPOSAL_BODY if is_admin(user) else MAX_BODY
+    return proposals_service.parse_proposal(await read_capped(request, limit), user)
 
 
 def body_doc(model: type[BaseModel], *, required: bool = True) -> dict[str, Any]:

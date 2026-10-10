@@ -494,10 +494,14 @@ function retryWords(seconds: number | undefined): string {
   return `Try again in about ${plural(Math.ceil(seconds / 3600), 'hour')}.`;
 }
 
-/** What each field a member sends is called on screen, and its limit. */
-const FIELD_WORDS: Readonly<Record<string, string>> = {
+/**
+ * What each field a member sends is called on screen, and its limit. The
+ * pitch's limit is the reader's own (`pitchMax`, from `pitchLimit`: an
+ * admin's is longer), so its words are made for each reader.
+ */
+const FIELD_WORDS: Readonly<Record<string, string | ((pitchMax: number) => string)>> = {
   title: `the title (1 to ${PROPOSAL_LIMITS.title} characters)`,
-  pitch: `the pitch (1 to ${PROPOSAL_LIMITS.pitch} characters)`,
+  pitch: (pitchMax) => `the pitch (1 to ${counted(pitchMax, pitchMax)} characters)`,
   text: `the comment (1 to ${PROPOSAL_LIMITS.comment} characters)`,
   civilianSummary: `the plain summary (1 to ${PROPOSAL_LIMITS.summary} characters)`,
   acceptanceCriteria: `what done means (1 to ${PROPOSAL_LIMITS.criteria} lines of up to ${PROPOSAL_LIMITS.criterion} characters)`,
@@ -509,13 +513,18 @@ const FIELD_WORDS: Readonly<Record<string, string>> = {
   testTimers: 'the switch',
 };
 
-/** "the title (...) and the pitch (...)", from `invalid_request`'s fields (or schema paths ending in one). */
-function fieldWords(fields: readonly string[] | undefined): string | null {
+/**
+ * "the title (...) and the pitch (...)", from `invalid_request`'s fields (or
+ * schema paths ending in one). The pitch's limit is the writer's (`pitchMax`):
+ * an admin's is longer.
+ */
+function fieldWords(fields: readonly string[] | undefined, pitchMax: number): string | null {
   if (fields === undefined) return null;
   const words: string[] = [];
   for (const field of fields) {
     const name = field.split(/[./]/).find((part) => Object.hasOwn(FIELD_WORDS, part));
-    const word = name === undefined ? undefined : FIELD_WORDS[name];
+    const entry = name === undefined ? undefined : FIELD_WORDS[name];
+    const word = typeof entry === 'function' ? entry(pitchMax) : entry;
     if (word !== undefined && !words.includes(word)) words.push(word);
   }
   if (words.length === 0) return null;
@@ -634,8 +643,17 @@ function rateLimited(
   return `You've made as many moves on the floor as FORGE allows in an hour (${limit ?? WRITE_LIMIT}): seconds, consents, objections, votes, edits and withdrawals all count. ${wait}`;
 }
 
-/** The sentence for any failure on the Propose screens. Every code in {@link PROPOSAL_ERROR_CODES} has its own. */
-export function describeProposalError(failure: string | ProposalFailure, action: ProposalAction = 'load'): string {
+/**
+ * The sentence for any failure on the Propose screens. Every code in
+ * {@link PROPOSAL_ERROR_CODES} has its own. `pitchMax` is the most the reader
+ * may write in a pitch (`pitchLimit`: an admin's is longer), for a refusal
+ * that names the pitch.
+ */
+export function describeProposalError(
+  failure: string | ProposalFailure,
+  action: ProposalAction = 'load',
+  pitchMax: number = PROPOSAL_LIMITS.pitch,
+): string {
   const { code, retryAfterSeconds, state, fields, limit, reason, scope } =
     typeof failure === 'string' ? { code: failure } : failure;
   switch (code) {
@@ -676,7 +694,7 @@ export function describeProposalError(failure: string | ProposalFailure, action:
         : `The house model is off (${why}), so nothing changed. Write the draft yourself.`;
     }
     case 'invalid_request': {
-      const words = fieldWords(fields);
+      const words = fieldWords(fields, pitchMax);
       if (action === 'publish') {
         return words === null
           ? "The draft task isn't finished, so it wasn't published. Fill in every part, save it, then publish."
@@ -715,9 +733,20 @@ export function describeProposalError(failure: string | ProposalFailure, action:
 
 /* --- what members send ----------------------------------------------------------------- */
 
+/**
+ * A count beside its limit, as a counter or a sentence about that limit says
+ * it: with thousands separators once the limit runs to five digits (an
+ * admin's pitch: "34,990 / 50,000"), and bare below that, as every other
+ * limit has always been written ("4001 / 4000"), so no member's counter or
+ * sentence changes.
+ */
+function counted(value: number, max: number): string {
+  return max >= 10_000 ? value.toLocaleString('en') : String(value);
+}
+
 /** "12 / 100": a counter in the same characters the API counts (`textLength`). */
 export function counterText(value: string, max: number): string {
-  return `${textLength(value)} / ${max}`;
+  return `${counted(textLength(value), max)} / ${counted(max, max)}`;
 }
 
 export function overLimit(value: string, max: number): boolean {
@@ -729,24 +758,71 @@ export type Checked<T, F extends string> = { ok: true; value: T } | { ok: false;
 function lengthProblem(value: string, max: number, what: string, missing: string): string | null {
   const length = textLength(value);
   if (length === 0) return missing;
-  return length > max ? `Keep ${what} to ${max} characters (it has ${length}).` : null;
+  return length > max ? `Keep ${what} to ${counted(max, max)} characters (it has ${counted(length, max)}).` : null;
 }
 
-/** A new proposal (or an edit) as it will be sent, or what to fix first. */
-export function checkProposal(input: { title: string; pitch: string }): Checked<NewProposal, 'title' | 'pitch'> {
+/**
+ * A new proposal (or an edit) as it will be sent, or what to fix first. The
+ * pitch is held to `pitchMax`, the most its writer may send (`pitchLimit`:
+ * an admin's is longer); the API holds it to the same again.
+ */
+export function checkProposal(
+  input: { title: string; pitch: string },
+  pitchMax: number = PROPOSAL_LIMITS.pitch,
+): Checked<NewProposal, 'title' | 'pitch'> {
   const title = input.title.trim();
   const pitch = input.pitch.trim();
   const errors: Partial<Record<'title' | 'pitch', string>> = {};
   const titleProblem = lengthProblem(title, PROPOSAL_LIMITS.title, 'the title', 'Give it a title.');
   const pitchProblem = lengthProblem(
     pitch,
-    PROPOSAL_LIMITS.pitch,
+    pitchMax,
     'the pitch',
     'Say what FORGE should build and why it matters.',
   );
   if (titleProblem !== null) errors.title = titleProblem;
   if (pitchProblem !== null) errors.pitch = pitchProblem;
   return titleProblem === null && pitchProblem === null ? { ok: true, value: { title, pitch } } : { ok: false, errors };
+}
+
+/** The note under an admin's pitch field: how far past a member's limit theirs runs. */
+export function adminPitchNote(pitchMax: number): string | null {
+  return pitchMax > PROPOSAL_LIMITS.pitch
+    ? `As an admin, you can write up to ${pitchMax.toLocaleString('en')} characters; everyone else's pitch stops at ${PROPOSAL_LIMITS.pitch.toLocaleString('en')}.`
+    : null;
+}
+
+/**
+ * The line under the new-proposal form's pitch when the API couldn't say who
+ * is writing (`GET /bff/proposals/me` failed): the form then counts to a
+ * member's limit, the safe one, since only the API may say who is an admin.
+ * `again` is true once "Try again" has failed too.
+ */
+export function pitchUncheckedNote(again: boolean): string {
+  return `${again ? "FORGE still couldn't check your account" : "FORGE couldn't check your account just now"}, so this form counts the pitch to ${PROPOSAL_LIMITS.pitch} characters.`;
+}
+
+/**
+ * The opening of a pitch too long to show whole at first, or null for one
+ * that isn't. A pitch a member may write (up to `PROPOSAL_LIMITS.pitch`)
+ * always shows whole; an admin's may run to 50,000 characters, which would
+ * push everything else on the page out of reach, so it shows its first
+ * `PROPOSAL_LIMITS.pitch` characters, cut at a paragraph, a line or a word
+ * where one falls in the second half of them, with "…".
+ */
+export function pitchOpening(pitch: string): { text: string; total: number } | null {
+  const characters = Array.from(pitch);
+  const most = PROPOSAL_LIMITS.pitch;
+  if (characters.length <= most) return null;
+  const head = characters.slice(0, most).join('');
+  const half = Math.floor(head.length / 2);
+  const cut = [head.lastIndexOf('\n\n'), head.lastIndexOf('\n'), head.lastIndexOf(' ')].find((at) => at >= half);
+  return { text: `${(cut === undefined ? head : head.slice(0, cut)).trimEnd()}…`, total: characters.length };
+}
+
+/** The button that shows the rest of a long pitch, or folds it again. */
+export function pitchToggleText(total: number, whole: boolean): string {
+  return whole ? 'Show less of the pitch' : `Read the whole pitch (${total.toLocaleString('en')} characters)`;
 }
 
 /** A comment (or an objection's reason) as it will be sent, or why not. */

@@ -55,6 +55,17 @@ What FORGE had to build on:
 - **Untrusted text.** Anyone with a GitHub account can write a pitch or a
   comment, throwaway accounts included (ADR-006).
 
+> Amended on 2026-10-10, with ADR-006's amendment of the same day: an
+> admin's pitch may run to 50,000 characters; everyone else's stays at
+> 4,000. The house still reads the pitch whole, fenced as data with the
+> rest of the proposal, and never cuts it. The largest proposal block the
+> floor allows (a 100-character title, a 50,000-character pitch and 50
+> comments of 2,000, all of four-byte characters, from logins of 39) is
+> 604,032 bytes, under the 640 KB (655,360 bytes) a message may hold
+> (`CONTEXT_CAP_BYTES`), so the proposal alone never makes a run
+> `too_large`: the file list, then the picked files and `AGENTS.md`, are
+> cut first.
+
 ## Decision
 
 **A house model drafts the task of every passed proposal.** When a

@@ -12,8 +12,10 @@ route records its caller as a member first (routers/members.py).
 proposal's task and answers 202 with the HouseDraft: services/house.py does the work.
 
 Bodies are read by routers/members.json_body, so a bad one is `400 invalid_request` with
-`fields`. A proposal number that isn't one is 404 proposal_not_found, like a missing one;
-a paging cursor that isn't one (`?decidedBefore=`, `?before=`) is 400 invalid_request.
+`fields`; a proposal's (bringing or editing one) by routers/members.proposal_body, which
+holds its pitch to the caller's limit: an admin's is longer. A proposal number that isn't
+one is 404 proposal_not_found, like a missing one; a paging cursor that isn't one
+(`?decidedBefore=`, `?before=`) is 400 invalid_request.
 response_model_exclude_none everywhere: zod's `.optional()` rejects an explicit null.
 """
 
@@ -43,6 +45,7 @@ from forge_api.routers.members import (
     Now,
     body_doc,
     json_body,
+    proposal_body,
 )
 from forge_api.services import flags as flags_service
 from forge_api.services import proposals as proposals_service
@@ -115,7 +118,7 @@ def settings(
 def move(
     floor: Floor,
     user: Member,
-    request: Annotated[NewProposal, Depends(json_body(NewProposal))],
+    request: Annotated[NewProposal, Depends(proposal_body)],
 ) -> ProposalDetail:
     return floor.move(user, request)
 
@@ -135,7 +138,7 @@ def edit(
     proposal_id: str,
     floor: Floor,
     user: Member,
-    request: Annotated[NewProposal, Depends(json_body(NewProposal))],
+    request: Annotated[NewProposal, Depends(proposal_body)],
 ) -> ProposalDetail:
     return floor.edit(user, proposals_service.parse_id(proposal_id), request)
 

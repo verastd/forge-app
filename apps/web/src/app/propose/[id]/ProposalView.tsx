@@ -5,7 +5,9 @@
  * it (Phase 5 contract §4).
  *
  * Top to bottom: the title, state, mover, seconder and the deadline as a
- * countdown; the pitch (plain text, line breaks kept); where it stands
+ * countdown; the pitch (plain text, line breaks kept: one longer than a
+ * member may write, an admin's, opens with its first 4,000 characters and a
+ * button for the rest, `PitchText`); where it stands
  * (consent progress, turnout, the tally after the close, the Contribute task
  * once published); your part, driven by the API's `you` (edit, withdraw,
  * second, consent or object, vote); the admin panel for admins; the debate;
@@ -48,6 +50,7 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { pitchLimit } from '@forge/shared';
 import type { DraftTaskRequest, NewProposal, ProposalComment, ProposalState, VoteChoice } from '@forge/shared';
 
 import { Chip } from '../../../components/Chip';
@@ -104,6 +107,7 @@ import { ActionPanel } from './ActionPanel';
 import type { YouState } from './ActionPanel';
 import { AdminPanel } from './AdminPanel';
 import { PracticeHouse } from './HouseDraft';
+import { PitchText } from './PitchText';
 import { OUTCOME_ID } from './problem';
 import type { Outcome, OutcomePart } from './problem';
 import { DebateThread, Timeline } from './Record';
@@ -511,7 +515,9 @@ export function ProposalView({ proposalId }: { proposalId: number }) {
           }
         }
         if (failure.code === 'test_mode_off') setMeAttempt((current) => current + 1);
-        say(action, 'problem', describeProposalError(failure, action), failure.proposalId);
+        // A refusal naming the pitch gives the reader's own limit: an admin's is longer.
+        const pitchMax = pitchLimit(shown.current?.you?.isAdmin === true);
+        say(action, 'problem', describeProposalError(failure, action, pitchMax), failure.proposalId);
         return false;
       } finally {
         working.current = false;
@@ -822,7 +828,7 @@ export function ProposalView({ proposalId }: { proposalId: number }) {
         <h2 id="pitch-title" className="section-title">
           The pitch
         </h2>
-        <p className={styles.pitch}>{detail.pitch}</p>
+        <PitchText pitch={detail.pitch} />
       </section>
 
       <section className="card stack" aria-labelledby="standing-title">

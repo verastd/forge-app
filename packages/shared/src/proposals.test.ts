@@ -43,6 +43,7 @@ import {
   VOTE_CHOICES,
   VoteChoiceSchema,
   VoteRequestSchema,
+  pitchLimit,
   textLength,
 } from './index.js';
 import type { DraftTaskRequest, NewProposal, Notification, ProposalDetail, ProposalState } from './index.js';
@@ -186,6 +187,7 @@ describe('proposal vocabularies', () => {
     expect(PROPOSAL_LIMITS).toEqual({
       title: 100,
       pitch: 4000,
+      adminPitch: 50000,
       comment: 2000,
       summary: 500,
       criteria: 10,
@@ -305,6 +307,9 @@ describe('DraftTaskSchema', () => {
   it('takes the draft as it starts: the whole pitch as the summary and no criteria yet', () => {
     const fresh = { ...DRAFT_REQUEST, civilianSummary: 'p'.repeat(PROPOSAL_LIMITS.pitch), acceptanceCriteria: [] };
     expect(DraftTaskSchema.safeParse(fresh).success).toBe(true);
+    // An admin's pitch too, however long: the admin cuts it to a summary before publishing.
+    const admins = { ...fresh, civilianSummary: 'p'.repeat(PROPOSAL_LIMITS.adminPitch) };
+    expect(DraftTaskSchema.safeParse(admins).success).toBe(true);
   });
 
   it('reuses the task board enums', () => {
@@ -326,7 +331,8 @@ describe('length limits on what members send', () => {
   const NEW: NewProposal = { title: 'A title', pitch: 'A pitch.' };
   const cases: [string, z.ZodTypeAny, object, string, number][] = [
     ['NewProposal.title', NewProposalSchema, NEW, 'title', PROPOSAL_LIMITS.title],
-    ['NewProposal.pitch', NewProposalSchema, NEW, 'pitch', PROPOSAL_LIMITS.pitch],
+    // The wire's ceiling is the admin's; the API holds everyone else to PROPOSAL_LIMITS.pitch (pitchLimit).
+    ['NewProposal.pitch', NewProposalSchema, NEW, 'pitch', PROPOSAL_LIMITS.adminPitch],
     ['CommentRequest.text', CommentRequestSchema, { text: 'x' }, 'text', PROPOSAL_LIMITS.comment],
     ['DraftTaskRequest.title', DraftTaskRequestSchema, DRAFT_REQUEST, 'title', PROPOSAL_LIMITS.title],
     ['DraftTaskRequest.civilianSummary', DraftTaskRequestSchema, DRAFT_REQUEST, 'civilianSummary', PROPOSAL_LIMITS.summary],
@@ -344,6 +350,7 @@ describe('length limits on what members send', () => {
 
   it('the numbers are the contract numbers', () => {
     expect([PROPOSAL_LIMITS.title, PROPOSAL_LIMITS.pitch, PROPOSAL_LIMITS.comment]).toEqual([100, 4000, 2000]);
+    expect(PROPOSAL_LIMITS.adminPitch).toBe(50000);
     expect([PROPOSAL_LIMITS.summary, PROPOSAL_LIMITS.criteria, PROPOSAL_LIMITS.criterion]).toEqual([500, 10, 300]);
   });
 
@@ -365,8 +372,14 @@ describe('length limits on what members send', () => {
     const result = NewProposalSchema.safeParse({ title: 't'.repeat(101), pitch: '' });
     expect(result.success ? [] : result.error.issues.map((issue) => [issue.path.join('.'), issue.message])).toEqual([
       ['title', 'Use 1 to 100 characters.'],
-      ['pitch', 'Use 1 to 4000 characters.'],
+      ['pitch', 'Use 1 to 50000 characters.'],
     ]);
+  });
+
+  it("a pitch's limit is the admin's for an admin, and 4,000 for everyone else", () => {
+    expect(pitchLimit(false)).toBe(PROPOSAL_LIMITS.pitch);
+    expect(pitchLimit(true)).toBe(PROPOSAL_LIMITS.adminPitch);
+    expect([pitchLimit(false), pitchLimit(true)]).toEqual([4000, 50000]);
   });
 });
 

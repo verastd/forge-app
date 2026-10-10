@@ -273,6 +273,32 @@
   max-width: 72ch;
 }
 
+/*
+ * The button under a pitch too long to show whole at first (PitchText). Its
+ * label names the pitch's length, so it wraps on a narrow screen instead of
+ * pushing the page sideways (`.btn` alone never wraps). The margins keep it
+ * clear of the sticky nav and the screen's edge when it is scrolled to.
+ */
+.pitchToggle {
+  white-space: normal;
+  max-width: 100%;
+  text-align: left;
+  scroll-margin: 88px 0 16px;
+}
+
+/*
+ * Open, it stays at the bottom of the screen for as long as the pitch is in
+ * view, so folding it again (or getting past it to the rest of the page)
+ * never means scrolling to the end of 50,000 characters. The fade keeps the
+ * text it passes over from showing through around it.
+ */
+.pitchToggleOpen {
+  position: sticky;
+  bottom: 0;
+  padding: 12px 0;
+  background: linear-gradient(to top, var(--bg-elev) 75%, transparent);
+}
+
 .progress {
   font-weight: 700;
   color: var(--text);

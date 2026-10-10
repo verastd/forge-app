@@ -10,19 +10,27 @@
  * needs a GitHub member behind it), as the BFF refuses it on the build we
  * deploy. A member who already has a proposal on the floor is pointed at it
  * instead: the API refuses a second one (`one_active_proposal`) either way.
+ *
+ * The pitch's limit is the writer's (`pitchLimit`): an admin's is longer, and
+ * only the API says who is one (`ProposalMe.isAdmin`, read with the rest of
+ * `me`). Until it has said, and for the practice account, it is a member's.
+ * When `me` can't be read the form still shows, counting to a member's
+ * limit, and says so under the pitch with "Try again", which reads `me` once
+ * more and keeps whatever has been typed.
  */
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
+import { pitchLimit } from '@forge/shared';
 import type { ProposalMe } from '@forge/shared';
 
 import { useSession } from '../../../components/SessionProvider';
 import { useToast } from '../../../components/Toast';
 import { isDemoMode } from '../../../lib/mode';
 import { createProposal, failureOf, loadMe, mayHaveHappened } from '../../../lib/proposals';
-import { checkProposal, describeProposalError, signInHref } from '../../../lib/proposals-format';
+import { checkProposal, describeProposalError, pitchUncheckedNote, signInHref } from '../../../lib/proposals-format';
 import { ProposalFields } from '../fields';
 import { Loading, SwitchedOff, useProposalsFlag } from '../gate';
 import styles from '../propose.module.css';
@@ -45,6 +53,10 @@ export function NewProposalForm() {
 
   const [me, setMe] = useState<ProposalMe | null>(null);
   const [meSettled, setMeSettled] = useState(false);
+  /** How many reads of `me` have failed in a row: then nobody knows yet whether the writer is an admin. */
+  const [meFailures, setMeFailures] = useState(0);
+  const [meChecking, setMeChecking] = useState(false);
+  const pitchMax = pitchLimit(identified && me?.isAdmin === true);
   const [title, setTitle] = useState('');
   const [pitch, setPitch] = useState('');
   const [errors, setErrors] = useState<FieldErrors>({});
@@ -79,7 +91,9 @@ export function NewProposalForm() {
         if (!cancelled) setMe(result);
       })
       .catch(() => {
-        // The form still shows: the API checks one-at-a-time itself.
+        // The form still shows: the API checks one-at-a-time itself. It counts
+        // the pitch to a member's limit, and says why under the pitch.
+        if (!cancelled) setMeFailures(1);
       })
       .finally(() => {
         if (!cancelled) setMeSettled(true);
@@ -89,12 +103,40 @@ export function NewProposalForm() {
     };
   }, [flag.on, identified]);
 
+  /**
+   * "Try again" after `me` failed. What is typed stays: a proposal already on
+   * the floor is pointed at rather than swapped in for the form (the API
+   * refuses a second one either way), and the pitch field takes focus once
+   * the line under it goes.
+   */
+  const checkAgain = useCallback(() => {
+    if (meChecking) return;
+    setMeChecking(true);
+    void loadMe()
+      .then(({ activeProposalId, ...rest }) => {
+        setMe(rest);
+        setMeFailures(0);
+        if (activeProposalId === undefined) {
+          document.getElementById('proposal-pitch')?.focus();
+          return;
+        }
+        focusProblem.current = true;
+        setProblem({ message: describeProposalError('one_active_proposal', 'create'), proposalId: activeProposalId });
+      })
+      .catch(() => {
+        setMeFailures((failures) => failures + 1);
+      })
+      .finally(() => {
+        setMeChecking(false);
+      });
+  }, [meChecking]);
+
   const submit = useCallback(
     (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
       if (sending) return;
       setProblem(null);
-      const checked = checkProposal({ title, pitch });
+      const checked = checkProposal({ title, pitch }, pitchMax);
       if (!checked.ok) {
         setErrors(checked.errors);
         document.getElementById(checked.errors.title === undefined ? 'proposal-pitch' : 'proposal-title')?.focus();
@@ -124,19 +166,19 @@ export function NewProposalForm() {
             const named: FieldErrors = {};
             for (const field of failure.fields) {
               if (/(^|\.)title$/.test(field)) named.title = describeProposalError({ code: 'invalid_request', fields: ['title'] }, 'create');
-              if (/(^|\.)pitch$/.test(field)) named.pitch = describeProposalError({ code: 'invalid_request', fields: ['pitch'] }, 'create');
+              if (/(^|\.)pitch$/.test(field)) named.pitch = describeProposalError({ code: 'invalid_request', fields: ['pitch'] }, 'create', pitchMax);
             }
             setErrors(named);
           }
           focusProblem.current = true;
           setProblem({
-            message: describeProposalError(failure, 'create'),
+            message: describeProposalError(failure, 'create', pitchMax),
             ...(failure.proposalId === undefined ? {} : { proposalId: failure.proposalId }),
           });
           setSending(false);
         });
     },
-    [pitch, router, sending, title, toast],
+    [pitch, pitchMax, router, sending, title, toast],
   );
 
   const heading = (
@@ -221,8 +263,26 @@ export function NewProposalForm() {
           onTitle={setTitle}
           onPitch={setPitch}
           errors={errors}
+          pitchMax={pitchMax}
           readOnly={sending}
         />
+        {meFailures > 0 && (
+          <div className="row">
+            <p id="proposal-unchecked" role="status" className="faint">
+              {pitchUncheckedNote(meFailures > 1)}
+            </p>
+            <button
+              type="button"
+              className="btn"
+              onClick={checkAgain}
+              aria-disabled={meChecking || undefined}
+              aria-busy={meChecking || undefined}
+            >
+              {meChecking && <span className="spinner" aria-hidden="true" />}
+              {meChecking ? 'Checking…' : 'Try again'}
+            </button>
+          </div>
+        )}
         <p id="proposal-rules" className="faint">
           You can edit it until someone seconds it, and withdraw it until it&apos;s decided. Everything on the
           floor is public, your name included.

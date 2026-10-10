@@ -127,10 +127,11 @@ class Case(BaseModel):
     expect: Expect
 
     def proposal(self) -> ProposalText:
-        """The case as the floor would store it: through the Proposals cleaners."""
+        """The case as the floor would store it: through the Proposals cleaners, its pitch
+        up to the longest the floor keeps (an admin's)."""
         return ProposalText(
             title=clean_line(self.title, PROPOSAL_LIMITS["title"]),
-            pitch=clean_paragraphs(self.pitch, PROPOSAL_LIMITS["pitch"]),
+            pitch=clean_paragraphs(self.pitch, PROPOSAL_LIMITS["adminPitch"]),
             comments=tuple(
                 (comment.author, clean_paragraphs(comment.text, PROPOSAL_LIMITS["comment"]))
                 for comment in self.comments

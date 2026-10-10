@@ -16,7 +16,7 @@
 
 import { PROPOSAL_LIMITS } from '@forge/shared';
 
-import { counterText, overLimit } from '../../lib/proposals-format';
+import { adminPitchNote, counterText, overLimit } from '../../lib/proposals-format';
 import styles from './propose.module.css';
 
 export function CountedField({
@@ -100,7 +100,11 @@ export function CountedField({
   );
 }
 
-/** A proposal's title and pitch: the new-proposal form and the mover's edit. */
+/**
+ * A proposal's title and pitch: the new-proposal form and the mover's edit.
+ * `pitchMax` is the most the writer may send (`pitchLimit`, from what the API
+ * says of them: an admin's is longer), which the counter shows.
+ */
 export function ProposalFields({
   idPrefix,
   title,
@@ -108,6 +112,7 @@ export function ProposalFields({
   onTitle,
   onPitch,
   errors,
+  pitchMax,
   readOnly = false,
 }: {
   idPrefix: string;
@@ -116,8 +121,10 @@ export function ProposalFields({
   onTitle: (value: string) => void;
   onPitch: (value: string) => void;
   errors: Partial<Record<'title' | 'pitch', string>>;
+  pitchMax: number;
   readOnly?: boolean;
 }) {
+  const adminNote = adminPitchNote(pitchMax);
   return (
     <>
       <CountedField
@@ -133,10 +140,10 @@ export function ProposalFields({
       <CountedField
         id={`${idPrefix}-pitch`}
         label="Your pitch"
-        help="Say what FORGE should build and why it matters, in plain English. Plain text: line breaks stay, formatting doesn't."
+        help={`Say what FORGE should build and why it matters, in plain English. Plain text: line breaks stay, formatting doesn't.${adminNote === null ? '' : ` ${adminNote}`}`}
         value={pitch}
         onChange={onPitch}
-        max={PROPOSAL_LIMITS.pitch}
+        max={pitchMax}
         error={errors.pitch}
         multiline
         rows={10}
