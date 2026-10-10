@@ -23,7 +23,7 @@ export const FLYER = Object.freeze({
   /** Heights measured across the model's top, each way. */
   grid: 12,
   /** How much of the top's width and depth the figure-8 covers. */
-  spread: 0.7,
+  spread: 0.35,
   /** The helicopter's length, times the top's larger side, and its least and most, metres. */
   size: 0.1875,
   minSize: 0.03,
@@ -43,7 +43,7 @@ export const FLYER = Object.freeze({
   lean: 0.12,
   /** The searchlight's pool: how far ahead of the helicopter, in its lengths, and its sweep, side to side. */
   ahead: 1.2,
-  sweep: 0.3,
+  sweep: 0.2,
   sweepPeriod: 5.3,
 });
 

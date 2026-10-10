@@ -20,6 +20,9 @@ describe('flightArea', () => {
     expect(area.halfZ).toBeCloseTo(0.15 * FLYER.spread);
     expect(area.size).toBeCloseTo(0.075);
     expect(area.cruise).toBeGreaterThanOrEqual(0.45 + FLYER.clearance);
+    // Kept in close: the whole loop spans at most 40% of the top, each way.
+    expect(2 * area.halfX).toBeLessThanOrEqual(0.4 * 0.4);
+    expect(2 * area.halfZ).toBeLessThanOrEqual(0.4 * 0.3);
   });
 
   it('keeps the helicopter a sensible size on a tiny or a huge head', () => {
