@@ -1602,6 +1602,13 @@ export const BrickChangeSchema = z.object({
 });
 export type BrickChange = z.infer<typeof BrickChangeSchema>;
 
+/** `GET /api/lobby/bricks/me` (signed in): who you are to the bricks, and whether you make them. */
+export const BrickMeSchema = z.object({
+  memberId: z.string().regex(AVATAR_MEMBER_ID),
+  maker: z.boolean(),
+});
+export type BrickMe = z.infer<typeof BrickMeSchema>;
+
 /** `POST /api/lobby/bricks` (the brick maker): a new brick, into their hand. */
 export const BrickMakeSchema = z.object({
   shape: z.enum(BRICK_SHAPE_IDS),

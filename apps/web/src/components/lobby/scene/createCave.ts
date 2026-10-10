@@ -47,6 +47,8 @@ import { createControls, createPicker } from './controls';
 import type { Hit, Motion } from './controls';
 import { CAVE_PALETTE, shaderColor } from './palette';
 import { createPeers } from './peers';
+import { createBricks } from './bricks/controller';
+import type { BrickCommand, BrickState, Builder, Bricks } from './bricks/controller';
 import { createPlay } from './play';
 import type { Play, PlayState } from './play';
 import { createRobotAssets } from './robot/assets';
@@ -282,6 +284,10 @@ export interface CaveOptions {
   onPlay?(state: PlayState): void;
   /** Something about the game to say: "Incoming from …", "You caught it!". */
   onPlayEvent?(text: string): void;
+  /** Building with bricks (with avatars on): the build, your brick and your aim, whenever that changes. */
+  onBricks?(state: BrickState): void;
+  /** Who you are to the bricks, from your session, at the start. */
+  builder?: Builder;
   /** The presence feed, read every frame; null while there is none. */
   feed(): PresenceFeed | null;
   hud: CaveHud;
@@ -297,7 +303,7 @@ export interface CaveOptions {
 }
 
 export interface Cave {
-  setState(next: { reducedMotion?: boolean }): void;
+  setState(next: { reducedMotion?: boolean; builder?: Builder }): void;
   /** First person, third or front (those two only with avatars on): the camera glides there. */
   setView(view: CameraView): void;
   /** Loads the robot body again after it failed, so your robot (and everyone's) can show. */
@@ -306,6 +312,8 @@ export interface Cave {
   ball(): void;
   /** Wave (as G does). */
   wave(): void;
+  /** A building command (as its key does). */
+  brick(command: BrickCommand): void;
   /** The camera now, clamped into the cave. */
   pose(): CameraState;
   dispose(): void;
@@ -496,6 +504,33 @@ export function createCave(canvas: HTMLCanvasElement, opts: CaveOptions): Cave {
       })
     : null;
   if (play) scene.add(camera);
+  // Building, with avatars on: what it says goes on the root for the shell (and the tests).
+  const bricks: Bricks | null = opts.avatars
+    ? createBricks(scene, camera, opts.feed, {
+        onState: (state) => {
+          root.dataset.bricks = String(state.count);
+          root.dataset.brickSync = state.sync;
+          root.dataset.brickAccess = state.access;
+          root.dataset.held = state.held ?? '';
+          root.dataset.brickBusy = state.busy ?? '';
+          root.dataset.aim = state.aim ? (state.aim.fits ? 'fits' : 'blocked') : '';
+          root.dataset.brickTarget = state.target?.can ?? '';
+          opts.onBricks?.(state);
+        },
+        onEvent: (text) => opts.onPlayEvent?.(text),
+      })
+    : null;
+  if (bricks) bricks.setBuilder(opts.builder ?? 'signed-out');
+  const brickKey = (code: string, shift: boolean): void => {
+    if (!bricks) return;
+    if (code.startsWith('Digit')) bricks.command({ kind: 'shape', index: Number(code.slice(5)) - 1 });
+    else if (code === 'KeyB') bricks.command({ kind: 'make' });
+    else if (code === 'KeyC') bricks.command({ kind: 'color', step: shift ? -1 : 1 });
+    else if (code === 'KeyX') bricks.command({ kind: 'remove' });
+    else if (code === 'KeyE') bricks.command({ kind: 'use' });
+    else if (code === 'KeyR') bricks.command({ kind: 'rotate' });
+    else if (code === 'KeyQ') bricks.command({ kind: 'drop' });
+  };
 
   // ---------- controls ----------
   const { initial } = opts;
@@ -564,6 +599,7 @@ export function createCave(canvas: HTMLCanvasElement, opts: CaveOptions): Cave {
     onToggleView: () => opts.onToggleView?.(),
     onBall: play ? () => play.ball() : undefined,
     onWave: play ? () => play.wave() : undefined,
+    onBrickKey: bricks ? brickKey : undefined,
     onTap(hit, pointerType) {
       setFocus(hit);
       // The tap wins over the crosshair until the camera moves again.
@@ -830,6 +866,12 @@ export function createCave(canvas: HTMLCanvasElement, opts: CaveOptions): Cave {
         selfRobot: robotShown ? peers.selfRobot() : null,
         reducedMotion,
       });
+      bricks?.update({
+        eye: motion.pos,
+        yaw: normalizeYaw(motion.yaw),
+        selfRobot: robotShown ? peers.selfRobot() : null,
+        robotOf: (id) => peers.robotOf(id),
+      });
       if (selfNow !== selfState) {
         selfState = selfNow;
         root.dataset.self = selfNow;
@@ -946,6 +988,7 @@ export function createCave(canvas: HTMLCanvasElement, opts: CaveOptions): Cave {
       if (next.reducedMotion !== undefined) {
         reducedMotion = next.reducedMotion;
       }
+      if (next.builder !== undefined) bricks?.setBuilder(next.builder);
     },
     setView(next) {
       view = allowedView(next);
@@ -960,6 +1003,9 @@ export function createCave(canvas: HTMLCanvasElement, opts: CaveOptions): Cave {
     wave() {
       play?.wave();
     },
+    brick(command) {
+      bricks?.command(command);
+    },
     pose,
     dispose() {
       if (disposed) {
@@ -972,6 +1018,7 @@ export function createCave(canvas: HTMLCanvasElement, opts: CaveOptions): Cave {
       canvas.removeEventListener('webglcontextlost', onContextLost);
       controls.dispose();
       play?.dispose();
+      bricks?.dispose();
       peers.dispose();
       delete root.dataset.ball;
       delete root.dataset.wave;

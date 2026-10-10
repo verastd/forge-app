@@ -28,6 +28,7 @@ import type { Cave, CaveHud } from './scene/createCave';
 import type { Hit } from './scene/controls';
 import type { SelfRobotState } from './scene/peers';
 import type { PlayState } from './scene/play';
+import type { BrickCommand, BrickState, Builder } from './scene/bricks/controller';
 
 /** Everything the scene tells the shell. */
 export interface SceneEvents {
@@ -47,6 +48,8 @@ export interface SceneEvents {
   onPlay(state: PlayState): void;
   /** Something about the game to say. */
   onPlayEvent(text: string): void;
+  /** Building with bricks: the build, your brick, your aim. */
+  onBricks(state: BrickState): void;
 }
 
 export interface LobbySceneProps {
@@ -64,6 +67,10 @@ export interface LobbySceneProps {
   ballPress: number;
   /** Bumped for each press of the wave button. */
   wavePress: number;
+  /** Who you are to the bricks (from your session). */
+  builder: Builder;
+  /** The latest building button pressed (a new `id` for each press). */
+  brickPress: { id: number; command: BrickCommand } | null;
   feed: RefObject<PresenceFeed | null>;
   /** The shell's HUD elements, read once when the scene mounts. */
   hud(): Omit<CaveHud, 'people'> | null;
@@ -86,6 +93,8 @@ export default function LobbyScene({
   retrySelf,
   ballPress,
   wavePress,
+  builder,
+  brickPress,
   feed,
   hud,
   events,
@@ -96,6 +105,7 @@ export default function LobbyScene({
   const eventsRef = useRef(events);
   const motionRef = useRef(reducedMotion);
   const viewRef = useRef(view);
+  const builderRef = useRef(builder);
 
   useEffect(() => {
     eventsRef.current = events;
@@ -124,6 +134,15 @@ export default function LobbyScene({
   }, [wavePress]);
 
   useEffect(() => {
+    builderRef.current = builder;
+    caveRef.current?.setState({ builder });
+  }, [builder]);
+
+  useEffect(() => {
+    if (brickPress) caveRef.current?.brick(brickPress.command);
+  }, [brickPress]);
+
+  useEffect(() => {
     const host = hostRef.current;
     const people = peopleRef.current;
     const elements = hud();
@@ -147,6 +166,8 @@ export default function LobbyScene({
         onSelf: (state) => eventsRef.current.onSelf(state),
         onPlay: (state) => eventsRef.current.onPlay(state),
         onPlayEvent: (text) => eventsRef.current.onPlayEvent(text),
+        onBricks: (state) => eventsRef.current.onBricks(state),
+        builder: builderRef.current,
         feed: () => feed.current,
         hud: { ...elements, people },
         classes: PEER_CLASSES,

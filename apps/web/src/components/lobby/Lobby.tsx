@@ -86,6 +86,8 @@ import type { Hit } from './scene/controls';
 import type { SelfRobotState } from './scene/peers';
 import { ViewToggle } from './ViewToggle';
 import { PlayControls } from './PlayControls';
+import { BuildControls, INITIAL_BRICKS } from './BuildControls';
+import type { BrickCommand, BrickState, Builder } from './scene/bricks/controller';
 import type { PlayState } from './scene/play';
 import { PeopleIcon, Spinner } from './icons';
 import { VoicePanel, roomCount, useFeedState, useFeedSummary, wantMicOnEntry } from './VoicePanel';
@@ -373,6 +375,13 @@ export function Lobby({ heading, directory }: { heading: ReactNode; directory: R
   const [play, setPlay] = useState<PlayState>({ phase: 'unavailable', other: null, waving: false });
   const [ballPress, setBallPress] = useState(0);
   const [wavePress, setWavePress] = useState(0);
+  /** Building: the build as the scene says; presses go to it one by one. */
+  const [bricks, setBricks] = useState<BrickState>(INITIAL_BRICKS);
+  const [brickPress, setBrickPress] = useState<{ id: number; command: BrickCommand } | null>(null);
+  const pressBrick = useCallback(
+    (command: BrickCommand) => setBrickPress((current) => ({ id: (current?.id ?? 0) + 1, command })),
+    [],
+  );
   /** The 2D lobby chosen (`?view=2d`): the 3D view never starts. */
   const [flat, setFlat] = useState(false);
 
@@ -487,7 +496,10 @@ export function Lobby({ heading, directory }: { heading: ReactNode; directory: R
     onSelf: setSelf,
     onPlay: setPlay,
     onPlayEvent: say,
+    onBricks: setBricks,
   };
+  /** Building needs a GitHub session: the practice account and visitors only look. */
+  const builder: Builder = session === null ? 'signed-out' : session.demo ? 'practice' : 'member';
 
   const hud = useCallback(() => {
     const root = rootRef.current;
@@ -598,6 +610,8 @@ export function Lobby({ heading, directory }: { heading: ReactNode; directory: R
               retrySelf={retrySelf}
               ballPress={ballPress}
               wavePress={wavePress}
+              builder={builder}
+              brickPress={brickPress}
               feed={feedRef}
               hud={hud}
               events={events}
@@ -660,6 +674,7 @@ export function Lobby({ heading, directory }: { heading: ReactNode; directory: R
           {!fallback && live && avatars && (
             <PlayControls state={play} onBall={() => setBallPress((n) => n + 1)} onWave={() => setWavePress((n) => n + 1)} />
           )}
+          {!fallback && live && avatars && <BuildControls state={bricks} onCommand={pressBrick} />}
         </div>
         {live && <VoicePanel feed={feed} micRef={micRef} practice={practice} onRejoin={rejoin} />}
       </div>

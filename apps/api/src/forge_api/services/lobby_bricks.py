@@ -20,7 +20,7 @@ import secrets
 from datetime import datetime, timedelta
 from typing import Any, Final
 
-from forge_api.models import Brick, BrickChange, BrickList, BrickMake, BrickPlace
+from forge_api.models import Brick, BrickChange, BrickList, BrickMake, BrickMe, BrickPlace
 from forge_api.services import avatars as avatars_service
 from forge_api.services import brick_rules as rules
 from forge_api.services import members as members_service
@@ -186,6 +186,12 @@ def list_bricks(db: StateDB, since: int | None, now: datetime) -> BrickList:
         bricks=[_brick(r) for r in rows if not r["gone"]],
         gone=[r["id"] for r in rows if r["gone"]],
     )
+
+
+def me(db: StateDB, member_id: str) -> BrickMe:
+    """Who the caller is to the bricks, and whether they make them (the browser's keys and
+    panel follow it; every maker-only call still checks)."""
+    return BrickMe(memberId=member_id, maker=avatars_service.is_brick_maker(db, member_id))
 
 
 def _require_maker(db: StateDB, member_id: str) -> None:

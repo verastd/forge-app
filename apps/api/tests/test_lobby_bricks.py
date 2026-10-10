@@ -122,6 +122,20 @@ def test_the_maker_makes_a_brick_into_their_hand_and_places_it(
     }
 
 
+def test_me_says_who_makes_bricks(
+    client: TestClient, maker: dict[str, str], visitor: dict[str, str]
+) -> None:
+    assert client.get("/api/lobby/bricks/me", headers=maker).json() == {
+        "memberId": MAKER,
+        "maker": True,
+    }
+    assert client.get("/api/lobby/bricks/me", headers=visitor).json() == {
+        "memberId": "gh:3003",
+        "maker": False,
+    }
+    assert client.get("/api/lobby/bricks/me").status_code == 401
+
+
 def test_only_the_maker_makes_or_takes_away(
     client: TestClient, maker: dict[str, str], visitor: dict[str, str]
 ) -> None:

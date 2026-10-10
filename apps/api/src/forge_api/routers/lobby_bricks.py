@@ -3,7 +3,8 @@
 
 - `GET /api/lobby/bricks?since=<rev>`: every brick, or what changed since `rev`. Public:
   everyone in the cave sees the build.
-- Signed in (`Member`): `PUT /api/lobby/bricks/{id}/pick` and `.../{id}/place`.
+- Signed in (`Member`): `GET /api/lobby/bricks/me` (who you are, and whether you make
+  bricks), `PUT /api/lobby/bricks/{id}/pick` and `.../{id}/place`.
 - The brick maker only (checked on every call): `POST /api/lobby/bricks` (make one) and
   `DELETE /api/lobby/bricks/{id}` (take one away).
 """
@@ -13,7 +14,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 
-from forge_api.models import BRICK_ID, BrickChange, BrickList, BrickMake, BrickPlace
+from forge_api.models import BRICK_ID, BrickChange, BrickList, BrickMake, BrickMe, BrickPlace
 from forge_api.routers.members import Db, Member, Now, body_doc, json_body
 from forge_api.services import flags as flags_service
 from forge_api.services import lobby_bricks as bricks_service
@@ -47,6 +48,11 @@ router = APIRouter(
 @router.get("", response_model=BrickList, response_model_exclude_none=True)
 def list_bricks(db: Db, now: Now, since: Annotated[int | None, Query(ge=0)] = None) -> BrickList:
     return bricks_service.list_bricks(db, since, now)
+
+
+@router.get("/me", response_model=BrickMe)
+def my_bricks(user: Member, db: Db) -> BrickMe:
+    return bricks_service.me(db, _member_id(user))
 
 
 @router.post(

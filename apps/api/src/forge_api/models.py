@@ -1304,6 +1304,11 @@ class BrickChange(BaseModel):
     brick: Brick | None = None
 
 
+class BrickMe(BaseModel):
+    memberId: _AvatarMemberId
+    maker: bool
+
+
 class BrickMake(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
