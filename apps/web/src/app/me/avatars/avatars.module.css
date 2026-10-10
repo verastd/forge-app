@@ -513,3 +513,13 @@
   border-radius: inherit;
   display: block;
 }
+
+.blendRow {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.blendRow select {
+  max-width: 220px;
+}

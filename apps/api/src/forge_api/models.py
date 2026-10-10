@@ -1093,9 +1093,14 @@ class AvatarCape(BaseModel):
     lining: _HexColor
 
 
-#: How much an uploaded chestplate glows when a robot has no setting of its own.
-AVATAR_CHEST_GLOW_DEFAULT: Final = 0.4
-_ChestGlow = Annotated[float, Field(ge=0, le=1, allow_inf_nan=False)]
+#: How an uploaded chestplate lies over the armour: a CSS mix-blend-mode.
+AvatarChestBlend = Literal[
+    "normal", "multiply", "screen", "overlay", "darken", "lighten", "color-dodge",
+    "color-burn", "hard-light", "soft-light", "difference", "exclusion", "hue",
+    "saturation", "color", "luminosity",
+]  # fmt: skip
+AVATAR_CHEST_BLENDS: Final = get_args(AvatarChestBlend)
+_Opacity = Annotated[float, Field(ge=0, le=1, allow_inf_nan=False)]
 
 
 class Avatar(BaseModel):
@@ -1113,8 +1118,10 @@ class Avatar(BaseModel):
     back: _AvatarHeadId | None = None
     #: ...or the built-in cape.
     cape: AvatarCape | None = None
-    #: How much an uploaded chestplate glows, 0 (printed on) to 1 (a lit screen); None: default.
-    chestGlow: _ChestGlow | None = None
+    #: How an uploaded chestplate blends over the armour; None: normal.
+    chestBlend: AvatarChestBlend | None = None
+    #: Its opacity, 0-1; None: 1.
+    chestOpacity: _Opacity | None = None
     updatedAt: str
 
 
@@ -1209,7 +1216,8 @@ class AvatarUpdate(BaseModel):
     #: At most one of `back` and `cape` (refused with 400 one_back).
     back: _AvatarHeadId | None = None
     cape: AvatarCape | None = None
-    chestGlow: _ChestGlow | None = None
+    chestBlend: AvatarChestBlend | None = None
+    chestOpacity: _Opacity | None = None
 
 
 class AvatarChestUpload(BaseModel):

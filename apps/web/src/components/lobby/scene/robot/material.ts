@@ -29,7 +29,6 @@
 import * as THREE from 'three';
 import { CHEST_PANEL, FACE_PANEL, ZONE, finishLook } from '@forge/lobby';
 import type { AvatarColors, AvatarFinish } from '@forge/lobby';
-import { AVATAR_CHEST_GLOW_DEFAULT } from '@forge/shared';
 
 /** The dark gunmetal every robot's joints share. */
 export const JOINT_COLOR = 0x2a2e35;
@@ -47,8 +46,9 @@ export interface RobotUniforms {
   uChestFade: { value: number };
   /** 1: an uploaded image, over the whole front and with its transparency; 0: the emblem, on the flat panel. */
   uChestFull: { value: number };
-  /** How much an uploaded chestplate glows: 0 printed on the armour, lit by the cave; 1 a lit screen. */
-  uChestGlow: { value: number };
+  /** An uploaded chestplate's CSS mix-blend-mode over the armour (AVATAR_CHEST_BLENDS' index) and its opacity. */
+  uChestBlend: { value: number };
+  uChestOpacity: { value: number };
   uThrust: { value: number };
   uHideHead: { value: number };
   uTime: { value: number };
@@ -103,7 +103,8 @@ uniform sampler2D uChest;
 uniform float uChestAspect;
 uniform float uChestFade;
 uniform float uChestFull;
-uniform float uChestGlow;
+uniform int uChestBlend;
+uniform float uChestOpacity;
 uniform float uThrust;
 uniform float uTime;
 uniform float uTalk;
@@ -119,6 +120,73 @@ varying vec3 vBindN;
 float robotRoundRect(vec2 p, vec2 halfSize, float r) {
   vec2 q = abs(p) - halfSize + r;
   return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
+}
+
+// CSS mix-blend-mode (W3C Compositing and Blending Level 1), on sRGB values as a browser does.
+vec3 robotToSrgb(vec3 c) {
+  c = clamp(c, 0.0, 1.0);
+  return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
+}
+vec3 robotToLinear(vec3 c) {
+  c = clamp(c, 0.0, 1.0);
+  return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c));
+}
+vec3 robotHardLight(vec3 b, vec3 s) {
+  vec3 m = b * (2.0 * s);
+  vec3 sc = 2.0 * s - 1.0;
+  vec3 sr = b + sc - b * sc;
+  // Multiply where the source is dark (≤ ½), screen where it's light.
+  return mix(m, sr, vec3(greaterThan(s, vec3(0.5))));
+}
+float robotDodge(float b, float s) {
+  if (b <= 0.0) return 0.0;
+  if (s >= 1.0) return 1.0;
+  return min(1.0, b / (1.0 - s));
+}
+float robotBurn(float b, float s) {
+  if (b >= 1.0) return 1.0;
+  if (s <= 0.0) return 0.0;
+  return 1.0 - min(1.0, (1.0 - b) / s);
+}
+float robotSoft(float b, float s) {
+  if (s <= 0.5) return b - (1.0 - 2.0 * s) * b * (1.0 - b);
+  float d = b <= 0.25 ? ((16.0 * b - 12.0) * b + 4.0) * b : sqrt(b);
+  return b + (2.0 * s - 1.0) * (d - b);
+}
+float robotLum(vec3 c) { return dot(c, vec3(0.3, 0.59, 0.11)); }
+vec3 robotClip(vec3 c) {
+  float l = robotLum(c);
+  float n = min(c.r, min(c.g, c.b));
+  float x = max(c.r, max(c.g, c.b));
+  if (n < 0.0) c = l + (c - l) * l / max(l - n, 1e-6);
+  if (x > 1.0) c = l + (c - l) * (1.0 - l) / max(x - l, 1e-6);
+  return c;
+}
+vec3 robotSetLum(vec3 c, float l) { return robotClip(c + (l - robotLum(c))); }
+float robotSat(vec3 c) { return max(c.r, max(c.g, c.b)) - min(c.r, min(c.g, c.b)); }
+vec3 robotSetSat(vec3 c, float s) {
+  float mx = max(c.r, max(c.g, c.b));
+  float mn = min(c.r, min(c.g, c.b));
+  if (mx <= mn) return vec3(0.0);
+  return (c - mn) * s / (mx - mn);
+}
+vec3 robotBlend(vec3 b, vec3 s, int mode) {
+  if (mode == 1) return b * s;
+  if (mode == 2) return b + s - b * s;
+  if (mode == 3) return robotHardLight(s, b);
+  if (mode == 4) return min(b, s);
+  if (mode == 5) return max(b, s);
+  if (mode == 6) return vec3(robotDodge(b.r, s.r), robotDodge(b.g, s.g), robotDodge(b.b, s.b));
+  if (mode == 7) return vec3(robotBurn(b.r, s.r), robotBurn(b.g, s.g), robotBurn(b.b, s.b));
+  if (mode == 8) return robotHardLight(b, s);
+  if (mode == 9) return vec3(robotSoft(b.r, s.r), robotSoft(b.g, s.g), robotSoft(b.b, s.b));
+  if (mode == 10) return abs(b - s);
+  if (mode == 11) return b + s - 2.0 * b * s;
+  if (mode == 12) return robotSetLum(robotSetSat(s, robotSat(b)), robotLum(b));
+  if (mode == 13) return robotSetLum(robotSetSat(b, robotSat(s)), robotLum(b));
+  if (mode == 14) return robotSetLum(s, robotLum(b));
+  if (mode == 15) return robotSetLum(b, robotLum(s));
+  return s;
 }
 `;
 
@@ -172,13 +240,25 @@ if (robotZone == ${ZONE.trim} || robotZone == ${ZONE.headTrim}) {
   float scanPart = plate * (1.0 - uChestFade);
   float imagePart = shown * uChestFade;
   float lit = scanPart + imagePart;
-  vec3 screen = (waiting * scanPart + image.rgb * imagePart) / max(lit, 1e-4);
-  // The emblem always glows; an upload glows as much as its robot says (a printed picture to a lit screen).
-  float glow = mix(1.0, uChestGlow, uChestFull);
-  robotBase = mix(robotBase, screen * mix(0.85, 0.45, glow), lit);
-  robotRough = mix(robotRough, mix(0.42, 0.14, glow), lit);
-  robotMetal = mix(robotMetal, 0.0, lit);
-  robotEmit += screen * (0.75 + 0.35 * uTalk) * glow * lit;
+  if (uChestFull > 0.5) {
+    // An upload: its CSS mix-blend-mode over the armour under it, at its opacity, lit like the paint
+    // (no light of its own). The loading scan still glows on the panel while it fades in.
+    float a = imagePart * uChestOpacity;
+    vec3 blended = robotToLinear(robotBlend(robotToSrgb(robotBase), robotToSrgb(image.rgb), uChestBlend));
+    robotBase = mix(robotBase, blended, a);
+    robotRough = mix(robotRough, 0.45, a);
+    robotMetal = mix(robotMetal, 0.0, a);
+    robotBase = mix(robotBase, waiting * 0.45, scanPart);
+    robotEmit += waiting * (0.75 + 0.35 * uTalk) * scanPart;
+    lit = scanPart + a;
+  } else {
+    // The emblem: a lit screen.
+    vec3 screen = (waiting * scanPart + image.rgb * imagePart) / max(lit, 1e-4);
+    robotBase = mix(robotBase, screen * 0.45, lit);
+    robotRough = mix(robotRough, 0.14, lit);
+    robotMetal = mix(robotMetal, 0.0, lit);
+    robotEmit += screen * (0.75 + 0.35 * uTalk) * lit;
+  }
   robotBase = mix(robotBase, uAccent * 0.5, frame);
   robotEmit += uAccent * frame * 0.9;
   // The chestplate is a screen, solid whatever the armour is made of.
@@ -226,7 +306,8 @@ export function createBodyMaterial(envMap: THREE.Texture, placeholder: THREE.Tex
     uChestAspect: { value: 1 },
     uChestFade: { value: 0 },
     uChestFull: { value: 0 },
-    uChestGlow: { value: AVATAR_CHEST_GLOW_DEFAULT },
+    uChestBlend: { value: 0 },
+    uChestOpacity: { value: 1 },
     uThrust: { value: 0.35 },
     uHideHead: { value: 0 },
     uTime: { value: 0 },
