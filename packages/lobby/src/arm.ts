@@ -5,12 +5,17 @@
  * - `armAxis`: the arm's length, from the end nearest where it's mounted (its
  *   base) to its far end (its tip, where its camera is): the model's longest
  *   direction (its vertices' principal axis), end to end.
- * - `armWeights`: how much each vertex follows each bone of a chain of
- *   `segments` bones laid evenly along that axis (blended across each joint).
+ * - `armJoints`: where it bends: the narrowest points along it (a robot arm's
+ *   wrists and elbows), away from its ends, so its thick parts (its camera
+ *   head among them) stay whole.
+ * - `armWeights`: which bone each vertex follows, all of it (rigid: each part
+ *   of the arm moves as one solid piece and only turns at a joint).
+ * - `clearOf`: whether a point keeps out of the robot (boxes in its frame).
  * - `stepArmLook`: where the tip aims, frame by frame: now at someone near
  *   (followed as they move), now somewhere around its rest direction (a quick
  *   hop to each new spot, a little bob while it holds); a few seconds each,
- *   picked at random. Reduced motion: it holds still (null).
+ *   picked at random, never a spot straight through the robot. Reduced
+ *   motion: it holds still (null).
  *
  * Pure and deterministic like the rest of the package: no DOM, no three.js.
  */
@@ -18,8 +23,15 @@
 import type { Vec3 } from './attenuation.js';
 
 export const ARM = Object.freeze({
-  /** Bones along the arm (joints where it bends). */
-  segments: 4,
+  /** The most joints it bends at, and where they may go: this far from either end (a share of its length) and from each other. */
+  maxJoints: 3,
+  jointEdge: 0.15,
+  jointGap: 0.15,
+  /** Slices its thickness is measured in, and how much narrower than the thick parts either side a joint must be. */
+  profileSlices: 40,
+  jointDip: 0.18,
+  /** How many spots it tries before it gives up on wandering (each a straight line from its base that mustn't cross the robot). */
+  wanderTries: 8,
   /** How near someone must be for it to look at them (metres from its base). */
   lookRange: 8,
   /** How likely it is to look at someone near when it picks what to do next. */
@@ -109,32 +121,96 @@ export function armAxis(positions: ArrayLike<number>, anchor: Vec3): ArmAxis | n
   return length(sub(a, anchor)) <= length(sub(b, anchor)) ? { base: a, tip: b } : { base: b, tip: a };
 }
 
-/**
- * Each vertex's two bones and how much it follows each (four of each per
- * vertex, as glTF skins have them; the last two always 0). Bone k sits k /
- * `segments` of the way from base to tip and turns everything past it; a
- * vertex near a joint is shared between the bones either side of it.
- */
-export function armWeights(positions: ArrayLike<number>, axis: ArmAxis, segments: number = ARM.segments): { joints: Uint16Array; weights: Float32Array } {
-  const count = Math.floor(positions.length / 3);
-  const joints = new Uint16Array(count * 4);
-  const weights = new Float32Array(count * 4);
+const fraction = (p: Vec3, axis: ArmAxis): number => {
   const span = sub(axis.tip, axis.base);
-  const size2 = Math.max(dot(span, span), 1e-12);
+  return dot(sub(p, axis.base), span) / Math.max(dot(span, span), 1e-12);
+};
+const at = (positions: ArrayLike<number>, i: number): Vec3 => ({ x: positions[i * 3]!, y: positions[i * 3 + 1]!, z: positions[i * 3 + 2]! });
+
+/**
+ * Where the arm bends, as shares of its length from base to tip (ascending):
+ * the narrowest points along it, each a good deal (ARM.jointDip) narrower
+ * than the thickest parts either side, at least ARM.jointEdge from either end
+ * and ARM.jointGap apart, the most pronounced first, at most `max`. With no
+ * narrowing to go by, two joints at its thirds.
+ */
+export function armJoints(positions: ArrayLike<number>, axis: ArmAxis, max: number = ARM.maxJoints): number[] {
+  const slices = ARM.profileSlices;
+  const spread: number[][] = Array.from({ length: slices }, () => []);
+  const span = sub(axis.tip, axis.base);
+  const count = Math.floor(positions.length / 3);
   for (let i = 0; i < count; i += 1) {
-    const p = { x: positions[i * 3]!, y: positions[i * 3 + 1]!, z: positions[i * 3 + 2]! };
-    const t = Math.min(1, Math.max(0, dot(sub(p, axis.base), span) / size2));
-    const s = t * segments;
-    const k = Math.min(segments - 1, Math.floor(s));
-    const f = s - k;
-    // The first half of a segment blends into the bone before it, eased; the rest is all its own.
-    const own = k === 0 ? 1 : f >= 0.5 ? 1 : 0.5 + 0.5 * (1 - Math.cos(Math.PI * f));
-    joints[i * 4] = k;
-    joints[i * 4 + 1] = Math.max(0, k - 1);
-    weights[i * 4] = own;
-    weights[i * 4 + 1] = 1 - own;
+    const p = at(positions, i);
+    const t = fraction(p, axis);
+    const off = sub(sub(p, axis.base), { x: span.x * t, y: span.y * t, z: span.z * t });
+    spread[Math.min(slices - 1, Math.max(0, Math.floor(t * slices)))]!.push(length(off));
   }
-  return { joints, weights };
+  // Each slice's thickness: the 90th percentile of how far its points are from the axis.
+  const raw = spread.map((r) => {
+    if (r.length === 0) return Number.NaN;
+    r.sort((a, b) => a - b);
+    return r[Math.floor(r.length * 0.9)]!;
+  });
+  // Evened out over five slices (an empty one counts for nothing).
+  const thick = raw.map((_, k) => {
+    const near = raw.slice(Math.max(0, k - 2), k + 3).filter((v) => !Number.isNaN(v));
+    return near.length === 0 ? Number.NaN : near.reduce((a, b) => a + b, 0) / near.length;
+  });
+  const found: { t: number; dip: number }[] = [];
+  for (let k = 1; k < slices - 1; k += 1) {
+    const t = (k + 0.5) / slices;
+    const here = thick[k]!;
+    if (t < ARM.jointEdge || t > 1 - ARM.jointEdge || Number.isNaN(here)) continue;
+    if (!(here <= thick[k - 1]! && here < thick[k + 1]!)) continue;
+    const before = Math.max(...thick.slice(0, k).filter((v) => !Number.isNaN(v)));
+    const after = Math.max(...thick.slice(k + 1).filter((v) => !Number.isNaN(v)));
+    const dip = 1 - here / Math.min(before, after);
+    if (dip >= ARM.jointDip) found.push({ t, dip });
+  }
+  found.sort((a, b) => b.dip - a.dip);
+  const chosen: number[] = [];
+  for (const { t } of found) {
+    if (chosen.length >= max) break;
+    if (chosen.every((c) => Math.abs(c - t) >= ARM.jointGap)) chosen.push(t);
+  }
+  return chosen.length > 0 ? chosen.sort((a, b) => a - b) : [1 / 3, 2 / 3].slice(0, Math.max(1, max));
+}
+
+/**
+ * Which bone each vertex follows, wholly (four of each per vertex, as glTF
+ * skins have them; only the first is ever used). Bone 0 is at the base and
+ * bone k at `joints[k - 1]`: a vertex follows the bone at the start of the
+ * stretch it's in, so every part of the arm moves as one solid piece.
+ */
+export function armWeights(positions: ArrayLike<number>, axis: ArmAxis, joints: readonly number[]): { joints: Uint16Array; weights: Float32Array } {
+  const count = Math.floor(positions.length / 3);
+  const bones = new Uint16Array(count * 4);
+  const weights = new Float32Array(count * 4);
+  for (let i = 0; i < count; i += 1) {
+    const t = fraction(at(positions, i), axis);
+    bones[i * 4] = joints.filter((j) => j <= t).length;
+    weights[i * 4] = 1;
+  }
+  return { joints: bones, weights };
+}
+
+/** A box the arm keeps out of (in the robot's own frame). */
+export interface ArmBox {
+  min: Vec3;
+  max: Vec3;
+}
+
+/** Whether `point` is at least `margin` outside every one of `boxes`. */
+export function clearOf(point: Vec3, boxes: readonly ArmBox[], margin: number): boolean {
+  return boxes.every(
+    (box) =>
+      point.x < box.min.x - margin ||
+      point.x > box.max.x + margin ||
+      point.y < box.min.y - margin ||
+      point.y > box.max.y + margin ||
+      point.z < box.min.z - margin ||
+      point.z > box.max.z + margin,
+  );
 }
 
 /** What the arm is up to: where its tip aims now, what it's after, until when, and whom it watches. */
@@ -164,6 +240,8 @@ export interface ArmLookInput {
   /** Whom it may look at: their eyes, in the cave. */
   people: readonly Vec3[];
   reducedMotion: boolean;
+  /** Whether reaching straight out from its base this way (unit length) would cross the robot; absent: never. */
+  blocked?: (dir: Vec3) => boolean;
 }
 
 const random = (state: ArmLook): number => {
@@ -196,20 +274,28 @@ export function stepArmLook(state: ArmLook, input: ArmLookInput): Vec3 | null {
       state.watching = candidates[Math.floor(random(state) * candidates.length)]!;
     } else {
       state.watching = null;
-      // Somewhere off its rest direction: tipped away from it by an angle, at a random turn around it.
-      const off = ARM.wanderMin + random(state) * (ARM.wanderMax - ARM.wanderMin);
-      const around = random(state) * Math.PI * 2;
       const r = input.rest;
       // Two directions square to the rest direction (from whichever axis it's least along).
       const seed = Math.abs(r.y) < 0.9 ? { x: 0, y: 1, z: 0 } : { x: 1, y: 0, z: 0 };
       const u = normal(cross(r, seed));
       const v = cross(r, u);
-      const side = { x: u.x * Math.cos(around) + v.x * Math.sin(around), y: u.y * Math.cos(around) + v.y * Math.sin(around), z: u.z * Math.cos(around) + v.z * Math.sin(around) };
-      const dir = {
-        x: r.x * Math.cos(off) + side.x * Math.sin(off),
-        y: r.y * Math.cos(off) + side.y * Math.sin(off),
-        z: r.z * Math.cos(off) + side.z * Math.sin(off),
-      };
+      // Somewhere off its rest direction (tipped away from it by an angle, at a random turn around
+      // it) that doesn't mean reaching through the robot; failing that, its rest direction.
+      let dir: Vec3 = r;
+      for (let tries = 0; tries < ARM.wanderTries; tries += 1) {
+        const off = ARM.wanderMin + random(state) * (ARM.wanderMax - ARM.wanderMin);
+        const around = random(state) * Math.PI * 2;
+        const side = { x: u.x * Math.cos(around) + v.x * Math.sin(around), y: u.y * Math.cos(around) + v.y * Math.sin(around), z: u.z * Math.cos(around) + v.z * Math.sin(around) };
+        const pick = {
+          x: r.x * Math.cos(off) + side.x * Math.sin(off),
+          y: r.y * Math.cos(off) + side.y * Math.sin(off),
+          z: r.z * Math.cos(off) + side.z * Math.sin(off),
+        };
+        if (!input.blocked?.(pick)) {
+          dir = pick;
+          break;
+        }
+      }
       state.goal = along(input.base, dir, input.reach);
     }
     state.until = input.t + ARM.holdMin + random(state) * (ARM.holdMax - ARM.holdMin);
