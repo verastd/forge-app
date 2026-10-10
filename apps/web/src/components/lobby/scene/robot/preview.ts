@@ -238,6 +238,9 @@ export function createRobotPreview(
         // Close enough that a chestplate clip plays (whatever the robot looks at).
         chestDistance: camera.position.length(),
         reducedMotion: reducedMotion || still,
+        // Held still for fitting, the robot still shows an arm on its back moving (unless you'd
+        // rather less motion, or a click on the model is being picked).
+        armStill: reducedMotion || onPick !== null,
         talking: false,
       });
       report(robot.state);

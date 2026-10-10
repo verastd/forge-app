@@ -86,11 +86,15 @@ describe('stepArmLook', () => {
     ...over,
   });
 
-  it('holds still for reduced motion, and forgets what it was doing', () => {
+  it('holds still for reduced motion, forgets what it was doing, and picks afresh once it may move again', () => {
     const state = createArmLook(3);
     stepArmLook(state, input());
-    expect(stepArmLook(state, input({ reducedMotion: true }))).toBeNull();
+    expect(stepArmLook(state, input({ t: 0.1, reducedMotion: true }))).toBeNull();
     expect(state.aim).toBeNull();
+    // Back to full motion mid-hold: a new pick at once, no stale (empty) goal.
+    const aim = stepArmLook(state, input({ t: 0.2 }));
+    expect(aim).not.toBeNull();
+    expect(state.goal).not.toBeNull();
   });
 
   it.each([
