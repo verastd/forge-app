@@ -115,8 +115,8 @@ function note(state: BrickState): string {
       ? `A ${state.target.label}: E to pick it up.`
       : 'Part of a build: only the Lego bot can take it out.';
   }
-  if (state.standIn) return 'Testing as the Lego bot: B makes a brick.';
-  return state.maker ? 'You’re the Lego bot: B makes a brick.' : 'Point at a loose brick to pick it up.';
+  if (state.standIn) return 'Testing as the Lego bot: B drops a new brick out of your backpack.';
+  return state.maker ? 'You’re the Lego bot: B drops a new brick out of your backpack.' : 'Point at a loose brick to pick it up.';
 }
 
 export function BuildControls({ state, onCommand }: BuildControlsProps) {

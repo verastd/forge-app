@@ -632,3 +632,48 @@ def test_build_rules_mirror_the_lobby() -> None:
     assert rules.blueprint_problems([at("brick-1x1", 0, 0, 0, 7)], []) == ["shape"]
     stacked = [at("brick-2x2", 0, 3, 0, 0), at("brick-1x1", 0, 6, 0, 0)]
     assert rules.blueprint_problems(stacked, [at("brick-2x4", 0, 0, 0, 0)]) == [None, None]
+
+
+def test_a_made_brick_can_drop_loose_on_the_floor(
+    client: TestClient, maker: dict[str, str]
+) -> None:
+    body = {"shape": "brick-2x4", "color": "red", "at": {"x": 4, "y": 0, "z": -6, "rot": 1}}
+    dropped = client.post("/api/lobby/bricks", headers=maker, json=body)
+    assert dropped.status_code == 200
+    brick = dropped.json()["brick"]
+    assert "holder" not in brick and (brick["x"], brick["y"], brick["z"], brick["rot"]) == (
+        4,
+        0,
+        -6,
+        1,
+    )
+    # The maker's hands stay free: another drops beside it, and one still comes to hand.
+    beside = {**body, "at": {"x": 10, "y": 0, "z": -6, "rot": 0}}
+    assert client.post("/api/lobby/bricks", headers=maker, json=beside).status_code == 200
+    assert make(client, maker).json()["brick"]["holder"] == MAKER
+    # Where it would drop must be free.
+    clash = client.post("/api/lobby/bricks", headers=maker, json=body)
+    assert clash.status_code == 409
+    assert clash.json() == {"error": "wont_fit", "problem": "overlap"}
+
+
+def test_a_ramp_is_kept_with_a_back_models_fit(
+    client: TestClient, maker: dict[str, str], admin_headers: dict[str, str]
+) -> None:
+    ramp = {**BACKPACK, "spout": [0.5, 0.1, 0.0]}
+    refit = client.put(
+        "/api/avatars/heads/pack/placement", headers=admin_headers, json={"placement": ramp}
+    )
+    assert refit.status_code == 200 and refit.json()["placement"]["spout"] == [0.5, 0.1, 0.0]
+    assert client.get("/api/avatars").json()["heads"][0]["placement"]["spout"] == [0.5, 0.1, 0.0]
+    bad = {**BACKPACK, "spout": [0.5, 1.5, 0.0]}
+    assert client.put(
+        "/api/avatars/heads/pack/placement", headers=admin_headers, json={"placement": bad}
+    ).status_code in (400, 422)
+    client.put(
+        "/api/avatars/heads/pack/placement", headers=admin_headers, json={"placement": BACKPACK}
+    )
+    assert get_state_db().query_all("SELECT * FROM avatars_head_spouts") == []
+    client.put("/api/avatars/heads/pack/placement", headers=admin_headers, json={"placement": ramp})
+    assert client.delete("/api/avatars/heads/pack", headers=admin_headers).status_code == 204
+    assert get_state_db().query_all("SELECT * FROM avatars_head_spouts") == []

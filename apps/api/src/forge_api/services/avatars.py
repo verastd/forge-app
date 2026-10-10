@@ -164,6 +164,14 @@ register_schema(
             head_id TEXT PRIMARY KEY REFERENCES avatars_heads (id),
             emitter TEXT NOT NULL
         )""",
+        # Where a brick-making back model's ramp is (fractions of its file's bounding box).
+        # No row: guessed.
+        """CREATE TABLE IF NOT EXISTS avatars_head_spouts (
+            head_id TEXT PRIMARY KEY REFERENCES avatars_heads (id),
+            x REAL NOT NULL,
+            y REAL NOT NULL,
+            z REAL NOT NULL
+        )""",
     ],
 )
 
@@ -173,14 +181,15 @@ _HEAD_SELECT: Final = (
     "a.slant AS a_slant, a.turn AS a_turn, a.pitch AS a_pitch, "
     "o.member_id AS o_member, l.eye_scale AS l_eye_scale, l.screen AS l_screen, "
     "r.tilt AS r_tilt, r.turn AS r_turn, r.slant AS r_slant, f.flyer AS f_flyer, "
-    "e.emitter AS e_emitter "
+    "e.emitter AS e_emitter, s.x AS s_x, s.y AS s_y, s.z AS s_z "
     "FROM avatars_heads h LEFT JOIN avatars_head_placements p ON p.head_id = h.id "
     "LEFT JOIN avatars_head_eye_angles a ON a.head_id = h.id "
     "LEFT JOIN avatars_head_owners o ON o.head_id = h.id "
     "LEFT JOIN avatars_head_eye_looks l ON l.head_id = h.id "
     "LEFT JOIN avatars_head_angles r ON r.head_id = h.id "
     "LEFT JOIN avatars_head_flyers f ON f.head_id = h.id "
-    "LEFT JOIN avatars_head_emitters e ON e.head_id = h.id"
+    "LEFT JOIN avatars_head_emitters e ON e.head_id = h.id "
+    "LEFT JOIN avatars_head_spouts s ON s.head_id = h.id"
 )
 
 
@@ -468,6 +477,7 @@ def _placement(row: dict[str, Any]) -> AvatarHeadPlacement:
         screen=screen,
         flyer=row["f_flyer"],
         emitter=row["e_emitter"],
+        spout=(row["s_x"], row["s_y"], row["s_z"]) if row["s_x"] is not None else None,
     )
 
 
@@ -495,8 +505,14 @@ def _store_placement(db: StateDB, head_id: str, placement: AvatarHeadPlacement |
     db.execute("DELETE FROM avatars_head_angles WHERE head_id = ?", (head_id,))
     db.execute("DELETE FROM avatars_head_flyers WHERE head_id = ?", (head_id,))
     db.execute("DELETE FROM avatars_head_emitters WHERE head_id = ?", (head_id,))
+    db.execute("DELETE FROM avatars_head_spouts WHERE head_id = ?", (head_id,))
     if placement is None:
         return
+    if placement.spout is not None:
+        db.execute(
+            "INSERT INTO avatars_head_spouts (head_id, x, y, z) VALUES (?, ?, ?, ?)",
+            (head_id, *placement.spout),
+        )
     if placement.emitter is not None:
         db.execute(
             "INSERT INTO avatars_head_emitters (head_id, emitter) VALUES (?, ?)",
@@ -803,6 +819,7 @@ def delete_head(db: StateDB, head_id: str) -> None:
         db.execute("DELETE FROM avatars_head_angles WHERE head_id = ?", (head_id,))
         db.execute("DELETE FROM avatars_head_flyers WHERE head_id = ?", (head_id,))
         db.execute("DELETE FROM avatars_head_emitters WHERE head_id = ?", (head_id,))
+        db.execute("DELETE FROM avatars_head_spouts WHERE head_id = ?", (head_id,))
         db.execute("DELETE FROM avatars_head_owners WHERE head_id = ?", (head_id,))
         db.execute("DELETE FROM avatars_heads WHERE id = ?", (head_id,))
         _drop_unused_assets(db, [row["sha256"]])

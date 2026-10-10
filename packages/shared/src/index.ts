@@ -1458,6 +1458,12 @@ export const AvatarHeadPlacementSchema = z.object({
    * have one). Absent: nothing.
    */
   emitter: z.enum(AVATAR_HEAD_EMITTERS).nullish(),
+  /**
+   * Where a brick-making back model's ramp is, as a fraction of the model
+   * file's own bounding box along x, y and z (0–1 each), so it stays put
+   * however the model is fitted. Absent: guessed, low on the model's back.
+   */
+  spout: z.tuple([z.number().min(0).max(1), z.number().min(0).max(1), z.number().min(0).max(1)]).nullish(),
 });
 export type AvatarHeadPlacement = z.infer<typeof AvatarHeadPlacementSchema>;
 
@@ -1651,13 +1657,6 @@ export const BrickStandInSchema = z.object({
 });
 export type BrickStandIn = z.infer<typeof BrickStandInSchema>;
 
-/** `POST /api/lobby/bricks` (the brick maker): a new brick, into their hand. */
-export const BrickMakeSchema = z.object({
-  shape: z.enum(BRICK_SHAPE_IDS),
-  color: z.enum(BRICK_COLOR_IDS),
-});
-export type BrickMake = z.infer<typeof BrickMakeSchema>;
-
 /** `PUT /api/lobby/bricks/{id}/place` (its holder): where it goes. */
 export const BrickPlaceSchema = z.object({
   x: brickCoord,
@@ -1666,6 +1665,16 @@ export const BrickPlaceSchema = z.object({
   rot: z.number().int().min(0).max(3),
 });
 export type BrickPlace = z.infer<typeof BrickPlaceSchema>;
+
+/** `POST /api/lobby/bricks` (the brick maker): a new brick, into their hand. */
+export const BrickMakeSchema = z.object({
+  shape: z.enum(BRICK_SHAPE_IDS),
+  color: z.enum(BRICK_COLOR_IDS),
+  /** Where it drops to on the floor, loose (out of the backpack's ramp); absent: into the maker's hand. */
+  at: BrickPlaceSchema.optional(),
+});
+export type BrickMake = z.infer<typeof BrickMakeSchema>;
+
 
 /** The most bricks one blueprint builds (@forge/lobby's BLUEPRINT_MAX). */
 export const BRICK_BUILD_MAX = 1000;

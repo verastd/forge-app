@@ -63,7 +63,7 @@ export interface HeadFitterProps {
 }
 
 type Reading = { kind: 'reading' } | { kind: 'ready'; measure: HeadMeasure } | { kind: 'error'; message: string };
-type Picking = null | 'left' | 'right' | 'hole';
+type Picking = null | 'left' | 'right' | 'hole' | 'ramp';
 
 const FITTING_LOOK_ID = 'gh:0';
 const MOVE_RANGE = 0.3;
@@ -106,6 +106,7 @@ function toWire(placement: HeadPlacement): AvatarHeadPlacement {
     ...(placement.screen ? { screen: placement.screen } : {}),
     ...(placement.flyer ? { flyer: placement.flyer } : {}),
     ...(placement.emitter ? { emitter: placement.emitter } : {}),
+    ...(placement.spout ? { spout: placement.spout } : {}),
   };
 }
 
@@ -334,6 +335,16 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled, w
     (pick: HeadPick | null) => {
       const current = placementRef.current;
       if (!current || !picking) return;
+      if (picking === 'ramp') {
+        if (!pick) {
+          setNote({ tone: 'warn', text: 'That missed the model. Click on the ramp bricks come out of.' });
+          return;
+        }
+        setPlacement({ ...current, spout: pick.file });
+        setNote({ tone: 'ok', text: 'Ramp marked: new bricks drop out there.' });
+        setPicking(null);
+        return;
+      }
       if (picking === 'hole') {
         if (!pick) {
           setNote({ tone: 'warn', text: 'That missed the face. Click on the eye hole.' });
@@ -370,7 +381,7 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled, w
   useEffect(() => {
     const preview = previewRef.current;
     if (!preview) return undefined;
-    preview.setPicking(picking ? handlePick : null, worn ? 'accessory' : 'head');
+    preview.setPicking(picking ? handlePick : null, picking === 'ramp' ? 'back' : worn ? 'accessory' : 'head');
     if (!picking) return undefined;
     const onKey = (event: KeyboardEvent): void => {
       if (event.key === 'Escape') setPicking(null);
@@ -481,6 +492,7 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled, w
     left: 'Click the head where its left eye goes (the robot’s left, on your right).',
     right: 'Click the head where its right eye goes (on your left).',
     hole: 'Click the middle of an eye hole: it moves over the nearest eye.',
+    ramp: 'Click the ramp (or chute) new bricks drop out of.',
   };
 
   return (
@@ -741,6 +753,38 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled, w
           </label>
         )}
 
+        {fit === 'back' && placement?.emitter === 'bricks' && (
+          <div className={styles.fitRow} data-ramp={placement.spout ? 'marked' : 'guessed'}>
+            <button
+              type="button"
+              className={`btn btn-sm ${picking === 'ramp' ? 'btn-primary' : 'btn-ghost'}`}
+              aria-pressed={picking === 'ramp'}
+              onClick={() => setPicking(picking === 'ramp' ? null : 'ramp')}
+              disabled={locked}
+            >
+              {placement.spout ? 'Mark the ramp again' : 'Mark the ramp'}
+            </button>
+            {placement.spout && (
+              <button
+                type="button"
+                className="btn btn-sm btn-ghost"
+                onClick={() => {
+                  setPlacement((current) => (current ? { ...current, spout: null } : current));
+                  setNote({ tone: 'ok', text: 'Ramp cleared: bricks drop from low on the middle of its back.' });
+                }}
+                disabled={locked}
+              >
+                Clear
+              </button>
+            )}
+            <span className={styles.hint}>
+              {placement.spout
+                ? 'Marked: new bricks drop out of the spot you clicked.'
+                : 'Not marked: new bricks drop from low on the middle of its back.'}
+            </span>
+          </div>
+        )}
+
         <div className={styles.fitRow}>
           {picking && (
             <button type="button" className="btn btn-sm btn-ghost" onClick={() => setPicking(null)}>
@@ -751,7 +795,7 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled, w
             type="button"
             className="btn btn-sm btn-ghost"
             onClick={() => {
-              if (auto) setPlacement((current) => ({ ...auto, flyer: current?.flyer ?? null, emitter: current?.emitter ?? null }));
+              if (auto) setPlacement((current) => ({ ...auto, flyer: current?.flyer ?? null, emitter: current?.emitter ?? null, spout: current?.spout ?? null }));
               setPicking(null);
               setNote({ tone: 'ok', text: 'Back to the first guess.' });
             }}

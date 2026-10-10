@@ -38,8 +38,8 @@ export interface RobotPreview {
   /** The whole robot on its turntable, or close in on its head, held still (turned only by a drag). */
   /** The whole robot, close on its head (fitting a head), or from behind (fitting something worn on the back). */
   setFraming(framing: 'robot' | 'head' | 'back'): void;
-  /** While set, a click on its head is reported (null: missed it). */
-  setPicking(onPick: ((pick: HeadPick | null) => void) | null, target?: 'head' | 'accessory'): void;
+  /** While set, a click on its head (or what it wears, or the model on its back) is reported (null: missed it). */
+  setPicking(onPick: ((pick: HeadPick | null) => void) | null, target?: 'head' | 'accessory' | 'back'): void;
   dispose(): void;
 }
 
@@ -78,7 +78,7 @@ export function createRobotPreview(
   camera.lookAt(lookAt);
   let framing: 'robot' | 'head' | 'back' = 'robot';
   let onPick: ((pick: HeadPick | null) => void) | null = null;
-  let pickTarget: 'head' | 'accessory' = 'head';
+  let pickTarget: 'head' | 'accessory' | 'back' = 'head';
   const raycaster = new THREE.Raycaster();
 
   scene.add(new THREE.HemisphereLight(0x9fb4d8, 0x0a0d14, 0.35));

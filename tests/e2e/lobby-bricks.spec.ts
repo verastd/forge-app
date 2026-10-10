@@ -130,9 +130,12 @@ class Cave {
       return reply(200, { rev: this.rev, removed: of.length });
     }
     if (method === 'POST' && path === '') {
-      const body = JSON.parse(request.postData() ?? '{}') as { shape: string; color: string };
+      const body = JSON.parse(request.postData() ?? '{}') as { shape: string; color: string; at?: { x: number; y: number; z: number; rot: number } };
       this.made += 1;
-      const made: Brick = { ...brick(`00000000000${this.made}`, 0, 0, 0, body.shape), color: body.color, holder: ME };
+      // With `at`: out of the backpack's ramp, loose on the floor there; without: into the hand.
+      const made: Brick = body.at
+        ? { ...brick(`00000000000${this.made}`, 0, 0, 0, body.shape), ...body.at, color: body.color }
+        : { ...brick(`00000000000${this.made}`, 0, 0, 0, body.shape), color: body.color, holder: ME };
       this.bricks.set(made.id, made);
       return reply(200, { rev: this.rev, brick: made });
     }
@@ -189,14 +192,15 @@ test.describe('building with bricks', () => {
     expect(cave.calls.some((c) => c.startsWith('PUT') || c === 'GET me')).toBe(false);
   });
 
-  test('the Lego bot makes a brick, places it, and removes it, each step saying so', async ({ page, context, baseURL }) => {
+  test('the Lego bot makes a brick (it drops out of the backpack behind them), moves one, and removes it, each step saying so', async ({ page, context, baseURL }) => {
     await signInAs(context, baseURL ?? '', { sub: '4242', login: 'lego-bot' });
-    const cave = new Cave(true);
+    const cave = new Cave(true, [brick('c00000000001', 0, 0, 0)]);
     await enter(page, cave);
     await expect(lobbyRoot(page)).toHaveAttribute('data-brick-access', 'member');
     const maker = page.getByRole('group', { name: 'Make bricks' });
     await expect(maker).toBeVisible();
-    await expect(note(page)).toContainText('You’re the Lego bot: B makes a brick.');
+    // (Pointing at the brick ahead: the line says what it is; with nothing to point at, it says B drops a new brick: see the stand-in test.)
+    await expect(note(page)).toContainText('A 2×4 brick: E to pick it up.');
 
     // Choose a 2×2 (key 4) in blue (C), then make it: Making… until the API answers.
     await page.keyboard.press('Digit4');
@@ -210,11 +214,20 @@ test.describe('building with bricks', () => {
     await expect(making).toHaveAttribute('aria-busy', 'true');
     await expect(lobbyRoot(page)).toHaveAttribute('data-brick-busy', 'making');
     cave.release();
-    await expect(lobbyRoot(page)).toHaveAttribute('data-held', 'brick-2x2');
-    await expect(toast(page, 'Blue 2×2 brick made')).toBeVisible();
+    await expect(toast(page, 'Blue 2×2 brick made · it’s on the floor behind you')).toBeVisible();
     expect(cave.calls).toContain('POST ');
+    // Not in your hand: loose on the floor behind you (you face −Z from z = 2.4 m), for anyone to pick up.
+    await expect(lobbyRoot(page)).toHaveAttribute('data-held', '');
+    await expect(lobbyRoot(page)).toHaveAttribute('data-bricks', '2');
+    const made = cave.bricks.get('000000000001')!;
+    expect(made).toMatchObject({ shape: 'brick-2x2', color: 'blue', y: 0 });
+    expect(made.holder).toBeUndefined();
+    expect(made.z * 0.2).toBeGreaterThan(2.4);
 
-    // Held: the ghost fits on the floor ahead. Placing… until the API answers, then on the floor.
+    // The brick ahead: pick it up, and the ghost fits where it was. Placing… until the API answers.
+    await expect(lobbyRoot(page)).toHaveAttribute('data-brick-target', 'pick');
+    await page.keyboard.press('KeyE');
+    await expect(lobbyRoot(page)).toHaveAttribute('data-held', 'brick-2x4');
     await expect(lobbyRoot(page)).toHaveAttribute('data-aim', 'fits');
     await expect(note(page)).toContainText('It fits: E to place it');
     cave.hold = true;
@@ -223,9 +236,8 @@ test.describe('building with bricks', () => {
     cave.release();
     await expect(lobbyRoot(page)).toHaveAttribute('data-held', '');
     await expect(toast(page, 'Placed')).toBeVisible();
-    await expect(lobbyRoot(page)).toHaveAttribute('data-bricks', '1');
-    const placed = [...cave.bricks.values()][0]!;
-    expect(placed.holder).toBeUndefined();
+    await expect(lobbyRoot(page)).toHaveAttribute('data-bricks', '2');
+    expect(cave.bricks.get('c00000000001')!.holder).toBeUndefined();
 
     // Pointing at it now: the Lego bot can remove it.
     await expect(lobbyRoot(page)).toHaveAttribute('data-brick-target', 'pick');
@@ -233,8 +245,9 @@ test.describe('building with bricks', () => {
     await page.keyboard.press('KeyX');
     await expect(build(page).getByRole('button', { name: /Removing…/ })).toHaveAttribute('aria-busy', 'true');
     cave.release();
-    await expect(toast(page, 'Removed a 2×2 brick')).toBeVisible();
-    await expect(lobbyRoot(page)).toHaveAttribute('data-bricks', '0');
+    await expect(toast(page, 'Removed a 2×4 brick')).toBeVisible();
+    await expect(lobbyRoot(page)).toHaveAttribute('data-bricks', '1');
+    expect([...cave.bricks.keys()]).toEqual(['000000000001']);
   });
 
   test('a visitor picks up a loose brick; a refused place puts it back in their hand, in words', async ({ page, context, baseURL }) => {
@@ -300,10 +313,11 @@ test.describe('building with bricks', () => {
     await expect(toast(page, 'You’re the Lego bot now (testing)')).toBeVisible();
     await expect(testing.getByRole('button', { name: /Being the Lego bot/ })).toHaveAttribute('aria-pressed', 'true');
     await expect(page.getByRole('group', { name: 'Make bricks' })).toBeVisible();
-    await expect(note(page)).toContainText('Testing as the Lego bot: B makes a brick.');
+    await expect(note(page)).toContainText('Testing as the Lego bot: B drops a new brick out of your backpack.');
     // The Lego bot's keys work now.
     await page.keyboard.press('KeyB');
-    await expect(lobbyRoot(page)).toHaveAttribute('data-held', 'brick-2x4');
+    await expect(toast(page, 'made · it’s on the floor behind you')).toBeVisible();
+    await expect(lobbyRoot(page)).toHaveAttribute('data-bricks', '1');
 
     await testing.getByRole('button', { name: /Being the Lego bot/ }).click();
     await expect(lobbyRoot(page)).toHaveAttribute('data-brick-stand-in', 'off');
