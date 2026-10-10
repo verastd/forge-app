@@ -44,6 +44,8 @@ export interface HeadPlacement {
   screen?: HeadScreen | null;
   /** What flies over the head (flyer.ts). */
   flyer?: 'helicopter' | null;
+  /** What a back model makes for its wearer (bricks: they're the cave's brick maker). */
+  emitter?: 'bricks' | null;
 }
 
 export interface HeadScreen {

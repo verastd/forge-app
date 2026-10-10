@@ -40,7 +40,12 @@ export type LobbyAction =
   | { kind: 'throw'; to: string | null; from: Vec3; dest: Vec3; time: number }
   /** The catcher's own word on the ball `thrower` threw at them: caught it, or missed. */
   | { kind: 'catch'; thrower: string; caught: boolean }
-  /** The cave's bricks changed (the API's word, at revision `rev`): fetch what's new. */
+  /**
+   * The cave's bricks changed (the API's word, at revision `rev`): fetch what's
+   * new. A notice, not a behaviour: the API holds the bricks and has the last
+   * word, so it has no BEHAVIORS entry (the catalog's intents are pinned to the
+   * four above by tests/acceptance/issue-48).
+   */
   | { kind: 'bricks'; rev: number };
 
 export type LobbyActionKind = LobbyAction['kind'];

@@ -6,7 +6,7 @@ import { BEHAVIORS, BEHAVIOR_STATES, behaviorById, behaviorForIntent, validateBe
 import type { BehaviorEntry } from './catalog.js';
 
 /** Every action kind the lobby sends today, from the wire format itself. */
-const ACTION_KINDS: LobbyActionKind[] = ['wave', 'ball', 'throw', 'catch', 'bricks'];
+const ACTION_KINDS: LobbyActionKind[] = ['wave', 'ball', 'throw', 'catch'];
 
 function entry(changes: Partial<BehaviorEntry> = {}): BehaviorEntry {
   return {

@@ -69,9 +69,20 @@ export function brickGeometry(shape: BrickShape): THREE.BufferGeometry {
   return merged;
 }
 
-/** The plastic: a little shiny. */
-export function brickMaterial(): THREE.MeshStandardMaterial {
-  return new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.32, metalness: 0 });
+/**
+ * The plastic: a little shiny, lit by the robots' environment map, and
+ * glowing faintly in its own colour so a build reads across the dark cave.
+ */
+export function brickMaterial(envMap: THREE.Texture | null): THREE.MeshStandardMaterial {
+  const material = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.3, metalness: 0, envMap, envMapIntensity: 1.1 });
+  material.onBeforeCompile = (shader) => {
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <emissivemap_fragment>',
+      '#include <emissivemap_fragment>\n\ttotalEmissiveRadiance += diffuseColor.rgb * 0.22;',
+    );
+  };
+  material.customProgramCacheKey = () => 'brick-plastic';
+  return material;
 }
 
 const colourCache = new Map<string, THREE.Color>();
@@ -118,8 +129,8 @@ export interface BrickLayer {
 }
 
 /** The cave's placed bricks: one InstancedMesh per shape, grown as needed. */
-export function createBrickLayer(scene: THREE.Scene): BrickLayer {
-  const material = brickMaterial();
+export function createBrickLayer(scene: THREE.Scene, envMap: THREE.Texture | null): BrickLayer {
+  const material = brickMaterial(envMap);
   const meshes = new Map<string, THREE.InstancedMesh>();
   const matrix = new THREE.Matrix4();
 

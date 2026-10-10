@@ -518,7 +518,7 @@ export function createCave(canvas: HTMLCanvasElement, opts: CaveOptions): Cave {
           opts.onBricks?.(state);
         },
         onEvent: (text) => opts.onPlayEvent?.(text),
-      })
+      }, robotAssets?.envMap ?? null)
     : null;
   if (bricks) bricks.setBuilder(opts.builder ?? 'signed-out');
   const brickKey = (code: string, shift: boolean): void => {

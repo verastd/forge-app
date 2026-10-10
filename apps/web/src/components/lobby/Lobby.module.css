@@ -1518,8 +1518,11 @@
 }
 
 .brickCount {
-  margin-left: auto;
-  padding-left: 8px;
+  flex-basis: 100%;
   color: rgba(var(--cave-text-rgb), 0.55);
   white-space: nowrap;
+}
+
+.buildNote {
+  flex-wrap: wrap;
 }

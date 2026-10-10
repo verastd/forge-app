@@ -123,6 +123,8 @@ export function createBricks(
   camera: THREE.PerspectiveCamera,
   feed: () => PresenceFeed | null,
   events: BrickEvents,
+  /** The robots' environment map, which lights the bricks too (null: none yet). */
+  envMap: THREE.Texture | null,
   client: BrickClient = createBrickClient(),
 ): Bricks {
   const bricks = new Map<string, Brick>();
@@ -241,7 +243,7 @@ export function createBricks(
     return near;
   };
 
-  const layer = createBrickLayer(scene);
+  const layer = createBrickLayer(scene, envMap);
   const ghostMaterial = new THREE.MeshBasicMaterial({ color: GHOST_FITS, transparent: true, opacity: 0.42, depthWrite: false });
   let ghost: THREE.Group | null = null;
   let ghostShape = '';
@@ -342,7 +344,7 @@ export function createBricks(
         entry = undefined;
       }
       if (!entry) {
-        const material = brickMaterial();
+        const material = brickMaterial(envMap);
         material.color.copy(brickColour(brick.color));
         entry = { group: createLoneBrick(brick.shape, material, true), material, shape: brick.shape, color: brick.color };
         inHand.set(brick.id, entry);
@@ -354,9 +356,9 @@ export function createBricks(
           entry.group.rotation.set(0, 0, 0);
           entry.group.scale.setScalar(1 / ROBOT_SCALE);
         } else {
-          entry.group.position.set(0.42, -0.36, -1);
+          entry.group.position.set(0.5, -0.42, -1.1);
           entry.group.rotation.set(0.35, 0.6, 0);
-          entry.group.scale.setScalar(0.45);
+          entry.group.scale.setScalar(0.32);
         }
       }
     }

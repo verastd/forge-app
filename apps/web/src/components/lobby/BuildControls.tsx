@@ -182,7 +182,7 @@ export function BuildControls({ state, onCommand }: BuildControlsProps) {
           </button>
         )}
       </div>
-      <p id={noteId} className={styles.viewNote} role="status">
+      <p id={noteId} className={`${styles.viewNote} ${styles.buildNote}`} role="status">
         {loading && <Spinner />}
         <span>{note(state)}</span>
         {state.sync === 'error' && (
