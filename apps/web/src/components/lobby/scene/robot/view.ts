@@ -47,10 +47,12 @@ import {
   robotPose,
   rotateAbout,
 } from '@forge/lobby';
-import type { ArmAim, ArmsPose, AvatarColors, AvatarFinish, Blinker, FlightArea, MotionInput, MotionPose, RoofGrid } from '@forge/lobby';
+import type { ArmAim, ArmsPose, AvatarColors, AvatarFinish, Blinker, FlightArea, MotionInput, MotionPose, RoofGrid, Vec3 } from '@forge/lobby';
 import { AVATAR_CHEST_BLENDS } from '@forge/shared';
 import type { AvatarCape, AvatarChestBlend, AvatarHead } from '@forge/shared';
 
+import { createBackArm } from './backArm';
+import type { BackArm } from './backArm';
 import type { ChestClip, RobotAssets, RobotBody } from './assets';
 import { createCape } from './cape';
 import type { CapeView } from './cape';
@@ -130,8 +132,8 @@ export function lookKey(look: RobotLook): string {
 /** A head's placement, to tell when only that changed. */
 function placementKey(head: AvatarHead | null): string {
   if (!head) return '';
-  const { scale, offset, eyes, eyeAngles, angles, eyeScale, screen, flyer, spout } = head.placement;
-  return JSON.stringify([scale, offset, eyes ?? null, eyeAngles ?? null, angles ?? null, eyeScale ?? null, screen ?? null, flyer ?? null, spout ?? null]);
+  const { scale, offset, eyes, eyeAngles, angles, eyeScale, screen, flyer, spout, motion } = head.placement;
+  return JSON.stringify([scale, offset, eyes ?? null, eyeAngles ?? null, angles ?? null, eyeScale ?? null, screen ?? null, flyer ?? null, spout ?? null, motion ?? null]);
 }
 
 /** Where `node` sits in `ancestor`'s frame (ancestor's own transform left out). */
@@ -161,6 +163,8 @@ export interface RobotFrame extends Omit<MotionInput, 'phase'> {
   chestDistance?: number;
   talking: boolean;
   act?: RobotAct;
+  /** Whom a back model that moves like an arm may look at: everyone else's eyes, in the cave. Absent: nobody. */
+  people?: readonly Vec3[];
 }
 
 export interface RobotView {
@@ -615,6 +619,8 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
   let accessoryRetryAt: number | null = null;
   // What it wears on its back: a library model, or the cape.
   let backObject: THREE.Object3D | null = null;
+  /** The back model's own rig while it moves like an arm. */
+  let backArm: BackArm | null = null;
   let backMaterials: THREE.Material[] = [];
   /** The back model's bounding box in its own file's frame (a spout is a fraction of it). */
   const backFileBox = new THREE.Box3();
@@ -854,7 +860,8 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
     scene: THREE.Object3D,
     prepare: (material: THREE.Material, toRoot: THREE.Matrix4) => void,
   ): { object: THREE.Object3D; materials: THREE.Material[] } => {
-    const object = scene.clone(true);
+    // A rigged model's copy gets its own skeleton (a plain clone would still bend the original's).
+    const object = cloneSkinned(scene);
     const materials: THREE.Material[] = [];
     object.updateMatrixWorld(true);
     const rootInverse = object.matrixWorld.clone().invert();
@@ -927,10 +934,20 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
     turnPivot(backPivot, back.placement);
     backObject.scale.setScalar(back.placement.scale);
     backObject.position.set(0, 0, 0);
+    // An arm: rigged where it now sits (mounted at the back slot), or let go when it no longer moves.
+    if (back.placement.motion === 'arm' && !backArm) {
+      root.updateMatrixWorld(true);
+      backArm = createBackArm(backObject, backSlot.getWorldPosition(new THREE.Vector3()), seed);
+    } else if (back.placement.motion !== 'arm' && backArm) {
+      backArm.dispose();
+      backArm = null;
+    }
   };
 
   const dropBack = (): void => {
     if (!backObject) return;
+    backArm?.dispose();
+    backArm = null;
     backObject.removeFromParent();
     for (const each of backMaterials) each.dispose();
     backObject = null;
@@ -1331,6 +1348,7 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
       flame.position.y = -0.04 - 0.1 * p.thrust;
       flameMaterial.opacity = 0.35 + 0.55 * p.thrust;
       cape?.update(frame);
+      backArm?.update(frame.t, frame.dt, frame.people ?? [], frame.reducedMotion);
       clip?.want(viewer, chestPlays({ viewerDistance: frame.chestDistance ?? frame.viewerDistance, reducedMotion: frame.reducedMotion }));
       if (flyer && flight) flyer.fly(flight.area, flight.grid, frame.t, flyerStart, frame.reducedMotion);
       return p;

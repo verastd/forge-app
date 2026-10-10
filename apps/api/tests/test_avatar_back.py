@@ -152,3 +152,32 @@ def test_the_back_goes_with_the_robot_the_model_or_the_model_given_away(
     put(client, admin_headers, {"colors": COLORS, "cape": CAPE})
     assert client.delete(f"/api/avatars/members/{MEMBER}", headers=admin_headers).status_code == 204
     assert backs() == []
+
+
+def test_an_arm_moves_on_its_own_only_on_the_back(
+    client: TestClient, admin_headers: dict[str, str]
+) -> None:
+    assert add(client, admin_headers, "arm", "back").status_code == 200
+    arm = {"scale": 0.7, "offset": [0.05, -0.14, 0.09], "motion": "arm"}
+    refit = client.put(
+        "/api/avatars/heads/arm/placement", headers=admin_headers, json={"placement": arm}
+    )
+    assert refit.status_code == 200 and refit.json()["placement"]["motion"] == "arm"
+    assert client.get("/api/avatars").json()["heads"][0]["placement"]["motion"] == "arm"
+    # Only `arm`, and only a back model.
+    odd = {**arm, "motion": "tail"}
+    assert client.put(
+        "/api/avatars/heads/arm/placement", headers=admin_headers, json={"placement": odd}
+    ).status_code in (400, 422)
+    assert add(client, admin_headers, "mask", "replace").status_code == 200
+    refused = client.put(
+        "/api/avatars/heads/mask/placement", headers=admin_headers, json={"placement": arm}
+    )
+    assert refused.status_code == 400 and refused.json()["error"] == "motion_back_only"
+    # Refitted without it, it holds still; deleted, its row goes with it.
+    still = {"scale": 0.7, "offset": [0.05, -0.14, 0.09]}
+    client.put("/api/avatars/heads/arm/placement", headers=admin_headers, json={"placement": still})
+    assert get_state_db().query_all("SELECT * FROM avatars_head_motions") == []
+    client.put("/api/avatars/heads/arm/placement", headers=admin_headers, json={"placement": arm})
+    assert client.delete("/api/avatars/heads/arm", headers=admin_headers).status_code == 204
+    assert get_state_db().query_all("SELECT * FROM avatars_head_motions") == []

@@ -107,6 +107,7 @@ function toWire(placement: HeadPlacement): AvatarHeadPlacement {
     ...(placement.flyer ? { flyer: placement.flyer } : {}),
     ...(placement.emitter ? { emitter: placement.emitter } : {}),
     ...(placement.spout ? { spout: placement.spout } : {}),
+    ...(placement.motion ? { motion: placement.motion } : {}),
   };
 }
 
@@ -446,6 +447,12 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled, w
   };
 
   /** Making bricks is a back model's choice of its own, like the helicopter. */
+  /** Moving like an arm is a back model's choice too: rigged in the lobby, it bounces around and looks at people. */
+  const onMotion = (event: ChangeEvent<HTMLInputElement>): void => {
+    const on = event.target.checked;
+    setPlacement((current) => (current ? { ...current, motion: on ? 'arm' : null } : current));
+  };
+
   const onEmitter = (event: ChangeEvent<HTMLInputElement>): void => {
     const on = event.target.checked;
     setPlacement((current) => (current ? { ...current, emitter: on ? 'bricks' : null } : current));
@@ -753,6 +760,21 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled, w
           </label>
         )}
 
+        {fit === 'back' && (
+          <label className={`${styles.radio} ${styles.fitFull}`}>
+            <input type="checkbox" checked={placement?.motion === 'arm'} onChange={onMotion} disabled={locked} />
+            <span>
+              Moves like an arm
+              <br />
+              <span className={styles.hint}>
+                {placement?.motion === 'arm'
+                  ? 'Bends from where it’s mounted: it bounces around and turns its far end (its camera) to look at whoever’s near. No rig needed in the file. The preview shows it moving.'
+                  : 'Off: it holds still.'}
+              </span>
+            </span>
+          </label>
+        )}
+
         {fit === 'back' && placement?.emitter === 'bricks' && (
           <div className={styles.fitRow} data-ramp={placement.spout ? 'marked' : 'guessed'}>
             <button
@@ -795,7 +817,7 @@ export default function HeadFitter({ source, fit, initial, onChange, disabled, w
             type="button"
             className="btn btn-sm btn-ghost"
             onClick={() => {
-              if (auto) setPlacement((current) => ({ ...auto, flyer: current?.flyer ?? null, emitter: current?.emitter ?? null, spout: current?.spout ?? null }));
+              if (auto) setPlacement((current) => ({ ...auto, flyer: current?.flyer ?? null, emitter: current?.emitter ?? null, spout: current?.spout ?? null, motion: current?.motion ?? null }));
               setPicking(null);
               setNote({ tone: 'ok', text: 'Back to the first guess.' });
             }}

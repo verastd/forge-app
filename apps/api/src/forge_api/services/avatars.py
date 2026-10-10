@@ -164,6 +164,11 @@ register_schema(
             head_id TEXT PRIMARY KEY REFERENCES avatars_heads (id),
             emitter TEXT NOT NULL
         )""",
+        # How a back model moves on its own (an arm). No row: it holds still.
+        """CREATE TABLE IF NOT EXISTS avatars_head_motions (
+            head_id TEXT PRIMARY KEY REFERENCES avatars_heads (id),
+            motion TEXT NOT NULL
+        )""",
         # Where a brick-making back model's ramp is (fractions of its file's bounding box).
         # No row: guessed.
         """CREATE TABLE IF NOT EXISTS avatars_head_spouts (
@@ -181,7 +186,7 @@ _HEAD_SELECT: Final = (
     "a.slant AS a_slant, a.turn AS a_turn, a.pitch AS a_pitch, "
     "o.member_id AS o_member, l.eye_scale AS l_eye_scale, l.screen AS l_screen, "
     "r.tilt AS r_tilt, r.turn AS r_turn, r.slant AS r_slant, f.flyer AS f_flyer, "
-    "e.emitter AS e_emitter, s.x AS s_x, s.y AS s_y, s.z AS s_z "
+    "e.emitter AS e_emitter, s.x AS s_x, s.y AS s_y, s.z AS s_z, m.motion AS m_motion "
     "FROM avatars_heads h LEFT JOIN avatars_head_placements p ON p.head_id = h.id "
     "LEFT JOIN avatars_head_eye_angles a ON a.head_id = h.id "
     "LEFT JOIN avatars_head_owners o ON o.head_id = h.id "
@@ -189,7 +194,8 @@ _HEAD_SELECT: Final = (
     "LEFT JOIN avatars_head_angles r ON r.head_id = h.id "
     "LEFT JOIN avatars_head_flyers f ON f.head_id = h.id "
     "LEFT JOIN avatars_head_emitters e ON e.head_id = h.id "
-    "LEFT JOIN avatars_head_spouts s ON s.head_id = h.id"
+    "LEFT JOIN avatars_head_spouts s ON s.head_id = h.id "
+    "LEFT JOIN avatars_head_motions m ON m.head_id = h.id"
 )
 
 
@@ -478,13 +484,17 @@ def _placement(row: dict[str, Any]) -> AvatarHeadPlacement:
         flyer=row["f_flyer"],
         emitter=row["e_emitter"],
         spout=(row["s_x"], row["s_y"], row["s_z"]) if row["s_x"] is not None else None,
+        motion=row["m_motion"],
     )
 
 
 def _check_emitter(fit: str, placement: AvatarHeadPlacement | None) -> None:
-    """Only a model worn on the back makes anything (400 emitter_back_only)."""
+    """Only a model worn on the back makes anything (400 emitter_back_only) or moves on its
+    own (400 motion_back_only)."""
     if placement is not None and placement.emitter is not None and fit != "back":
         raise ApiError(400, {"error": "emitter_back_only", "fields": ["placement.emitter"]})
+    if placement is not None and placement.motion is not None and fit != "back":
+        raise ApiError(400, {"error": "motion_back_only", "fields": ["placement.motion"]})
 
 
 def is_brick_maker(db: StateDB, member_id: str) -> bool:
@@ -506,8 +516,14 @@ def _store_placement(db: StateDB, head_id: str, placement: AvatarHeadPlacement |
     db.execute("DELETE FROM avatars_head_flyers WHERE head_id = ?", (head_id,))
     db.execute("DELETE FROM avatars_head_emitters WHERE head_id = ?", (head_id,))
     db.execute("DELETE FROM avatars_head_spouts WHERE head_id = ?", (head_id,))
+    db.execute("DELETE FROM avatars_head_motions WHERE head_id = ?", (head_id,))
     if placement is None:
         return
+    if placement.motion is not None:
+        db.execute(
+            "INSERT INTO avatars_head_motions (head_id, motion) VALUES (?, ?)",
+            (head_id, placement.motion),
+        )
     if placement.spout is not None:
         db.execute(
             "INSERT INTO avatars_head_spouts (head_id, x, y, z) VALUES (?, ?, ?, ?)",
@@ -820,6 +836,7 @@ def delete_head(db: StateDB, head_id: str) -> None:
         db.execute("DELETE FROM avatars_head_flyers WHERE head_id = ?", (head_id,))
         db.execute("DELETE FROM avatars_head_emitters WHERE head_id = ?", (head_id,))
         db.execute("DELETE FROM avatars_head_spouts WHERE head_id = ?", (head_id,))
+        db.execute("DELETE FROM avatars_head_motions WHERE head_id = ?", (head_id,))
         db.execute("DELETE FROM avatars_head_owners WHERE head_id = ?", (head_id,))
         db.execute("DELETE FROM avatars_heads WHERE id = ?", (head_id,))
         _drop_unused_assets(db, [row["sha256"]])

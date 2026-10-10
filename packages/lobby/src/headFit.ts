@@ -48,6 +48,8 @@ export interface HeadPlacement {
   emitter?: 'bricks' | null;
   /** Where a brick-making back model's ramp is: fractions (0–1) of its file's bounding box. */
   spout?: [number, number, number] | null;
+  /** How a back model moves on its own (`arm`: rigged and bent like an arm). */
+  motion?: 'arm' | null;
 }
 
 export interface HeadScreen {

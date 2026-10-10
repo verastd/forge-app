@@ -1147,6 +1147,9 @@ AvatarHeadFlyer = Literal["helicopter"]
 
 #: What a back model makes for whoever wears it on their back (bricks: the brick maker).
 AvatarHeadEmitter = Literal["bricks"]
+#: How a back model moves on its own: `arm` bends it like an arm (an auto-rig), bouncing around
+#: and turning its tip (its camera) to look at people.
+AvatarHeadMotion = Literal["arm"]
 
 
 class AvatarHeadPlacement(BaseModel):
@@ -1187,6 +1190,8 @@ class AvatarHeadPlacement(BaseModel):
     #: Where a brick-making back model's ramp is: a fraction (0-1) of the model file's
     #: bounding box along x, y and z. None: guessed, low on the model's back.
     spout: tuple[_Fraction, _Fraction, _Fraction] | None = None
+    #: How a back model moves on its own (`arm`); None: it holds still. Back models only.
+    motion: AvatarHeadMotion | None = None
 
 
 #: A head worn as its file says.
