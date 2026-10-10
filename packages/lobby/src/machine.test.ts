@@ -136,6 +136,11 @@ describe('a model’s parts', () => {
     expect(split.parts[3]!.triangles).toBe(12);
   });
 
+  it('never cuts up a model that came in parts, however few', () => {
+    const split = machineParts([sheet(12, 3), box(5, 0, 0, 1)]);
+    expect(split.parts).toHaveLength(2);
+  });
+
   it('splits a fused model where it falls apart', () => {
     const split = machineParts([fuse(Array.from({ length: 10 }, (_, i) => box(i * 2, 0, 0, 1)))]);
     expect(split.parts).toHaveLength(10);
