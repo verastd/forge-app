@@ -24,7 +24,10 @@ import {
   BRICK_COLORS,
   BRICK_PROBLEM_TEXT,
   BRICK_SHAPES,
+  BLUEPRINT_ERROR_TEXT,
+  BLUEPRINT_MAX_BYTES,
   aimBrick,
+  blueprintProblems,
   brickBox,
   brickFrozen,
   brickProblem,
@@ -32,8 +35,12 @@ import {
   brickUnderRay,
   floorSpot,
   nextRot,
+  parseBlueprint,
+  placeBlueprint,
+  skippedText,
+  turnBlueprint,
 } from '@forge/lobby';
-import type { BrickAt, BrickRot, LobbyAction, Ray } from '@forge/lobby';
+import type { Blueprint, BlueprintBrick, BrickAt, BrickRot, LobbyAction, Ray } from '@forge/lobby';
 import type { Brick, BrickChange, BrickColorId, BrickList, BrickShapeId } from '@forge/shared';
 
 import type { PresenceFeed } from '../../presence/types';
@@ -41,13 +48,13 @@ import { ROBOT_SCALE } from '../robot/view';
 import type { RobotView } from '../robot/view';
 import { BrickRefusal, createBrickClient } from './client';
 import type { BrickClient } from './client';
-import { brickColour, brickMatrix, brickMaterial, createBrickLayer, createLoneBrick } from './meshes';
+import { brickColour, brickMatrix, brickMaterial, createBrickLayer, createGhostLayer, createLoneBrick } from './meshes';
 import type { DrawnBrick } from './meshes';
 
 /** Who you are to the bricks: what the shell knows of your session. */
 export type Builder = 'member' | 'signed-out' | 'practice';
 
-export type BrickBusy = 'making' | 'picking' | 'placing' | 'dropping' | 'removing' | 'switching';
+export type BrickBusy = 'making' | 'picking' | 'placing' | 'dropping' | 'removing' | 'switching' | 'reading' | 'building';
 
 export interface BrickState {
   /** The build: loading it, shown, or failed to load (and trying again). */
@@ -71,6 +78,19 @@ export interface BrickState {
   aim: { fits: boolean; why: string | null } | null;
   /** Not holding: the brick you're pointing at and what you can do with it. */
   target: { label: string; can: 'pick' | 'frozen' } | null;
+  /**
+   * The Lego bot's blueprint, while one is out: its name, how many bricks,
+   * what was left out of it, and where it's aimed (whether it all fits, how
+   * many bricks don't and why; null aim: not aimed anywhere).
+   */
+  blueprint: { name: string; bricks: number; skipped: string | null; aim: BlueprintAim | null } | null;
+}
+
+/** Where a blueprint is aimed: whether all of it fits, and if not, how many bricks don't and the first one's why. */
+export interface BlueprintAim {
+  fits: boolean;
+  blocked: number;
+  why: string | null;
 }
 
 export type BrickCommand =
@@ -83,7 +103,11 @@ export type BrickCommand =
   | { kind: 'drop' }
   | { kind: 'remove' }
   | { kind: 'retry' }
-  | { kind: 'stand-in'; on: boolean };
+  | { kind: 'stand-in'; on: boolean }
+  /** The Lego bot reads a blueprint (an LDraw file) to build. */
+  | { kind: 'blueprint'; file: File }
+  /** …and puts it away. */
+  | { kind: 'put-away' };
 
 export interface BrickFrame {
   /** Your eye, for dropping in front of you and for reach. */
@@ -219,7 +243,7 @@ export function createBricks(
   const hear = (_from: string, action: LobbyAction): void => {
     if (action.kind === 'bricks' && (rev === null || action.rev > rev)) void read();
   };
-  const ping = (change: BrickChange): void => {
+  const ping = (change: { rev: number }): void => {
     feed()?.sendAction({ kind: 'bricks', rev: change.rev });
   };
 
@@ -284,6 +308,56 @@ export function createBricks(
     return { ray: { origin: [origin.x, origin.y, origin.z], dir: [direction.x, direction.y, direction.z] }, reach };
   };
 
+  // ---------- the Lego bot's blueprint ----------
+
+  let blueprint: Blueprint | null = null;
+  const ghosts = createGhostLayer(scene);
+  /** Where the blueprint goes now, and which of its bricks fit there. */
+  let planned: BlueprintBrick[] | null = null;
+  let plannedAim: BlueprintAim | null = null;
+  let planKey = '';
+
+  const aimBlueprint = (r: Ray, reach: number, candidates: readonly BrickAt[]): void => {
+    if (!blueprint) return;
+    // Where a 1×1 would go is where the blueprint's middle goes: on the floor, or on top of what it hits.
+    const spot = aimBrick(r, 'brick-1x1', 0, candidates, reach);
+    if (!spot) {
+      if (planKey !== '') ghosts.hide();
+      planKey = '';
+      planned = null;
+      plannedAim = null;
+      return;
+    }
+    const [sx, sz] = blueprint.size;
+    const corner = { x: spot.x - Math.floor(sx / 2), y: spot.y, z: spot.z - Math.floor(sz / 2) };
+    const key = `${corner.x},${corner.y},${corner.z}|${blueprint.bricks.length}|${blueprint.size.join()}|${rev ?? ''}|${placed.length}`;
+    if (key === planKey) return;
+    planKey = key;
+    planned = placeBlueprint(blueprint, corner.x, corner.y, corner.z);
+    // Only the cave's bricks around it can be in its way.
+    const minX = corner.x - 1;
+    const maxX = corner.x + sx + 1;
+    const minZ = corner.z - 1;
+    const maxZ = corner.z + sz + 1;
+    const around = placed.filter((brick) => {
+      const box = brickBox(brick);
+      return box.max[0] / BRICK.stud >= minX && box.min[0] / BRICK.stud <= maxX && box.max[2] / BRICK.stud >= minZ && box.min[2] / BRICK.stud <= maxZ;
+    });
+    const problems = blueprintProblems(planned, around);
+    const blocked = problems.filter((problem) => problem !== null);
+    const first = blocked[0];
+    plannedAim = { fits: blocked.length === 0, blocked: blocked.length, why: first ? BRICK_PROBLEM_TEXT[first] : null };
+    ghosts.set(planned.map((brick, i) => ({ ...brick, fits: problems[i] === null })));
+  };
+
+  const putAway = (): void => {
+    blueprint = null;
+    planned = null;
+    plannedAim = null;
+    planKey = '';
+    ghosts.hide();
+  };
+
   const look = (): void => {
     const held = mine();
     const { ray: r, reach } = ray();
@@ -291,6 +365,10 @@ export function createBricks(
     aimed = null;
     aim = null;
     target = null;
+    if (blueprint) {
+      if (busy === null) aimBlueprint(r, reach, candidates);
+      return;
+    }
     if (held && busy === null) {
       aimed = aimBrick(r, held.shape, rot, candidates, reach);
       if (aimed) {
@@ -510,8 +588,56 @@ export function createBricks(
         changed = true;
         return;
       }
+      case 'blueprint': {
+        if (!makerOnly() || !ready()) return;
+        if (mine()) {
+          events.onEvent('Your hands are full: place or drop that brick first.');
+          return;
+        }
+        if (command.file.size > BLUEPRINT_MAX_BYTES) {
+          events.onEvent(BLUEPRINT_ERROR_TEXT['too-big']);
+          return;
+        }
+        busy = 'reading';
+        changed = true;
+        command.file
+          .text()
+          .then((text) => {
+            if (disposed) return;
+            const result = parseBlueprint(text, command.file.name);
+            if (typeof result === 'string') {
+              events.onEvent(BLUEPRINT_ERROR_TEXT[result]);
+              return;
+            }
+            putAway();
+            blueprint = result;
+            const skipped = skippedText(result);
+            events.onEvent(
+              `${result.name}: ${result.bricks.length.toLocaleString('en')} bricks · E builds it where the ghost is, R turns it, Q puts it away${skipped ? ` (${skipped})` : ''}`,
+            );
+          })
+          .catch(() => {
+            if (!disposed) events.onEvent('Couldn’t read that file: try again.');
+          })
+          .finally(() => {
+            if (busy === 'reading') busy = null;
+            changed = true;
+          });
+        return;
+      }
+      case 'put-away': {
+        if (!blueprint || busy !== null) return;
+        putAway();
+        changed = true;
+        events.onEvent('Blueprint put away');
+        return;
+      }
       case 'make': {
         if (!makerOnly() || !ready()) return;
+        if (blueprint) {
+          events.onEvent('Put the blueprint away first (Q), or build it (E).');
+          return;
+        }
         if (mine()) {
           events.onEvent('Your hands are full: place or drop that brick first.');
           return;
@@ -526,6 +652,11 @@ export function createBricks(
         return;
       }
       case 'rotate': {
+        if (blueprint && busy === null) {
+          blueprint = turnBlueprint(blueprint);
+          planKey = '';
+          return;
+        }
         if (!mine()) {
           events.onEvent('Pick up a brick to turn it.');
           return;
@@ -536,6 +667,38 @@ export function createBricks(
       }
       case 'use': {
         if (!canBuild() || !ready()) return;
+        if (blueprint) {
+          if (!makerOnly()) return;
+          if (!planned || !plannedAim) {
+            events.onEvent('Aim at the floor (or a build) to place the blueprint.');
+            return;
+          }
+          if (!plannedAim.fits) {
+            events.onEvent(`${plannedAim.blocked} brick${plannedAim.blocked === 1 ? '' : 's'} won’t fit: ${plannedAim.why ?? ''}`);
+            return;
+          }
+          const { name } = blueprint;
+          const pieces = planned.map(({ shape: s, color: c, x, y, z, rot: r }) => ({ shape: s as BrickShapeId, color: c as BrickColorId, x, y, z, rot: r }));
+          busy = 'building';
+          changed = true;
+          client
+            .build({ name, bricks: pieces })
+            .then((built) => {
+              if (disposed) return;
+              events.onEvent(`Built ${name}: ${built.built.toLocaleString('en')} bricks`);
+              ping(built);
+              planKey = '';
+              void read();
+            })
+            .catch((error: unknown) => {
+              if (!disposed) events.onEvent(error instanceof BrickRefusal ? error.message : 'Couldn’t build it: try again.');
+            })
+            .finally(() => {
+              busy = null;
+              changed = true;
+            });
+          return;
+        }
         const held = mine();
         if (held) {
           if (!aimed || !aim) {
@@ -567,6 +730,10 @@ export function createBricks(
         return;
       }
       case 'drop': {
+        if (blueprint) {
+          run({ kind: 'put-away' });
+          return;
+        }
         const held = mine();
         if (!held) {
           events.onEvent('You’re not holding a brick.');
@@ -622,6 +789,9 @@ export function createBricks(
       held: held ? held.shape : null,
       aim: held ? aim : null,
       target: held || !target ? null : { label: shapeLabel(target.shape), can: target.can },
+      blueprint: blueprint
+        ? { name: blueprint.name, bricks: blueprint.bricks.length, skipped: skippedText(blueprint), aim: plannedAim }
+        : null,
     };
   };
 
@@ -671,6 +841,7 @@ export function createBricks(
       reading?.abort();
       unsubscribe?.();
       layer.dispose();
+      ghosts.dispose();
       if (ghost) scene.remove(ghost);
       ghostMaterial.dispose();
       scene.remove(outline);

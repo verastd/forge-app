@@ -1341,3 +1341,33 @@ class BrickPlace(BaseModel):
     y: _BrickCoord
     z: _BrickCoord
     rot: _BrickRot
+
+
+#: The most bricks one blueprint builds.
+BRICK_BUILD_MAX: Final = 1000
+BRICK_BUILD_NAME_MAX: Final = 60
+
+
+class BrickBuildPiece(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    shape: BrickShapeId
+    color: BrickColorId
+    x: _BrickCoord
+    y: _BrickCoord
+    z: _BrickCoord
+    rot: _BrickRot
+
+
+class BrickBuild(BaseModel):
+    """A blueprint built where it's placed, all at once, every brick new."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: Annotated[str, Field(min_length=1, max_length=BRICK_BUILD_NAME_MAX)]
+    bricks: Annotated[list[BrickBuildPiece], Field(min_length=1, max_length=BRICK_BUILD_MAX)]
+
+
+class BrickBuilt(BaseModel):
+    rev: _Rev
+    built: Annotated[int, Field(ge=1)]

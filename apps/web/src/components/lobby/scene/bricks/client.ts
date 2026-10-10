@@ -6,8 +6,8 @@
 
 import { BRICK, BRICK_PROBLEM_TEXT } from '@forge/lobby';
 import type { BrickProblem } from '@forge/lobby';
-import { BrickChangeSchema, BrickListSchema, BrickMeSchema } from '@forge/shared';
-import type { BrickChange, BrickList, BrickMake, BrickMe, BrickPlace } from '@forge/shared';
+import { BrickBuiltSchema, BrickChangeSchema, BrickListSchema, BrickMeSchema } from '@forge/shared';
+import type { BrickBuild, BrickBuilt, BrickChange, BrickList, BrickMake, BrickMe, BrickPlace } from '@forge/shared';
 
 export const BRICKS_URL = '/bff/lobby/bricks';
 
@@ -41,6 +41,8 @@ export function refusalText(status: number, code: string, problem: BrickProblem 
       return 'Only the Lego bot makes and removes bricks.';
     case 'brick_limit':
       return `The cave is full: it holds ${BRICK.limit.toLocaleString('en')} bricks.`;
+    case 'too_large':
+      return 'That blueprint is too big to send.';
     case 'admin_only':
       return 'Only admins can take over the Lego bot.';
     case 'brick_not_found':
@@ -64,6 +66,8 @@ export interface BrickClient {
   pick(id: string): Promise<BrickChange>;
   place(id: string, at: BrickPlace): Promise<BrickChange>;
   remove(id: string): Promise<BrickChange>;
+  /** The brick maker: a blueprint built where it's placed, all at once. */
+  build(body: BrickBuild): Promise<BrickBuilt>;
   /** Admins: be the brick maker for testing, or stop. */
   standIn(on: boolean): Promise<BrickMe>;
 }
@@ -110,6 +114,8 @@ export function createBrickClient(fetchImpl: typeof fetch = (...args) => fetch(.
     pick: (id) => call(fetchImpl, `/${id}/pick`, { method: 'PUT' }, change),
     place: (id, at) => call(fetchImpl, `/${id}/place`, { method: 'PUT', headers: JSON_HEADERS, body: JSON.stringify(at) }, change),
     remove: (id) => call(fetchImpl, `/${id}`, { method: 'DELETE' }, change),
+    build: (body) =>
+      call(fetchImpl, '/build', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(body) }, (b) => BrickBuiltSchema.safeParse(b)),
     standIn: (on) =>
       call(fetchImpl, '/me/stand-in', { method: 'PUT', headers: JSON_HEADERS, body: JSON.stringify({ on }) }, (body) =>
         BrickMeSchema.safeParse(body),
