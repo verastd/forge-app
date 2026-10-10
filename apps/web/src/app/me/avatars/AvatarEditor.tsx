@@ -20,6 +20,7 @@ import { AVATAR_FINISHES, AVATAR_PALETTES, CHEST_VIDEO, chestVideoProblem, defau
 import type { AvatarColors, AvatarFinish } from '@forge/lobby';
 import {
   AVATAR_CAPE_DEFAULT,
+  AVATAR_CHEST_GLOW_DEFAULT,
   AVATAR_CHEST_MAX_BYTES,
   AVATAR_CHEST_MAX_PIXELS,
   AVATAR_CHEST_TYPES,
@@ -125,6 +126,8 @@ interface Draft {
   /** On its back: a library model, or the cape (never both). */
   back: string | null;
   cape: AvatarCape | null;
+  /** How much an uploaded chestplate glows, 0–1. */
+  chestGlow: number;
 }
 
 function draftFor(memberId: string, list: AvatarList): Draft {
@@ -136,14 +139,22 @@ function draftFor(memberId: string, list: AvatarList): Draft {
     finish: saved?.finish ?? 'paint',
     back: saved?.back ?? null,
     cape: saved?.cape ?? null,
+    chestGlow: saved?.chestGlow ?? AVATAR_CHEST_GLOW_DEFAULT,
   };
+}
+
+/** What a glow level looks like, in words. */
+function glowWords(glow: number): string {
+  if (glow <= 0.15) return 'Printed on the armour, lit by the cave';
+  if (glow < 0.7) return 'A soft glow';
+  return 'A bright screen';
 }
 
 /** Every key, by name: a right eye on only one side is a change too. */
 function sameDraft(a: Draft, b: Draft): boolean {
   const colours = (['shell', 'trim', 'accent', 'eye'] as const).every((k) => a.colors[k] === b.colors[k]);
   const capes = a.cape === null || b.cape === null ? a.cape === b.cape : a.cape.outer === b.cape.outer && a.cape.lining === b.cape.lining;
-  return colours && (a.colors.eyeRight ?? null) === (b.colors.eyeRight ?? null) && a.head === b.head && a.accessory === b.accessory && a.finish === b.finish && a.back === b.back && capes;
+  return colours && (a.colors.eyeRight ?? null) === (b.colors.eyeRight ?? null) && a.head === b.head && a.accessory === b.accessory && a.finish === b.finish && a.back === b.back && capes && a.chestGlow === b.chestGlow;
 }
 
 /**
@@ -511,8 +522,9 @@ function RobotEditor({ member, list, setList, onDirty, onDraft }: RobotEditorPro
       finish: draft.finish,
       back,
       cape: draft.cape,
+      chestGlow: draft.chestGlow,
     }),
-    [member.memberId, member.login, draft.colors, head, accessory, saved?.chest, saved?.chestType, draft.finish, back, draft.cape],
+    [member.memberId, member.login, draft.colors, head, accessory, saved?.chest, saved?.chestType, draft.finish, back, draft.cape, draft.chestGlow],
   );
 
   const commit = useCallback(async (): Promise<Avatar> => {
@@ -525,6 +537,8 @@ function RobotEditor({ member, list, setList, onDirty, onDraft }: RobotEditorPro
       ...(draft.finish !== 'paint' ? { finish: draft.finish } : {}),
       // On its back, one or the other (or neither): a model, or the cape.
       ...(draft.back ? { back: draft.back } : draft.cape ? { cape: draft.cape } : {}),
+      // The glow is sent only when it isn't the default, as the finish is.
+      ...(draft.chestGlow !== AVATAR_CHEST_GLOW_DEFAULT ? { chestGlow: draft.chestGlow } : {}),
     });
     setList((current) => ({ ...current, avatars: [...current.avatars.filter((a) => a.memberId !== result.memberId), result] }));
     return result;
@@ -548,7 +562,7 @@ function RobotEditor({ member, list, setList, onDirty, onDraft }: RobotEditorPro
     resetAvatar(member.memberId).then(
       () => {
         setList((current) => ({ ...current, avatars: current.avatars.filter((a) => a.memberId !== member.memberId) }));
-        setDraft({ colors: defaultColors(member.memberId), head: null, accessory: null, finish: 'paint', back: null, cape: null });
+        setDraft({ colors: defaultColors(member.memberId), head: null, accessory: null, finish: 'paint', back: null, cape: null, chestGlow: AVATAR_CHEST_GLOW_DEFAULT });
         setBusy({ kind: 'idle' });
       },
       (error: unknown) => setBusy({ kind: 'error', message: describeAvatarsError(error), retry: reset }),
@@ -947,6 +961,27 @@ function RobotEditor({ member, list, setList, onDirty, onDraft }: RobotEditorPro
               </span>
             </div>
           </div>
+          <label className={styles.label}>
+            <span className={styles.sliderHead} aria-hidden="true">
+              Glow <span className={styles.sliderValue}>{Math.round(draft.chestGlow * 100)}%</span>
+            </span>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              step={5}
+              value={Math.round(draft.chestGlow * 100)}
+              onChange={(event) => setDraft((d) => ({ ...d, chestGlow: Number(event.target.value) / 100 }))}
+              disabled={working || !saved?.chest}
+              aria-label="Chestplate glow"
+              aria-valuetext={`${Math.round(draft.chestGlow * 100)}%: ${glowWords(draft.chestGlow)}`}
+            />
+            <span className={styles.hint}>
+              {saved?.chest
+                ? `${glowWords(draft.chestGlow)}. The preview shows it as you drag; Save to keep it.`
+                : 'Upload an image or clip first: the initials always glow.'}
+            </span>
+          </label>
           <UploadStatus upload={chestUpload} label="the chestplate" />
         </fieldset>
 

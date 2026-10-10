@@ -121,6 +121,11 @@ register_schema(
             cape_outer TEXT,
             cape_lining TEXT
         )""",
+        # How much a robot's uploaded chestplate glows (0-1). No row: the default.
+        """CREATE TABLE IF NOT EXISTS avatars_member_chest_glow (
+            member_id TEXT PRIMARY KEY REFERENCES avatars_members (member_id),
+            glow REAL NOT NULL
+        )""",
         # Who a head was made for: only they can wear it. No row: nobody yet.
         """CREATE TABLE IF NOT EXISTS avatars_head_owners (
             head_id TEXT PRIMARY KEY REFERENCES avatars_heads (id),
@@ -417,6 +422,7 @@ def _avatar(row: dict[str, Any]) -> Avatar:
             if row["b_cape_outer"] is not None
             else None
         ),
+        chestGlow=row["g_glow"],
         updatedAt=members_service.from_db(row["updated_at"]).isoformat(),
     )
 
@@ -544,12 +550,13 @@ def _head_row(db: StateDB, head_id: str) -> dict[str, Any] | None:
 _MEMBER_SELECT: Final = (
     "SELECT m.*, x.head_id AS x_accessory, l.eye_right AS l_eye_right, l.finish AS l_finish, "
     "b.head_id AS b_back, b.cape_outer AS b_cape_outer, b.cape_lining AS b_cape_lining, "
-    "c.content_type AS c_chest_type "
+    "c.content_type AS c_chest_type, g.glow AS g_glow "
     "FROM avatars_members m "
     "LEFT JOIN avatars_member_accessories x ON x.member_id = m.member_id "
     "LEFT JOIN avatars_member_looks l ON l.member_id = m.member_id "
     "LEFT JOIN avatars_member_backs b ON b.member_id = m.member_id "
-    "LEFT JOIN avatars_assets c ON c.sha256 = m.chest_sha256"
+    "LEFT JOIN avatars_assets c ON c.sha256 = m.chest_sha256 "
+    "LEFT JOIN avatars_member_chest_glow g ON g.member_id = m.member_id"
 )
 
 
@@ -640,6 +647,12 @@ def set_avatar(db: StateDB, member_id: str, update: AvatarUpdate, now: datetime)
                 "INSERT INTO avatars_member_looks (member_id, eye_right, finish) VALUES (?, ?, ?)",
                 (member_id, c.eyeRight, finish),
             )
+        db.execute("DELETE FROM avatars_member_chest_glow WHERE member_id = ?", (member_id,))
+        if update.chestGlow is not None:
+            db.execute(
+                "INSERT INTO avatars_member_chest_glow (member_id, glow) VALUES (?, ?)",
+                (member_id, update.chestGlow),
+            )
         row = _avatar_row(db, member_id)
     assert row is not None
     return _avatar(row)
@@ -652,6 +665,7 @@ def reset_avatar(db: StateDB, member_id: str) -> None:
         db.execute("DELETE FROM avatars_member_accessories WHERE member_id = ?", (member_id,))
         db.execute("DELETE FROM avatars_member_looks WHERE member_id = ?", (member_id,))
         db.execute("DELETE FROM avatars_member_backs WHERE member_id = ?", (member_id,))
+        db.execute("DELETE FROM avatars_member_chest_glow WHERE member_id = ?", (member_id,))
         db.execute("DELETE FROM avatars_members WHERE member_id = ?", (member_id,))
         _drop_unused_assets(db, [row["chest_sha256"] if row else None])
 

@@ -29,6 +29,7 @@
 import * as THREE from 'three';
 import { CHEST_PANEL, FACE_PANEL, ZONE, finishLook } from '@forge/lobby';
 import type { AvatarColors, AvatarFinish } from '@forge/lobby';
+import { AVATAR_CHEST_GLOW_DEFAULT } from '@forge/shared';
 
 /** The dark gunmetal every robot's joints share. */
 export const JOINT_COLOR = 0x2a2e35;
@@ -46,6 +47,8 @@ export interface RobotUniforms {
   uChestFade: { value: number };
   /** 1: an uploaded image, over the whole front and with its transparency; 0: the emblem, on the flat panel. */
   uChestFull: { value: number };
+  /** How much an uploaded chestplate glows: 0 printed on the armour, lit by the cave; 1 a lit screen. */
+  uChestGlow: { value: number };
   uThrust: { value: number };
   uHideHead: { value: number };
   uTime: { value: number };
@@ -100,6 +103,7 @@ uniform sampler2D uChest;
 uniform float uChestAspect;
 uniform float uChestFade;
 uniform float uChestFull;
+uniform float uChestGlow;
 uniform float uThrust;
 uniform float uTime;
 uniform float uTalk;
@@ -169,10 +173,12 @@ if (robotZone == ${ZONE.trim} || robotZone == ${ZONE.headTrim}) {
   float imagePart = shown * uChestFade;
   float lit = scanPart + imagePart;
   vec3 screen = (waiting * scanPart + image.rgb * imagePart) / max(lit, 1e-4);
-  robotBase = mix(robotBase, screen * 0.45, lit);
-  robotRough = mix(robotRough, 0.14, lit);
+  // The emblem always glows; an upload glows as much as its robot says (a printed picture to a lit screen).
+  float glow = mix(1.0, uChestGlow, uChestFull);
+  robotBase = mix(robotBase, screen * mix(0.85, 0.45, glow), lit);
+  robotRough = mix(robotRough, mix(0.42, 0.14, glow), lit);
   robotMetal = mix(robotMetal, 0.0, lit);
-  robotEmit += screen * (0.75 + 0.35 * uTalk) * lit;
+  robotEmit += screen * (0.75 + 0.35 * uTalk) * glow * lit;
   robotBase = mix(robotBase, uAccent * 0.5, frame);
   robotEmit += uAccent * frame * 0.9;
   // The chestplate is a screen, solid whatever the armour is made of.
@@ -220,6 +226,7 @@ export function createBodyMaterial(envMap: THREE.Texture, placeholder: THREE.Tex
     uChestAspect: { value: 1 },
     uChestFade: { value: 0 },
     uChestFull: { value: 0 },
+    uChestGlow: { value: AVATAR_CHEST_GLOW_DEFAULT },
     uThrust: { value: 0.35 },
     uHideHead: { value: 0 },
     uTime: { value: 0 },

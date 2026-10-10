@@ -47,6 +47,7 @@ export function lookFrom(list: AvatarList | null, id: string, name: string): Rob
     finish: dressed?.finish ?? null,
     back,
     cape: dressed?.cape ?? null,
+    chestGlow: dressed?.chestGlow ?? null,
   };
 }
 
