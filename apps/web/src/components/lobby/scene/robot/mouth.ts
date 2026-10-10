@@ -89,6 +89,16 @@ export function createTalkingMouth(envMap: THREE.Texture | null, seed: number): 
   stream.count = 0;
   stream.frustumCulled = false;
   stream.castShadow = true;
+  // The stream isn't under the robot (its blocks fly in the cave), so it doesn't hide with it:
+  // while the robot is hidden (your own, in first person) it draws nothing, until it's back.
+  stream.onBeforeRender = () => {
+    for (let o: THREE.Object3D | null = plate; o; o = o.parent) {
+      if (!o.visible) {
+        stream.count = 0;
+        return;
+      }
+    }
+  };
 
   let state: MouthState = createMouthState();
   let height = 0;
