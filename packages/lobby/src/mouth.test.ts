@@ -126,6 +126,14 @@ describe('finding the mouth', () => {
       return out === 0 ? 0.5 : Math.min(1, 0.55 + 0.15 * out);
     }, 160);
     expect(mouthRecess(sloped, [0.45, 0.2, 0.5])!.center[2]).toBe(1);
+    // A wide bevel, rising over six cells: climbed all the way to its top.
+    const bevelled = relief((x, y) => {
+      const out = Math.max(32 - x, x - 111, 16 - y, y - 47, 0);
+      return Math.min(1, 0.5 + 0.075 * out);
+    }, 160);
+    const wide = mouthRecess(bevelled, [0.45, 0.2, 0.5])!;
+    expect(wide.center[2]).toBe(1);
+    expect(wide.size[0]).toBeGreaterThan(0.5);
   });
 
   it('finds nothing on a flat face, in the open air, or in a "hollow" that’s most of the model', () => {

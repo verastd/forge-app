@@ -216,6 +216,7 @@ export function mouthRecess(triangles: ArrayLike<number>, at: Readonly<[number, 
   // middle depth, so a nose or brow beyond one wall isn't taken for the face.
   const reach = Math.round(cells / 2);
   const rise = span / 20;
+  const climb = Math.round(cells / 20);
   const walls: number[] = [];
   for (const [dx, dy] of [
     [-1, 0],
@@ -229,8 +230,9 @@ export function mouthRecess(triangles: ArrayLike<number>, at: Readonly<[number, 
       if (x < 0 || y < 0 || x >= W || y >= H) break;
       let wall = depth[y * W + x]!;
       if (wall - start < rise) continue;
-      // Up a sloped lip to its top, a step or two on.
-      for (let more = 1; more <= 2; more += 1) {
+      // Up a sloped or bevelled lip to its top, as long as it keeps rising, but no further than a
+      // twentieth of the model on, so it never climbs on into a nose or brow.
+      for (let more = 1; more <= climb; more += 1) {
         const nx = x + dx * more;
         const ny = y + dy * more;
         if (nx < 0 || ny < 0 || nx >= W || ny >= H || depth[ny * W + nx]! <= wall) break;
