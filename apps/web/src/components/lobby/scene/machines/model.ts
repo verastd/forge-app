@@ -10,10 +10,11 @@
  */
 
 import * as THREE from 'three';
-import { MACHINE, machineParts } from '@forge/lobby';
+import { MACHINE, machineFinish, machineParts } from '@forge/lobby';
 import type { MachineMesh, MachinePart } from '@forge/lobby';
 
 import { disposeObject, gltfLoader } from '../robot/assets';
+import { applyFinish } from './finish';
 
 export interface MachineModel {
   /** Its size along x, y and z in its own units (what the API stores). */
@@ -58,6 +59,22 @@ export async function readMachineModel(data: ArrayBuffer, envMap: THREE.Texture 
   const gltf = await gltfLoader().parseAsync(data, '');
   gltf.scene.updateMatrixWorld(true);
   const baked: Baked[] = [];
+  // Finished copies of untextured materials (each part its own), to dispose with the model.
+  const finished: THREE.Material[] = [];
+  const finish = (material: THREE.Material, name: string): THREE.Material => {
+    const plain = material as THREE.MeshStandardMaterial;
+    // A model that brings its own texture (or colours per vertex) is drawn as it is.
+    if (!plain.isMeshStandardMaterial || plain.map || plain.vertexColors) {
+      light(material, envMap);
+      return material;
+    }
+    // The CAD colour (three.js keeps colours linear, as the finish rules read them).
+    const cad = plain.color;
+    const copy = plain.clone();
+    applyFinish(copy, machineFinish(name, [cad.r, cad.g, cad.b]), envMap);
+    finished.push(copy);
+    return copy;
+  };
   gltf.scene.traverse((object) => {
     const mesh = object as THREE.Mesh;
     if (!mesh.isMesh || !mesh.geometry.getAttribute('position')) return;
@@ -68,8 +85,10 @@ export async function readMachineModel(data: ArrayBuffer, envMap: THREE.Texture 
       if (name !== 'position' && name !== 'normal' && name !== 'uv' && name !== 'color' && name !== 'tangent') geometry.deleteAttribute(name);
     }
     geometry.morphAttributes = {};
-    for (const material of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) light(material, envMap);
-    baked.push({ geometry, material: mesh.material });
+    // A part's name: its own, or its node's (a mesh of several primitives sits under it).
+    const name = mesh.name || mesh.parent?.name || '';
+    const material = Array.isArray(mesh.material) ? mesh.material.map((m) => finish(m, name)) : finish(mesh.material, name);
+    baked.push({ geometry, material });
   });
   if (baked.length === 0) throw new Error('no meshes');
 
@@ -160,6 +179,7 @@ export async function readMachineModel(data: ArrayBuffer, envMap: THREE.Texture 
     dispose() {
       for (const list of pieces) for (const { geometry } of list) geometry.dispose();
       for (const { geometry } of baked) geometry.dispose();
+      for (const material of finished) material.dispose();
       disposeObject(gltf.scene);
     },
   };
