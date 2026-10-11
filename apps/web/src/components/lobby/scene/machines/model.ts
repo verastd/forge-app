@@ -29,6 +29,20 @@ export interface MachineModel {
   dispose(): void;
 }
 
+/** Every slot a model's material can bring a texture in: any one means it was authored, not bare CAD. */
+const TEXTURE_SLOTS = [
+  'map',
+  'normalMap',
+  'roughnessMap',
+  'metalnessMap',
+  'emissiveMap',
+  'aoMap',
+  'bumpMap',
+  'alphaMap',
+  'lightMap',
+  'displacementMap',
+] as const satisfies readonly (keyof THREE.MeshStandardMaterial)[];
+
 interface Baked {
   geometry: THREE.BufferGeometry;
   material: THREE.Material | THREE.Material[];
@@ -63,8 +77,8 @@ export async function readMachineModel(data: ArrayBuffer, envMap: THREE.Texture 
   const finished: THREE.Material[] = [];
   const finish = (material: THREE.Material, name: string): THREE.Material => {
     const plain = material as THREE.MeshStandardMaterial;
-    // A model that brings its own texture (or colours per vertex) is drawn as it is.
-    if (!plain.isMeshStandardMaterial || plain.map || plain.vertexColors) {
+    // A model that brings any texture of its own (or colours per vertex) is drawn as it is.
+    if (!plain.isMeshStandardMaterial || plain.vertexColors || TEXTURE_SLOTS.some((slot) => plain[slot])) {
       light(material, envMap);
       return material;
     }
