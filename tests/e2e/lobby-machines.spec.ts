@@ -305,11 +305,24 @@ test.describe('the mechanic’s machines', () => {
     const building = page.getByRole('group', { name: 'Build V8' }).getByRole('button', { name: /Building…/ });
     await expect(building).toHaveAttribute('aria-busy', 'true');
     await expect(note(page)).toContainText('Sending V8…');
+    // Every line the note shows from here on: an 8-part build can finish between two checks,
+    // so the part-by-part line is looked for among all it said, not just what it says now.
+    await page.evaluate(() => {
+      const seen: string[] = [];
+      (window as unknown as { __machineNotes: string[] }).__machineNotes = seen;
+      const read = (): void => {
+        const text = document.querySelector('[data-control="machines"] > [role="status"]')?.textContent ?? '';
+        if (seen[seen.length - 1] !== text) seen.push(text);
+      };
+      new MutationObserver(read).observe(document.body, { subtree: true, childList: true, characterData: true });
+      read();
+    });
     machines.release();
     await expect(toast(page, 'Building V8')).toBeVisible();
     await expect(lobbyRoot(page)).toHaveAttribute('data-machines', '1');
-    await expect(lobbyRoot(page)).toHaveAttribute('data-machine-assembling', 'on');
-    await expect(note(page)).toContainText(/Building V8: part \d+ of \d+/);
+    await expect
+      .poll(() => page.evaluate(() => (window as unknown as { __machineNotes: string[] }).__machineNotes.some((n) => /Building V8: part \d+ of \d+/.test(n))))
+      .toBe(true);
     // Put away after building.
     await expect(lobbyRoot(page)).toHaveAttribute('data-machine-chosen', '');
     const built = [...machines.machines.values()][0]!;
