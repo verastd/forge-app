@@ -15,6 +15,7 @@ import * as bricks from './bricks.js';
 import * as blueprint from './blueprint.js';
 import * as brickDrop from './brickDrop.js';
 import * as machine from './machine.js';
+import * as machineFinish from './machineFinish.js';
 import * as step from './step.js';
 import * as mouth from './mouth.js';
 import * as arm from './arm.js';
@@ -112,7 +113,7 @@ const RETIRED = [
 ];
 
 /** Everything the re-exported modules export, in one list. */
-const REEXPORTED = [presence, attenuation, acoustics, voice, avatar, avatarMotion, collide, chase, headFit, bricks, blueprint, brickDrop, machine, step, mouth, arm, flyer, cape, chest, actions, play, behaviors].flatMap((module) => Object.keys(module));
+const REEXPORTED = [presence, attenuation, acoustics, voice, avatar, avatarMotion, collide, chase, headFit, bricks, blueprint, brickDrop, machine, machineFinish, step, mouth, arm, flyer, cape, chest, actions, play, behaviors].flatMap((module) => Object.keys(module));
 
 describe('@forge/lobby public API', () => {
   it('exports its own API plus everything presence.ts and the voice modules export, with no name taken twice', () => {
