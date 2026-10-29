@@ -1268,6 +1268,12 @@ export type ContributorProfile = z.infer<typeof ContributorProfileSchema>;
 
 /** A member's id in the lobby: `gh:` and their numeric GitHub user id (the LiveKit identity). */
 export const AVATAR_MEMBER_ID = /^gh:[0-9]{1,20}$/;
+/**
+ * A robot an admin can dress: a member's (`gh:<id>`) or one of the cave's
+ * helper bots (`bot:<name>`, @forge/lobby's HELPER_BOTS; the API takes only
+ * the ones it lists).
+ */
+export const AVATAR_ROBOT_ID = /^(?:gh:[0-9]{1,20}|bot:[a-z0-9][a-z0-9-]{0,31})$/;
 /** A library head's id: lower-case letters, digits and dashes. */
 export const AVATAR_HEAD_ID = /^[a-z0-9][a-z0-9-]{0,39}$/;
 /** A lower-case sha256, hex. */
@@ -1361,7 +1367,7 @@ export const AVATAR_CAPE_DEFAULT: Readonly<AvatarCape> = Object.freeze({ outer: 
 
 /** One member's robot, as an admin set it. A member with none wears their default. */
 export const AvatarSchema = z.object({
-  memberId: z.string().regex(AVATAR_MEMBER_ID),
+  memberId: z.string().regex(AVATAR_ROBOT_ID),
   colors: AvatarColorsSchema,
   /** A library head's id; absent: the robot's own head. */
   head: z.string().regex(AVATAR_HEAD_ID).optional(),
@@ -1550,7 +1556,7 @@ export const AvatarHeadSchema = z.object({
    * The member it was made for: only they can wear it, and the editor offers
    * it to nobody else. Absent: not given to anyone yet (no one can pick it).
    */
-  owner: z.string().regex(AVATAR_MEMBER_ID).optional(),
+  owner: z.string().regex(AVATAR_ROBOT_ID).optional(),
   updatedAt: z.string(),
 });
 export type AvatarHead = z.infer<typeof AvatarHeadSchema>;
@@ -1592,7 +1598,7 @@ export const AvatarHeadUploadSchema = z.object({
   /** How to wear it; absent: as the file is. */
   placement: AvatarHeadPlacementSchema.optional(),
   /** The member it is made for; absent: keeps the one it has (a new head: nobody). */
-  owner: z.string().regex(AVATAR_MEMBER_ID).optional(),
+  owner: z.string().regex(AVATAR_ROBOT_ID).optional(),
 });
 export type AvatarHeadUpload = z.infer<typeof AvatarHeadUploadSchema>;
 
@@ -1604,13 +1610,13 @@ export type AvatarHeadRefit = z.infer<typeof AvatarHeadRefitSchema>;
 
 /** `PUT /api/avatars/heads/{headId}/owner` (admins): give a head to a member, or to nobody (null). */
 export const AvatarHeadOwnerSchema = z.object({
-  owner: z.string().regex(AVATAR_MEMBER_ID).nullable(),
+  owner: z.string().regex(AVATAR_ROBOT_ID).nullable(),
 });
 export type AvatarHeadOwner = z.infer<typeof AvatarHeadOwnerSchema>;
 
-/** A member an admin can dress, for the editor's list. */
+/** A robot an admin can dress, for the editor's list: a member, or a helper bot (its login is its name). */
 export const AvatarMemberSchema = z.object({
-  memberId: z.string().regex(AVATAR_MEMBER_ID),
+  memberId: z.string().regex(AVATAR_ROBOT_ID),
   login: z.string(),
 });
 export type AvatarMember = z.infer<typeof AvatarMemberSchema>;

@@ -938,7 +938,7 @@ def test_the_limits_match_the_zod_side() -> None:
         match = re.search(rf"export const {name} = ([0-9.]+);", source)
         assert match is not None, name
         assert float(match.group(1)) == getattr(models, name), name
-    for name in ("AVATAR_MEMBER_ID", "AVATAR_HEAD_ID", "AVATAR_SHA256"):
+    for name in ("AVATAR_MEMBER_ID", "AVATAR_ROBOT_ID", "AVATAR_HEAD_ID", "AVATAR_SHA256"):
         match = re.search(rf"export const {name} = /(.*)/;", source)
         assert match is not None and match.group(1) == getattr(models, name), name
     fits = re.search(r"export const AVATAR_HEAD_FITS = \[(.*)\] as const;", source)

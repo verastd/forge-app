@@ -87,6 +87,7 @@ const PEER_CLASSES = {
   peer: cls('peer'),
   tag: cls('tag'),
   talking: cls('talking'),
+  bot: cls('bot'),
 };
 
 export default function LobbyScene({

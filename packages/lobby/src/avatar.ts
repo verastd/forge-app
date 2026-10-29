@@ -16,6 +16,7 @@
  */
 
 import { hashId } from './avatarMotion.js';
+import { helperBot } from './helpers.js';
 
 // Axes are the asset's: metres, +Y up, the robot facing +Z, its feet (the
 // thruster's tip) at y = 0 and the top of its old head at y = 1.
@@ -306,9 +307,12 @@ export function isHexColor(value: unknown): value is string {
   return typeof value === 'string' && /^#[0-9a-fA-F]{6}$/.test(value);
 }
 
-/** The paint a member's robot wears until someone customises it: picked by their id. */
+/**
+ * The paint a member's robot wears until someone customises it: picked by
+ * their id. A helper bot (helpers.ts) wears its own.
+ */
 export function defaultColors(id: string): AvatarColors {
-  return AVATAR_PALETTES[paletteIndex(id)] as AvatarColors;
+  return helperBot(id)?.colors ?? (AVATAR_PALETTES[paletteIndex(id)] as AvatarColors);
 }
 
 /** Which of AVATAR_PALETTES a member's id picks. */
