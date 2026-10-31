@@ -121,7 +121,7 @@ describe('fetchGoogleUser', () => {
     const { fetchImpl, calls } = fakeFetch(() => json(JANE));
     await expect(fetchGoogleUser(TOKEN, fetchImpl)).resolves.toEqual({
       sub: 'google:109876543210987654321',
-      login: 'g.jane-doe',
+      login: 'g.jane-doe-vtuhvpo1',
       name: 'Jane Doe',
       avatarUrl: 'https://lh3.googleusercontent.com/a/jane',
     });
@@ -131,7 +131,7 @@ describe('fetchGoogleUser', () => {
 
   it('drops a name or picture it can’t use, and never makes a handle from the email', async () => {
     const { fetchImpl } = fakeFetch(() => json({ sub: '42', name: '  ', email: 'x.y@example.com', picture: 'http://insecure/p' }));
-    await expect(fetchGoogleUser(TOKEN, fetchImpl)).resolves.toEqual({ sub: 'google:42', login: 'g.member', name: null, avatarUrl: null });
+    await expect(fetchGoogleUser(TOKEN, fetchImpl)).resolves.toEqual({ sub: 'google:42', login: 'g.member-00000016', name: null, avatarUrl: null });
   });
 
   it('refuses an unverified email, a missing or odd sub, and a failed call', async () => {
@@ -145,12 +145,15 @@ describe('fetchGoogleUser', () => {
 });
 
 describe('googleHandle', () => {
-  it('is g. and a lower-case slug that no GitHub login could be', () => {
-    expect(googleHandle('José María O’Neil')).toBe('g.jose-maria-o-neil');
-    expect(googleHandle('Sam_Smith')).toBe('g.sam-smith');
-    expect(googleHandle('李雷')).toBe('g.member');
-    expect(googleHandle(null)).toBe('g.member');
-    const long = googleHandle('a'.repeat(30) + ' ' + 'b'.repeat(30));
+  it('is g., a lower-case slug no GitHub login could be, and a tail that is theirs alone', () => {
+    expect(googleHandle('José María O’Neil', '1')).toBe('g.jose-maria-o-neil-00000001');
+    expect(googleHandle('Sam_Smith', '42')).toBe('g.sam-smith-00000016');
+    expect(googleHandle('李雷', '1')).toBe('g.member-00000001');
+    expect(googleHandle(null, '1')).toBe('g.member-00000001');
+    // Two of the same name, or two with none, are never one handle.
+    expect(googleHandle('Jane Doe', '109876543210987654321')).not.toBe(googleHandle('Jane Doe', '109876543210987654322'));
+    expect(googleHandle(null, '7')).not.toBe(googleHandle(null, '8'));
+    const long = googleHandle('a'.repeat(30) + ' ' + 'b'.repeat(30), '109876543210987654321');
     expect(long.length).toBeLessThanOrEqual(39);
     expect(isGoogleLogin(long)).toBe(true);
     expect(long.endsWith('-')).toBe(false);

@@ -121,22 +121,25 @@ export async function exchangeGoogleCode({
 }
 
 /**
- * A handle for a Google member from their name: `g.` and the words
- * lower-cased and joined with hyphens, ASCII letters and digits only, cut to
- * fit. `g.member` when nothing usable is left. Never from their email, which
- * a handle would put on every name tag. Not unique, and it needn't be: the
- * `sub` is who they are, the handle only what their tag says.
+ * A handle for a Google member: `g.`, their name's words lower-cased and
+ * joined with hyphens (ASCII letters and digits only, cut to fit; `member`
+ * when nothing usable is left), and a hyphen and eight base-36 characters
+ * from their Google id. The tail makes it theirs alone, as a GitHub login is,
+ * since logins are compared as identities in places (a proposal's seconders),
+ * and two Jane Does must never read as one. Never from their email, which a
+ * handle would put on every name tag.
  */
-export function googleHandle(name: string | null): string {
+export function googleHandle(name: string | null, id: string): string {
   const slug = (name ?? '')
     .normalize('NFKD')
     .replace(/[̀-ͯ]/g, '')
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
-    .slice(0, 37)
+    .slice(0, 28)
     .replace(/-+$/, '');
-  return `g.${slug === '' ? 'member' : slug}`;
+  const tail = (BigInt(id) % 36n ** 8n).toString(36).padStart(8, '0');
+  return `g.${slug === '' ? 'member' : slug}-${tail}`;
 }
 
 /**
@@ -169,7 +172,7 @@ export async function fetchGoogleUser(accessToken: string, fetchImpl: FetchLike 
   const displayName = typeof name === 'string' && name.trim() !== '' && isDisplayName(name.trim()) ? name.trim() : null;
   return {
     sub: `google:${sub}`,
-    login: googleHandle(displayName),
+    login: googleHandle(displayName, sub),
     name: displayName,
     avatarUrl: typeof picture === 'string' && isAvatarUrl(picture) ? picture : null,
   };

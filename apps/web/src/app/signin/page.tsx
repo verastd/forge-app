@@ -43,7 +43,9 @@ export default async function SignInPage({ searchParams }: { searchParams: Searc
   const error = first(params.error);
   const message = error !== undefined && Object.hasOwn(ERRORS, error) ? ERRORS[error] : undefined;
   const githubHref = `/auth/signin?${new URLSearchParams({ next }).toString()}`;
-  const google = availability === 'github' && (await googleSignIn()) !== null;
+  // Each way in on its own: Google can be offered without the GitHub App, and the other way round.
+  const github = availability === 'github';
+  const google = availability !== 'demo' && (await googleSignIn()) !== null;
   const googleHref = `/auth/google?${new URLSearchParams({ next }).toString()}`;
 
   return (
@@ -54,9 +56,11 @@ export default async function SignInPage({ searchParams }: { searchParams: Searc
           <p className="lede">
             {availability === 'demo'
               ? 'This is the practice app, so there is a practice account instead of GitHub.'
-              : google
+              : github && google
                 ? 'FORGE uses your GitHub or Google account to know who you are. That is all it uses it for.'
-                : 'FORGE uses your GitHub account to know who you are. That is all it uses it for.'}
+                : google
+                  ? 'FORGE uses your Google account to know who you are. That is all it uses it for.'
+                  : 'FORGE uses your GitHub account to know who you are. That is all it uses it for.'}
           </p>
         </div>
 
@@ -86,9 +90,13 @@ export default async function SignInPage({ searchParams }: { searchParams: Searc
           <div className="card stack">
             <h2 className="section-title">What signing in does</h2>
             <ul className={styles.points}>
-              <li>FORGE sees your GitHub username, display name and profile picture.</li>
-              <li>It gets no access to your repositories or your code.</li>
-              <li>No GitHub token is kept: FORGE reads your profile once and lets the token go.</li>
+              {github && (
+                <>
+                  <li>FORGE sees your GitHub username, display name and profile picture.</li>
+                  <li>It gets no access to your repositories or your code.</li>
+                  <li>No GitHub token is kept: FORGE reads your profile once and lets the token go.</li>
+                </>
+              )}
               {google && (
                 <li>
                   With Google, FORGE sees your name and picture, and uses your email only to check it’s
@@ -97,9 +105,9 @@ export default async function SignInPage({ searchParams }: { searchParams: Searc
               )}
               <li>You stay signed in on this browser for up to 7 days, or until you sign out.</li>
             </ul>
-            {availability === 'github' ? (
+            {github || google ? (
               <p className={styles.ways}>
-                <SignInLink href={githubHref} label="Continue with GitHub" pending="Opening GitHub…" />
+                {github && <SignInLink href={githubHref} label="Continue with GitHub" pending="Opening GitHub…" />}
                 {google && <SignInLink href={googleHref} label="Continue with Google" pending="Opening Google…" />}
               </p>
             ) : (
