@@ -1050,7 +1050,7 @@ class GcsStatus(BaseModel):
 # wire-golden.json, whose describer probes strings with plain letters).
 # ---------------------------------------------------------------------------
 
-AVATAR_MEMBER_ID: Final = r"^gh:[0-9]{1,20}$"
+AVATAR_MEMBER_ID: Final = r"^(?:gh:[0-9]{1,20}|go:[0-9]{1,40})$"
 AVATAR_HEAD_ID: Final = r"^[a-z0-9][a-z0-9-]{0,39}$"
 AVATAR_SHA256: Final = r"^[0-9a-f]{64}$"
 AVATAR_HEAD_NAME_MAX: Final = 40

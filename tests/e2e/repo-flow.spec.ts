@@ -7,6 +7,7 @@ import {
   AuthError,
   constantTimeEqual,
   createPkcePair,
+  isGitHubSession,
   isRepoAction,
   openTransaction,
   pkceChallenge,
@@ -76,7 +77,7 @@ import { plantPracticeSession, signInAs } from './helpers/session';
 
 const SECRET = 'repo-flow-spec-session-secret-0123456789';
 /** The `@forge/auth` calls the flow makes, from the package's build, as the routes pass the package's own. */
-const AUTH = { AuthError, constantTimeEqual, createPkcePair, isRepoAction, publicRepoAuthorizeUrl, randomToken, sealTransaction };
+const AUTH = { AuthError, constantTimeEqual, createPkcePair, isGitHubSession, isRepoAction, publicRepoAuthorizeUrl, randomToken, sealTransaction };
 const APP = { clientId: 'Ov23liRepoFlowSpec01', clientSecret: 'repo-flow-spec-client-secret-0003', origin: 'https://forge.example' };
 const TOKEN = 'gho_one-time-token-must-never-leak-0004';
 const CODE = 'oauth-code-must-never-leak-0005';

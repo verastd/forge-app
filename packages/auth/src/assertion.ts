@@ -9,6 +9,7 @@ import { SignJWT } from 'jose';
 
 import { AuthError } from './errors.js';
 import { isGitHubLogin, isGitHubUserId } from './github.js';
+import { isGoogleLogin, isGoogleSub } from './google.js';
 import { isStrongSecret, MIN_SECRET_LENGTH, nowSeconds } from './session.js';
 import type { TimeOptions } from './session.js';
 
@@ -37,8 +38,9 @@ export interface AssertionOptions extends TimeOptions {
  *   `now` is not a whole number of seconds.
  * @throws AuthError `weak_secret` if `secret` is shorter than 32 characters.
  * @throws AuthError `invalid_identity` unless `sub` is a GitHub user id and
- *   `login` a GitHub login. That makes demo sessions (`sub: 'demo'`) unable
- *   to mint, by design.
+ *   `login` a GitHub login, or `sub` a Google member's `google:<id>` and
+ *   `login` their `g.` handle (the API decides what each may do). That makes
+ *   demo sessions (`sub: 'demo'`) unable to mint, by design.
  */
 export async function mintApiAssertion(
   { sub, login }: ApiIdentity,
@@ -52,8 +54,8 @@ export async function mintApiAssertion(
   if (!isStrongSecret(secret)) {
     throw new AuthError('weak_secret', `secrets must be at least ${MIN_SECRET_LENGTH} characters`);
   }
-  if (!isGitHubUserId(sub) || !isGitHubLogin(login)) {
-    throw new AuthError('invalid_identity', 'only a GitHub identity can call the API');
+  if (!(isGitHubUserId(sub) && isGitHubLogin(login)) && !(isGoogleSub(sub) && isGoogleLogin(login))) {
+    throw new AuthError('invalid_identity', 'only a GitHub or Google identity can call the API');
   }
   const iat = nowSeconds(now);
   return new SignJWT({ login })

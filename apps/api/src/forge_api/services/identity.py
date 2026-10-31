@@ -44,6 +44,9 @@ CLOCK_SKEW_SECONDS = 30
 # fullmatch, never `$`: `$` also matches just before a trailing newline.
 _SUB = re.compile(r"[1-9][0-9]{0,19}")
 _LOGIN = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})")
+# Someone signed in with Google (@forge/auth's google.ts): never a GitHub id or login.
+_GOOGLE_SUB = re.compile(r"google:[0-9]{1,40}")
+_GOOGLE_LOGIN = re.compile(r"g\.[a-z0-9](?:[a-z0-9-]{0,36})")
 # Case-insensitive scheme, exactly one space, then the token (RFC 6750 §2.1).
 _BEARER = re.compile(r"bearer (\S+)", re.IGNORECASE | re.ASCII)
 
@@ -56,8 +59,34 @@ class InvalidAssertion(Exception):
 
 @dataclass(frozen=True)
 class Identity:
+    """A signed-in member: a GitHub user id and login, or a Google member's `google:<id>`
+    and `g.` handle."""
+
     sub: str
     login: str
+
+    @property
+    def github(self) -> bool:
+        """Whether this is a GitHub account (and so can do GitHub work: contributing,
+        agents, being an admin)."""
+        return _fullmatch(self.sub, _SUB)
+
+    @property
+    def member_id(self) -> str:
+        """Their id in the lobby and everything keyed by member: `gh:<id>` or `go:<id>`."""
+        return member_id(self.sub)
+
+
+def member_id(sub: str) -> str:
+    """A member's id from their sub: `gh:<GitHub id>`, or `go:<id>` for `google:<id>`."""
+    return f"gh:{sub}" if _fullmatch(sub, _SUB) else f"go:{sub.removeprefix('google:')}"
+
+
+def _valid_pair(sub: object, login: object) -> bool:
+    """A GitHub id with a GitHub login, or a Google sub with a Google handle: never mixed."""
+    return (_fullmatch(sub, _SUB) and _fullmatch(login, _LOGIN)) or (
+        _fullmatch(sub, _GOOGLE_SUB) and _fullmatch(login, _GOOGLE_LOGIN)
+    )
 
 
 def verify_assertion(token: str, *, secret: str, now: int | None = None) -> Identity:
@@ -90,10 +119,8 @@ def verify_assertion(token: str, *, secret: str, now: int | None = None) -> Iden
         raise InvalidAssertion("typ header is not JWT")
     _check_lifetime(claims, int(time.time()) if now is None else now)
     sub, login = claims["sub"], claims.get("login")
-    if not _fullmatch(sub, _SUB):
-        raise InvalidAssertion("sub is not a GitHub numeric id")
-    if not _fullmatch(login, _LOGIN):
-        raise InvalidAssertion("login is not a GitHub login")
+    if not (isinstance(login, str) and _valid_pair(sub, login)):
+        raise InvalidAssertion("sub and login are not a GitHub or a Google identity")
     return Identity(sub=sub, login=login)
 
 
@@ -105,10 +132,8 @@ def mint_assertion(
     issued = int(time.time()) if now is None else now
     if len(secret) < MIN_SECRET_LENGTH:
         raise ValueError(f"secret must be at least {MIN_SECRET_LENGTH} characters")
-    if not _fullmatch(sub, _SUB):
-        raise ValueError("sub must be a GitHub numeric id")
-    if not _fullmatch(login, _LOGIN):
-        raise ValueError("login must be a GitHub login")
+    if not _valid_pair(sub, login):
+        raise ValueError("sub and login must be a GitHub or a Google identity")
     if not (_is_int(ttl) and 1 <= ttl <= MAX_TTL_SECONDS):
         raise ValueError(f"ttl must be 1-{MAX_TTL_SECONDS} seconds")
     if not _is_int(issued):
@@ -124,8 +149,9 @@ def mint_assertion(
     return jwt.encode(claims, secret.encode(), algorithm=ALGORITHM, headers={"typ": "JWT"})
 
 
-def require_identity(authorization: Annotated[str | None, Header()] = None) -> Identity:
-    """Router dependency: the verified caller, or 401 for any defect whatsoever."""
+def require_any_identity(authorization: Annotated[str | None, Header()] = None) -> Identity:
+    """Router dependency: the verified caller, GitHub or Google, or 401 for any defect
+    whatsoever. Only routes a Google member may use take this."""
     if not flags_service.is_enabled(SIGNIN_FLAG):
         raise _unauthenticated()
     match = _BEARER.fullmatch(authorization or "")
@@ -138,10 +164,21 @@ def require_identity(authorization: Annotated[str | None, Header()] = None) -> I
         raise _unauthenticated() from None
 
 
+def require_identity(authorization: Annotated[str | None, Header()] = None) -> Identity:
+    """Router dependency: the verified caller, who must be a GitHub account. 401 for any
+    defect; 403 `github_required` for a Google member. The default, so a route nobody has
+    looked at since Google sign-in stays GitHub-only rather than opening by accident."""
+    identity = require_any_identity(authorization)
+    if not identity.github:
+        raise ApiError(403, {"error": "github_required"})
+    return identity
+
+
 def is_admin(identity: Identity) -> bool:
     """Whether `identity` is an admin: its GitHub user id is on FORGE_ADMIN_IDS. The id,
-    never the login: a login can be renamed, and then registered by someone else."""
-    return identity.sub in admin_ids()
+    never the login: a login can be renamed, and then registered by someone else. A Google
+    member is never one: the list holds GitHub ids only."""
+    return identity.github and identity.sub in admin_ids()
 
 
 def require_admin(identity: Annotated[Identity, Depends(require_identity)]) -> Identity:

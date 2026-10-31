@@ -98,6 +98,22 @@ export function githubAppConfig(): GitHubAppConfig | null {
 }
 
 /**
+ * Google sign-in, the second way in beside GitHub: GOOGLE_CLIENT_ID and
+ * GOOGLE_CLIENT_SECRET (a Google Cloud OAuth client of type "Web
+ * application", its redirect URI `<FORGE_PUBLIC_ORIGIN>/auth/google/callback`),
+ * with the public origin. Null when either is unset, which leaves the button
+ * off: there is no flag besides (GitHub sign-in's flag still governs both).
+ * Server-side only: the secret is used for the code exchange and nothing else.
+ */
+export function googleConfig(): GitHubAppConfig | null {
+  const clientId = process.env.GOOGLE_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+  const origin = publicOrigin();
+  if (!clientId || !clientSecret || origin === null) return null;
+  return { clientId, clientSecret, origin };
+}
+
+/**
  * FORGE's OAuth App behind "your copy" and "Send for review" (Phase 7):
  * GITHUB_REPO_CLIENT_ID and GITHUB_REPO_CLIENT_SECRET, with the public origin
  * its callback (`/auth/github/repo/callback`) lives on. Null when any of

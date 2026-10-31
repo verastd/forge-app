@@ -23,7 +23,7 @@ from forge_api.models import (
 )
 from forge_api.services import flags as flags_service
 from forge_api.services.errors import ApiError
-from forge_api.services.identity import require_identity
+from forge_api.services.identity import require_any_identity
 from forge_api.services.upland import analytics
 from forge_api.services.upland.action_codes import CATEGORIES
 from forge_api.services.upland.hyperion import HyperionClient
@@ -64,7 +64,7 @@ router = APIRouter(
     tags=["upland"],
     # In this order: 404 while `upland_data` is off, then 401 without a valid assertion.
     # A route's own dependencies (the export's `require_csv_export`) run after both.
-    dependencies=[Depends(require_upland_enabled), Depends(require_identity)],
+    dependencies=[Depends(require_upland_enabled), Depends(require_any_identity)],
 )
 
 

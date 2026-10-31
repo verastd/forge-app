@@ -39,3 +39,10 @@
   background: var(--danger-soft);
   color: var(--text);
 }
+
+/* The ways in, side by side, wrapping on a phone. */
+.ways {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}

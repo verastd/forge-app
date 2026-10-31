@@ -26,7 +26,8 @@ export const dynamic = 'force-dynamic';
 /** Longer than the forward's own 25 s wait on the API, so the browser hears its 504. */
 export const maxDuration = 30;
 
-const MEMBER = 'gh:[0-9]{1,20}';
+/** A member's id (@forge/shared's AVATAR_MEMBER_ID): GitHub's `gh:` or Google's `go:`. */
+const MEMBER = '(?:gh:[0-9]{1,20}|go:[0-9]{1,40})';
 const HEAD = '[a-z0-9][a-z0-9-]{0,39}';
 const SEGMENT = new RegExp(`^(?:members|heads|chest|${MEMBER}|${HEAD})$`);
 /** Room for a base64 file of `limit` bytes and the JSON around it. */

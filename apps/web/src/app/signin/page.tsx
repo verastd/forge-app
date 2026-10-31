@@ -1,5 +1,6 @@
 /**
- * /signin: what signing in means, then the one way in this server offers.
+ * /signin: what signing in means, then the ways in this server offers:
+ * GitHub, and Google beside it when configured (googleSignIn).
  * Every availability state renders something honest. There is never a button
  * that leads nowhere: with sign-in switched off there is no button at all.
  */
@@ -7,7 +8,8 @@ import { safeNext } from '@forge/auth';
 import type { Metadata } from 'next';
 import { redirect } from 'next/navigation';
 
-import { getPublicSession, signInAvailability } from '../../lib/session';
+import { getPublicSession, googleSignIn, signInAvailability } from '../../lib/session';
+import { SignInLink } from './SignInLink';
 import styles from './signin.module.css';
 
 export const metadata: Metadata = {
@@ -23,6 +25,9 @@ const ERRORS: Readonly<Record<string, string>> = {
   state: 'We couldn’t match that sign-in to this browser, so we stopped it. Please try again.',
   denied: 'You didn’t approve the sign-in on GitHub, so nothing was shared.',
   github: 'GitHub didn’t finish the sign-in. Please try again in a moment.',
+  google: 'Google didn’t finish the sign-in. Please try again in a moment.',
+  google_denied: 'You didn’t approve the sign-in on Google, so nothing was shared.',
+  google_unverified: 'That Google account’s email isn’t verified yet. Verify it with Google, then try again.',
 };
 
 function first(value: string | string[] | undefined): string | undefined {
@@ -38,6 +43,8 @@ export default async function SignInPage({ searchParams }: { searchParams: Searc
   const error = first(params.error);
   const message = error !== undefined && Object.hasOwn(ERRORS, error) ? ERRORS[error] : undefined;
   const githubHref = `/auth/signin?${new URLSearchParams({ next }).toString()}`;
+  const google = availability === 'github' && (await googleSignIn()) !== null;
+  const googleHref = `/auth/google?${new URLSearchParams({ next }).toString()}`;
 
   return (
     <main className="page">
@@ -47,7 +54,9 @@ export default async function SignInPage({ searchParams }: { searchParams: Searc
           <p className="lede">
             {availability === 'demo'
               ? 'This is the practice app, so there is a practice account instead of GitHub.'
-              : 'FORGE uses your GitHub account to know who you are. That is all it uses it for.'}
+              : google
+                ? 'FORGE uses your GitHub or Google account to know who you are. That is all it uses it for.'
+                : 'FORGE uses your GitHub account to know who you are. That is all it uses it for.'}
           </p>
         </div>
 
@@ -80,14 +89,18 @@ export default async function SignInPage({ searchParams }: { searchParams: Searc
               <li>FORGE sees your GitHub username, display name and profile picture.</li>
               <li>It gets no access to your repositories or your code.</li>
               <li>No GitHub token is kept: FORGE reads your profile once and lets the token go.</li>
+              {google && (
+                <li>
+                  With Google, FORGE sees your name and picture, and uses your email only to check it’s
+                  verified. Contributing code still needs GitHub.
+                </li>
+              )}
               <li>You stay signed in on this browser for up to 7 days, or until you sign out.</li>
             </ul>
             {availability === 'github' ? (
-              <p>
-                {/* A plain link, not next/link: a prefetch must never start a sign-in. */}
-                <a className="btn btn-primary btn-lg" href={githubHref}>
-                  Continue with GitHub
-                </a>
+              <p className={styles.ways}>
+                <SignInLink href={githubHref} label="Continue with GitHub" pending="Opening GitHub…" />
+                {google && <SignInLink href={googleHref} label="Continue with Google" pending="Opening Google…" />}
               </p>
             ) : (
               <p className="muted">

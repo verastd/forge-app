@@ -47,6 +47,7 @@ from forge_api.models import (
     AvatarMemberList,
     AvatarUpdate,
 )
+from forge_api.services import identity as identity_service
 from forge_api.services import members as members_service
 from forge_api.services.errors import ApiError
 from forge_api.services.identity import Identity, is_admin
@@ -667,7 +668,7 @@ def list_members(db: StateDB) -> AvatarMemberList:
     """Every member, for the editor: oldest first, as gh:<id>."""
     return AvatarMemberList(
         members=[
-            AvatarMember(memberId=f"gh:{m.sub}", login=m.login)
+            AvatarMember(memberId=identity_service.member_id(m.sub), login=m.login)
             for m in members_service.all_members(db)
         ]
     )
