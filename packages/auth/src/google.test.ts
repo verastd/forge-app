@@ -30,7 +30,7 @@ const EXCHANGE = {
   redirectUri: 'https://forge.example/auth/google/callback',
   codeVerifier: VERIFIER,
 };
-const TOKEN = 'ya29.google-token-must-never-leak-0003';
+const TOKEN = 'google-access-token-must-never-leak-0003';
 const JANE = {
   sub: '109876543210987654321',
   name: 'Jane Doe',
