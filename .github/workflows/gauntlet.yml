@@ -182,7 +182,9 @@ jobs:
     # deliberately down — the chromium-demo project asserts the offline demo
     # path (NEXT_PUBLIC_FORGE_DEMO=1), and chromium-live asserts that live
     # mode fails closed (no fixture data, no fictional write success).
-    runs-on: ubuntu-latest
+    # Pinned: `ubuntu-latest` moved to 26.04, which the repo's Playwright (1.56)
+    # can't install Chromium on. Move this on with a Playwright that supports it.
+    runs-on: ubuntu-24.04
     needs: hygiene # fail fast — don't pay for a browser download on a broken PR
     permissions:
       contents: read
