@@ -27,6 +27,13 @@
  * `data-hover-glow` (on or off) whenever they change, and how many people
  * are robots (with avatars on) as `data-robots`.
  *
+ * With avatars on, the cave's helper bots (helpers.ts) go round its edge,
+ * stopping for whoever comes up to them, and sweep it with their beacons. The
+ * root says what each is doing as `data-helpers` (`patrolling` or `stopped`,
+ * space-separated in @forge/lobby's HELPER_BOTS order), where as
+ * `data-helper-at` (`x,z` each), and how many are drawn as robots yet as
+ * `data-helper-robots` (the rest are orbs, loading).
+ *
  * With avatars on, members also bump into each other (`collideBodies`):
  * after each step the local member is pushed out of everyone drawn and
  * bounces off them, counted on the root as `data-bumps`.
@@ -39,13 +46,14 @@
  */
 
 import * as THREE from 'three';
-import { THIRD_PERSON, WALL, boomOffset, chaseCamera, clampCamera, collideBodies, normalizeYaw, slotPose } from '@forge/lobby';
-import type { AppEntry, CameraState, CameraView, MachineSpot } from '@forge/lobby';
+import { HELPER_BOTS, THIRD_PERSON, WALL, boomOffset, chaseCamera, clampCamera, collideBodies, normalizeYaw, slotPose } from '@forge/lobby';
+import type { AppEntry, CameraState, CameraView, MachineSpot, Vec3 } from '@forge/lobby';
 
 import type { PeerState, PresenceFeed, SelfState } from '../presence/types';
 import { createControls, createPicker } from './controls';
 import type { Hit, Motion } from './controls';
 import { CAVE_PALETTE, shaderColor } from './palette';
+import { createHelpers } from './helpers';
 import { createPeers } from './peers';
 import { createBricks } from './bricks/controller';
 import type { BrickCommand, BrickState, Builder, Bricks } from './bricks/controller';
@@ -500,6 +508,9 @@ export function createCave(canvas: HTMLCanvasElement, opts: CaveOptions): Cave {
     robotAssets && avatarDirectory ? { assets: robotAssets, directory: avatarDirectory } : null,
   );
   let robotCount = -1;
+  // The cave's helper bots, with avatars on: drawn among the peers, stepped by the wall clock.
+  const helpers = opts.avatars ? createHelpers(scene, Date.now()) : null;
+  const everyone: Vec3[] = [];
   // Catch and waving, with avatars on: the camera joins the scene so a ball held in first person can ride in it.
   const play: Play | null = opts.avatars
     ? createPlay(scene, camera, opts.feed, {
@@ -876,7 +887,24 @@ export function createCave(canvas: HTMLCanvasElement, opts: CaveOptions): Cave {
         feed.setListener(self);
         others = feed.peers();
       }
-      peers.update(dt, t, camera, others, reducedMotion, motion.pos, play ? (id) => play.act(id) : undefined);
+      let drawn = others;
+      if (helpers) {
+        // Who a bot stops for: you, and everyone the feed has.
+        everyone.length = 0;
+        everyone.push(motion.pos, ...others.values());
+        helpers.step(Date.now(), everyone);
+        drawn = helpers.withPeers(others);
+      }
+      peers.update(
+        dt,
+        t,
+        camera,
+        drawn,
+        reducedMotion,
+        motion.pos,
+        play || helpers ? (id) => helpers?.act(id, reducedMotion) ?? play?.act(id) : undefined,
+      );
+      helpers?.light((id) => peers.robotOf(id));
       const selfNow = peers.updateSelf(
         dt,
         t,
@@ -1011,6 +1039,14 @@ export function createCave(canvas: HTMLCanvasElement, opts: CaveOptions): Cave {
         root.dataset.yaw = fixed(normalizeYaw(motion.yaw));
         root.dataset.pitch = fixed(motion.pitch);
         if (opts.avatars) root.dataset.bumps = String(bumps);
+        if (helpers) {
+          root.dataset.helpers = helpers.modes().join(' ');
+          root.dataset.helperAt = helpers
+            .where()
+            .map((at) => `${fixed(at.x)},${fixed(at.z)}`)
+            .join(' ');
+          root.dataset.helperRobots = String(HELPER_BOTS.filter((bot) => peers.robotOf(bot.id) !== null).length);
+        }
         const key = poseKey();
         if (key !== focusKey) {
           focusKey = key;
@@ -1072,6 +1108,10 @@ export function createCave(canvas: HTMLCanvasElement, opts: CaveOptions): Cave {
       bricks?.dispose();
       machines?.dispose();
       peers.dispose();
+      helpers?.dispose();
+      delete root.dataset.helpers;
+      delete root.dataset.helperAt;
+      delete root.dataset.helperRobots;
       delete root.dataset.ball;
       delete root.dataset.wave;
       avatarDirectory?.dispose();

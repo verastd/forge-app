@@ -1169,7 +1169,8 @@ home, on screen whenever the wall is the page.
   `csp.ts`); which chrome a route gets (`chrome.ts`, which `SiteChrome`
   uses); the presence packet, send rate, name rules, rate limit and the
   check that a peer's next position is one a camera could reach
-  (`presence.ts`, with the camera's top speeds in `camera.ts`); and the
+  (`presence.ts`, with the camera's top speeds in `camera.ts`); the helper
+  bots' loop and when they stop (`helpers.ts`); and the
   voice: Fable's attenuation curves and acoustics (`attenuation.ts`,
   `acoustics.ts`, including the cave's synthesized impulse response) and
   the cave's settings and rules for them (`voice.ts`: the ranges, the
@@ -1215,8 +1216,11 @@ or `on`), `data-sound` (`blocked` while the browser holds sound back until
 a tap, `on`, or `none` without voice), `data-room-sound` (the cave's
 reverb: `off`, `rendering`, `live` or `failed`), `data-deafened`, and
 `data-hover-slot` and `data-hover-glow` (the empty slot whose readout is
-showing, or empty, and whether its light is `on` or `off`). The people
-panel marks each row `data-person-id`. The site nav's header on `/apps`
+showing, or empty, and whether its light is `on` or `off`). With robot
+avatars on, `data-helpers` (each helper bot's `patrolling` or `stopped`),
+`data-helper-at` (each one's `x,z`) and `data-helper-robots` (how many are
+drawn as robots yet; the rest are orbs, loading) report the helper bots
+(below). The people panel marks each row `data-person-id`. The site nav's header on `/apps`
 carries `data-nav-mode` and `data-nav` (`shown` or `hidden`).
 
 **Moving and opening.** Drag to look (a drag pulls the cave, as a photo
@@ -1249,6 +1253,33 @@ a coarse pointer, four or fewer cores, or Save-Data
 preloads metadata alone, and loads in full once the camera comes within
 40 m. Media is same-origin only (the registry refuses anything with a
 scheme), because the scene samples the pixels for the room's light.
+
+**The helper bots.** With robot avatars on (`lobby_avatars`), the cave has
+robots of its own: one today, `bot:helper`, named "Helper". It goes round
+the cave's edge at 1.2 m/s (a lap in a little over two minutes) on a loop
+24.91 m out, the walking disk's edge less a body, so it never meets a brick
+or a machine (they stand within 24 m). Anyone who comes within 4 m of it
+stops it: it slows to a halt, turns to face the nearest of them and waves
+once, and waits until nobody has been within 5.5 m of it for 2 s, then turns
+back to its way and goes on. Its pure half is `@forge/lobby`'s `helpers.ts`;
+the scene draws it among the peers (`scene/helpers.ts`), so it is an orb
+while the body loads, then a robot with a name tag marked "Bot", and members
+bump into it; it is never in the people panel, the people count or
+`data-robots`. There is no server to keep its place (ADR-009's world
+participant doesn't exist yet), so its place on the loop comes from the wall
+clock, and every client draws it in the same spot give or take their
+clocks; who it stops for is everyone's position, which every client already
+has. A stop leaves it behind its schedule, and it cruises up to twice as
+fast until it has caught up, so a client that arrived meanwhile soon agrees.
+It wears the head it ships with (`public/lobby/helper-head.glb`, worn by
+`scene/robot/builtin.ts`), a gunmetal box with an amber beacon whose band of
+light and beam go round (`scene/robot/beacon.ts`), and one real spotlight
+per bot follows the beam, so the sweep lights the floor, the rock and
+anyone it passes; with reduced motion the beacon glows still. Admins dress
+it in the avatar editor like a member: it is listed first, as a "Lobby bot",
+and a head or a chestplate can be made for it. The API takes only the bots
+it lists (`HELPER_BOTS` in `services/avatars.py`, pinned to `helpers.ts` by
+its tests).
 
 **Presence and voice.** One feed per visit, picked by `createPresenceFeed`
 in `presence/`:

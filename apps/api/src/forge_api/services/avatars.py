@@ -6,6 +6,10 @@ face accessory worn over it (a mask over the eyes, a visor, a helmet). A member 
 dressed has no row here and wears the default the lobby derives from their id
 (@forge/lobby's `defaultColors`).
 
+The cave's helper bots (`HELPER_BOTS`, @forge/lobby's helpers.ts) are dressed the same way:
+they're in the editor's list beside the members, as `bot:<name>`, and a head can be made for
+one. Only the ones listed here can be dressed.
+
 Files (chest images and heads) are stored once each, by their sha256, in `avatars_assets`
 and served from `GET /api/avatars/assets/{sha256}` forever-cacheable: a new upload is a new
 hash, so a cached copy is never stale. A file nothing uses any more is deleted with the
@@ -32,6 +36,7 @@ from forge_api.models import (
     AVATAR_CHEST_VIDEO_MAX_BYTES,
     AVATAR_EYE_NODES,
     AVATAR_HEAD_MAX_BYTES,
+    AVATAR_MEMBER_ID,
     AVATAR_PLACEMENT_AS_IS,
     Avatar,
     AvatarAccess,
@@ -55,6 +60,19 @@ from forge_api.services.state import StateDB, register_schema
 
 FLAG: Final = "lobby_avatars"
 GLB_TYPE: Final = "model/gltf-binary"
+
+#: The cave's helper bots, as the editor lists them (their login is the name it shows). Mirrors
+#: the ids in @forge/lobby's HELPER_BOTS (packages/lobby/src/helpers.ts); tests pin the two.
+HELPER_BOTS: Final = (AvatarMember(memberId="bot:helper", login="helper-bot"),)
+
+
+def is_robot(robot_id: str) -> bool:
+    """Whether `robot_id` names a robot an admin can dress: a member's (`gh:<id>` or
+    `go:<id>`; whether they've signed in isn't asked), or a helper bot in HELPER_BOTS."""
+    if robot_id.startswith("bot:"):
+        return any(bot.memberId == robot_id for bot in HELPER_BOTS)
+    return re.fullmatch(AVATAR_MEMBER_ID, robot_id) is not None
+
 
 register_schema(
     "avatars",
@@ -608,7 +626,10 @@ def _store_placement(db: StateDB, head_id: str, placement: AvatarHeadPlacement |
 
 
 def _store_owner(db: StateDB, head_id: str, owner: str | None) -> None:
-    """Gives a head to `owner` (None: nobody); whoever else wore it goes back to their own."""
+    """Gives a head to `owner` (None: nobody); whoever else wore it goes back to their own.
+    400 unknown_owner for a helper bot the cave doesn't have."""
+    if owner is not None and not is_robot(owner):
+        raise ApiError(400, {"error": "unknown_owner", "fields": ["owner"]})
     db.execute("DELETE FROM avatars_head_owners WHERE head_id = ?", (head_id,))
     if owner is not None:
         db.execute(
@@ -665,11 +686,15 @@ def list_all(db: StateDB) -> AvatarList:
 
 
 def list_members(db: StateDB) -> AvatarMemberList:
-    """Every member, for the editor: oldest first, as gh:<id>."""
+    """Every robot an admin can dress, for the editor: the helper bots, then every member,
+    oldest first, as gh:<id>."""
     return AvatarMemberList(
         members=[
-            AvatarMember(memberId=identity_service.member_id(m.sub), login=m.login)
-            for m in members_service.all_members(db)
+            *HELPER_BOTS,
+            *(
+                AvatarMember(memberId=identity_service.member_id(m.sub), login=m.login)
+                for m in members_service.all_members(db)
+            ),
         ]
     )
 

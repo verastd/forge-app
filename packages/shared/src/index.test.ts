@@ -1151,3 +1151,20 @@ describe('AvatarHeadPlacementSchema', () => {
     expect(AvatarHeadUploadSchema.safeParse({ name: 'Bolt', fit: 'replace', data: 'AA==', placement: fitted }).success).toBe(true);
   });
 });
+
+describe('AVATAR_ROBOT_ID', () => {
+  it('takes a member or a helper bot wherever a robot is dressed, and members only elsewhere', () => {
+    const colors = { shell: '#34353b', trim: '#ff9a1f', accent: '#ffb627', eye: '#ffc83d' };
+    for (const id of ['gh:1001', 'bot:helper', 'bot:helper-2']) {
+      expect(shared.AVATAR_ROBOT_ID.test(id), id).toBe(true);
+      expect(shared.AvatarSchema.safeParse({ memberId: id, colors, updatedAt: 'now' }).success, id).toBe(true);
+      expect(shared.AvatarMemberSchema.safeParse({ memberId: id, login: 'x' }).success, id).toBe(true);
+      expect(shared.AvatarHeadOwnerSchema.safeParse({ owner: id }).success, id).toBe(true);
+    }
+    for (const id of ['bot:', 'bot:Helper', 'bot:-x', 'gh:abc', 'helper']) {
+      expect(shared.AVATAR_ROBOT_ID.test(id), id).toBe(false);
+    }
+    // Bricks and machines are still a member's: no bot holds or builds.
+    expect(shared.AVATAR_MEMBER_ID.test('bot:helper')).toBe(false);
+  });
+});

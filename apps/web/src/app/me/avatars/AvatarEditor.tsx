@@ -16,7 +16,7 @@
 import dynamic from 'next/dynamic';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent, FormEvent } from 'react';
-import { AVATAR_FINISHES, AVATAR_PALETTES, CHEST_VIDEO, chestVideoProblem, defaultColors, emblemInitials } from '@forge/lobby';
+import { AVATAR_FINISHES, AVATAR_PALETTES, CHEST_VIDEO, chestVideoProblem, defaultColors, emblemInitials, isHelperBot } from '@forge/lobby';
 import type { AvatarColors, AvatarFinish } from '@forge/lobby';
 import {
   AVATAR_CAPE_DEFAULT,
@@ -47,6 +47,7 @@ import {
   uploadChest,
   uploadHead,
 } from '../../../lib/avatars';
+import { defaultHead } from '../../../components/lobby/scene/robot/builtin';
 import type { RobotLook } from '../../../components/lobby/scene/robot/view';
 import styles from './avatars.module.css';
 
@@ -412,6 +413,7 @@ export function AvatarEditor() {
                         {colors.eyeRight && <i style={{ background: colors.eyeRight }} />}
                       </span>
                       <span className={styles.memberName}>@{member.login}</span>
+                      {isHelperBot(member.memberId) && <span className="chip">Lobby bot</span>}
                       {saved?.finish && saved.finish !== 'paint' && <span className="chip">{FINISH_CHOICES[saved.finish].label}</span>}
                       {saved?.cape && <span className="chip">Cape</span>}
                       {saved?.back && <span className="chip">{list.heads.find((h) => h.id === saved.back)?.name ?? 'On its back'}</span>}
@@ -510,7 +512,8 @@ function RobotEditor({ member, list, setList, onDirty, onDraft }: RobotEditorPro
       id: member.memberId,
       name: member.login,
       colors: draft.colors,
-      head,
+      // A helper bot's own head is the one it ships with, as the lobby draws it.
+      head: head ?? defaultHead(member.memberId),
       accessory,
       chest: saved?.chest ?? null,
       chestType: saved?.chestType ?? null,
@@ -673,7 +676,7 @@ function RobotEditor({ member, list, setList, onDirty, onDraft }: RobotEditorPro
               onClick={() => setDraft((d) => ({ ...d, head: null }))}
             >
               <span>Its own head</span>
-              <span className={styles.headMeta}>With the face screen</span>
+              <span className={styles.headMeta}>{isHelperBot(member.memberId) ? 'The helper head, beacon and all' : 'With the face screen'}</span>
             </button>
             {ownHeads
               .filter((h) => h.fit === 'replace' || h.id === draft.head)

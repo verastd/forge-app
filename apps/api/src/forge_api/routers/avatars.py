@@ -6,7 +6,8 @@ off). The logic is services/avatars.py.
 - `GET /api/avatars/assets/{sha256}`: a chest image or a head, cacheable forever.
 - `GET /api/avatars/me`: whether the signed-in caller may edit (is an admin), for the web's
   account menu.
-- Admins only (`AdminMember`): `GET /api/avatars/members` (whom to dress),
+- Admins only (`AdminMember`): `GET /api/avatars/members` (whom to dress: the helper bots and
+  every member; `{memberId}` below is either),
   `PUT|DELETE /api/avatars/members/{memberId}`, `PUT|DELETE .../{memberId}/chest`, and
   `PUT|DELETE /api/avatars/heads/{headId}`.
 
@@ -24,7 +25,6 @@ from forge_api.models import (
     AVATAR_CHEST_MAX_BYTES,
     AVATAR_HEAD_ID,
     AVATAR_HEAD_MAX_BYTES,
-    AVATAR_MEMBER_ID,
     AVATAR_SHA256,
     Avatar,
     AvatarAccess,
@@ -65,7 +65,8 @@ def _require_enabled() -> None:
 
 
 def _member_id(memberId: str) -> str:
-    if re.fullmatch(AVATAR_MEMBER_ID, memberId) is None:
+    """A member's id, or a helper bot's; 404 member_not_found for anything else."""
+    if not avatars_service.is_robot(memberId):
         raise ApiError(404, {"error": "member_not_found"})
     return memberId
 
