@@ -1050,9 +1050,10 @@ class GcsStatus(BaseModel):
 # wire-golden.json, whose describer probes strings with plain letters).
 # ---------------------------------------------------------------------------
 
-AVATAR_MEMBER_ID: Final = r"^gh:[0-9]{1,20}$"
-#: A robot an admin can dress: a member's, or a helper bot's (services/avatars.py HELPER_BOTS).
-AVATAR_ROBOT_ID: Final = r"^(?:gh:[0-9]{1,20}|bot:[a-z0-9][a-z0-9-]{0,31})$"
+AVATAR_MEMBER_ID: Final = r"^(?:gh:[0-9]{1,20}|go:[0-9]{1,40})$"
+#: A robot an admin can dress: a member's (GitHub or Google), or a helper bot's
+#: (services/avatars.py HELPER_BOTS).
+AVATAR_ROBOT_ID: Final = r"^(?:gh:[0-9]{1,20}|go:[0-9]{1,40}|bot:[a-z0-9][a-z0-9-]{0,31})$"
 AVATAR_HEAD_ID: Final = r"^[a-z0-9][a-z0-9-]{0,39}$"
 AVATAR_SHA256: Final = r"^[0-9a-f]{64}$"
 AVATAR_HEAD_NAME_MAX: Final = 40

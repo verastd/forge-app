@@ -1,5 +1,5 @@
 /**
- * @forge/auth — Sign in with GitHub for FORGE.
+ * @forge/auth — Sign in with GitHub (and, as a second way in, Google) for FORGE.
  *
  * Edge-safe by construction: Next's middleware imports this package, so every
  * module is built on Web APIs (Web Crypto, TextEncoder, fetch) and jose, never
@@ -21,17 +21,20 @@ export {
   revokeGitHubToken,
 } from './github.js';
 export type { AuthorizeUrlParams, ExchangeCodeParams, FetchLike, GitHubUser, RevokeTokenParams } from './github.js';
+export { exchangeGoogleCode, fetchGoogleUser, googleAuthorizeUrl, googleHandle, isGoogleLogin, isGoogleSub } from './google.js';
+export type { GoogleAuthorizeUrlParams, GoogleExchangeParams, GoogleUser } from './google.js';
 export { acceptSession, DEV_SESSION_SECRET, resolveSessionKeys, sessionAllowed } from './keys.js';
 export type { AcceptOptions, NoSessionKeys, SessionKeyEnv, SessionKeys } from './keys.js';
 export { createPkcePair, pkceChallenge } from './pkce.js';
 export type { PkcePair } from './pkce.js';
 export { randomToken } from './random.js';
 export { safeNext } from './redirect.js';
-export { MIN_SECRET_LENGTH, openSession, sealSession } from './session.js';
+export { isGitHubSession, memberId, MIN_SECRET_LENGTH, openSession, sealSession } from './session.js';
 export type { SessionClaims, SessionInput, TimeOptions } from './session.js';
 export { isRepoAction, openTransaction, REPO_ACTIONS, sealTransaction } from './transaction.js';
 export type {
   AgentAttempt,
+  GoogleAttempt,
   RepoAction,
   RepoAttempt,
   SignInAttempt,

@@ -18,7 +18,7 @@ import type { ApiOutcome } from '../../../lib/bff-forward';
 export const MEMBERS_HELLO_PATH = '/api/members/hello';
 export const HELLO_TIMEOUT_MS = 3000;
 
-/** Who signed in: the session's GitHub user id and login. */
+/** Who signed in: the session's sub (a GitHub user id, or `google:<id>`) and login. */
 export interface Member {
   sub: string;
   login: string;

@@ -10,7 +10,7 @@ import type { SessionClaims, SessionInput } from '@forge/auth';
 import { loadFlags } from '@forge/flags';
 import { cookies } from 'next/headers';
 
-import { githubAppConfig, githubRepoConfig, isProduction, sessionKeys } from './auth/config';
+import { githubAppConfig, githubRepoConfig, googleConfig, isProduction, sessionKeys } from './auth/config';
 import type { GitHubAppConfig } from './auth/config';
 import { visitorSession } from './auth/visitor';
 import { isDemoMode } from './mode';
@@ -49,6 +49,19 @@ export async function signInAvailability(): Promise<SignInAvailability> {
   if (keys.practiceOnly || githubAppConfig() === null) return 'unavailable';
   const flags = await loadFlags();
   return flags.github_signin ? 'github' : 'unavailable';
+}
+
+/**
+ * Google sign-in's settings, or null while it is off: the practice build,
+ * keys only good for practice, the `github_signin` flag off (one switch for
+ * signing in at all), or no Google client configured (`googleConfig`).
+ */
+export async function googleSignIn(): Promise<GitHubAppConfig | null> {
+  const keys = sessionKeys();
+  const config = googleConfig();
+  if (keys === null || keys.practiceOnly || isDemoMode() || config === null) return null;
+  const flags = await loadFlags();
+  return flags.github_signin ? config : null;
 }
 
 /**

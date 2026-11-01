@@ -39,8 +39,8 @@ from forge_api.models import (
 )
 from forge_api.routers.members import (
     AdminMember,
+    AnyMember,
     Db,
-    Member,
     Now,
     body_doc,
     json_body,
@@ -121,7 +121,7 @@ def get_asset(sha256: str, db: Db) -> Response:
 
 
 @router.get("/me", response_model=AvatarAccess)
-def my_access(user: Member) -> AvatarAccess:
+def my_access(user: AnyMember) -> AvatarAccess:
     """Whether the caller may use the avatar editor: the web's account menu asks, to link
     admins to it. The editor's own routes still check, every time."""
     return avatars_service.access(user)

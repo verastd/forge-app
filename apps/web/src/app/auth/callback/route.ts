@@ -8,8 +8,8 @@
  * back here too, and takes its own branch below; the sign-in path is
  * unchanged, except that once the session is set it says hello to the API
  * for the new member (`members-hello.ts`), best effort, after the redirect.
- * A `repo` attempt (the OAuth App's, `/auth/github/repo`) has its own
- * callback and is refused here.
+ * A `repo` attempt (the OAuth App's, `/auth/github/repo`) and a Google
+ * sign-in (`/auth/google`) have their own callbacks and are refused here.
  */
 import {
   AuthError,
@@ -61,6 +61,8 @@ export async function GET(request: NextRequest): Promise<Response> {
   // "Your copy" and "Send for review" come back to /auth/github/repo/callback,
   // never here: an OAuth App attempt is no sign-in, whatever the query says.
   if (tx.purpose === 'repo') return signInFailed('state');
+  // Nor is a Google sign-in, which only /auth/google/callback takes.
+  if (tx.purpose === 'google') return signInFailed('state');
 
   const params = request.nextUrl.searchParams;
   if (!constantTimeEqual(params.get('state') ?? '', tx.state)) return signInFailed('state');

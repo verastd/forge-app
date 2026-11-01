@@ -15,6 +15,7 @@ import {
   COOKIE,
   cookieOptions,
   createPkcePair,
+  isGitHubSession,
   isRepoAction,
   publicRepoAuthorizeUrl,
   randomToken,
@@ -33,7 +34,7 @@ export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest): Promise<Response> {
   return startRepoAuthorization(request, {
-    auth: { createPkcePair, isRepoAction, publicRepoAuthorizeUrl, randomToken, sealTransaction },
+    auth: { createPkcePair, isGitHubSession, isRepoAction, publicRepoAuthorizeUrl, randomToken, sealTransaction },
     sameOrigin: () => isSameOrigin(request),
     session: getSession,
     setup: async () => {
