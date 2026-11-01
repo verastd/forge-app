@@ -1051,6 +1051,8 @@ class GcsStatus(BaseModel):
 # ---------------------------------------------------------------------------
 
 AVATAR_MEMBER_ID: Final = r"^gh:[0-9]{1,20}$"
+#: A robot an admin can dress: a member's, or a helper bot's (services/avatars.py HELPER_BOTS).
+AVATAR_ROBOT_ID: Final = r"^(?:gh:[0-9]{1,20}|bot:[a-z0-9][a-z0-9-]{0,31})$"
 AVATAR_HEAD_ID: Final = r"^[a-z0-9][a-z0-9-]{0,39}$"
 AVATAR_SHA256: Final = r"^[0-9a-f]{64}$"
 AVATAR_HEAD_NAME_MAX: Final = 40
@@ -1082,6 +1084,7 @@ AVATAR_PLACEMENT_SCREEN_MAX: Final = 0.6
 _HexColor = Annotated[str, Field(pattern=r"^#[0-9a-f]{6}$")]
 _AvatarHeadId = Annotated[str, Field(pattern=AVATAR_HEAD_ID)]
 _AvatarMemberId = Annotated[str, Field(pattern=AVATAR_MEMBER_ID)]
+_AvatarRobotId = Annotated[str, Field(pattern=AVATAR_ROBOT_ID)]
 _Sha256 = Annotated[str, Field(pattern=AVATAR_SHA256)]
 _Reach = Annotated[
     float, Field(ge=-AVATAR_PLACEMENT_REACH, le=AVATAR_PLACEMENT_REACH, allow_inf_nan=False)
@@ -1128,7 +1131,7 @@ _Opacity = Annotated[float, Field(ge=0, le=1, allow_inf_nan=False)]
 
 
 class Avatar(BaseModel):
-    memberId: _AvatarMemberId
+    memberId: _AvatarRobotId
     colors: AvatarColors
     head: _AvatarHeadId | None = None
     #: A face accessory worn over the head; None: none.
@@ -1248,7 +1251,7 @@ class AvatarHead(BaseModel):
     eyes: bool
     placement: AvatarHeadPlacement = AVATAR_PLACEMENT_AS_IS
     #: The member it was made for; None: nobody yet.
-    owner: _AvatarMemberId | None = None
+    owner: _AvatarRobotId | None = None
     updatedAt: str
 
 
@@ -1285,7 +1288,7 @@ class AvatarHeadUpload(BaseModel):
     fit: AvatarHeadFit
     data: Annotated[str, Field(min_length=1)]
     placement: AvatarHeadPlacement | None = None
-    owner: _AvatarMemberId | None = None
+    owner: _AvatarRobotId | None = None
 
 
 class AvatarHeadRefit(BaseModel):
@@ -1297,11 +1300,11 @@ class AvatarHeadRefit(BaseModel):
 class AvatarHeadOwner(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    owner: _AvatarMemberId | None
+    owner: _AvatarRobotId | None
 
 
 class AvatarMember(BaseModel):
-    memberId: _AvatarMemberId
+    memberId: _AvatarRobotId
     login: str
 
 

@@ -6,13 +6,16 @@
  * A member nobody has dressed, and everyone while the list hasn't arrived
  * (or can't: signed out on a server without the API, the practice account),
  * wears their default: @forge/lobby's palette for their id, their own head
- * and their emblem. The lobby never waits on this list to draw anyone.
+ * and their emblem. A helper bot's own head is the one it ships with
+ * (builtin.ts), dressed or not, until an admin gives it another. The lobby
+ * never waits on this list to draw anyone.
  */
 
 import { defaultColors } from '@forge/lobby';
 import { AvatarListSchema } from '@forge/shared';
 import type { AvatarHead, AvatarList } from '@forge/shared';
 
+import { defaultHead } from './builtin';
 import type { RobotLook } from './view';
 
 export const AVATARS_URL = '/bff/avatars';
@@ -33,7 +36,7 @@ export interface AvatarDirectory {
 
 export function lookFrom(list: AvatarList | null, id: string, name: string): RobotLook {
   const dressed = list?.avatars.find((avatar) => avatar.memberId === id);
-  const head: AvatarHead | null = dressed?.head ? (list?.heads.find((h) => h.id === dressed.head) ?? null) : null;
+  const head: AvatarHead | null = (dressed?.head ? list?.heads.find((h) => h.id === dressed.head) : null) ?? defaultHead(id);
   const accessory: AvatarHead | null = dressed?.accessory ? (list?.heads.find((h) => h.id === dressed.accessory) ?? null) : null;
   const back: AvatarHead | null = dressed?.back ? (list?.heads.find((h) => h.id === dressed.back) ?? null) : null;
   return {

@@ -21,6 +21,8 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { emblemInitials, segmentRobot } from '@forge/lobby';
 import type { AvatarColors } from '@forge/lobby';
 
+import { builtInHeadUrl } from './builtin';
+
 export const ROBOT_URL = '/lobby/robot.glb';
 /** Where the avatars BFF serves a stored file. */
 export const assetUrl = (sha256: string): string => `/bff/avatars/assets/${sha256}`;
@@ -194,7 +196,8 @@ export function createRobotAssets(renderer: THREE.WebGLRenderer): RobotAssets {
   return {
     body,
     head(sha256) {
-      return heads.get(sha256, () => loader().loadAsync(assetUrl(sha256)));
+      // A head the lobby ships with comes from its own file; any other from the library.
+      return heads.get(sha256, () => loader().loadAsync(builtInHeadUrl(sha256) ?? assetUrl(sha256)));
     },
     localHead(key, bytes) {
       return heads.get(key, () => loader().parseAsync(bytes, ''));

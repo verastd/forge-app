@@ -6,7 +6,8 @@
  * presence.ts) the multiplayer packet and name rules, and the voice: Fable's
  * attenuation and acoustics (attenuation.ts, acoustics.ts) and the cave's
  * settings for them (voice.ts), members bumping into each other
- * (collide.ts), fitting a library head to the robot (headFit.ts) and the
+ * (collide.ts), the cave's helper bots going round its edge (helpers.ts),
+ * fitting a library head to the robot (headFit.ts) and the
  * shared behaviours (behaviors/: the catalog, budgets, entities and the
  * world, ADR-009). No DOM, no three.js and no runtime
  * dependencies (tsconfig.json and eslint.config.mjs enforce it), so the
@@ -33,6 +34,7 @@ export * from './voice.js';
 export * from './avatar.js';
 export * from './avatarMotion.js';
 export * from './collide.js';
+export * from './helpers.js';
 export * from './chase.js';
 export * from './actions.js';
 export * from './play.js';

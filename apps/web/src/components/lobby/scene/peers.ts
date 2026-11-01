@@ -15,6 +15,10 @@
  * someone you can hear. Nothing here invents movement or speech: a robot
  * leans, banks and burns its thruster from how its member actually moves.
  *
+ * The cave's helper bots (helpers.ts) come in among the peers and are drawn
+ * the same way, with a tag that says they're a bot; they aren't counted
+ * among the robots (`robotCount`), which are people.
+ *
  * The people panel (VoicePanel.tsx) lists everyone in the room, nearest first
  * with their distance, so nobody who could be listening is invisible:
  * someone whose position hasn't arrived yet gets no orb, and a row reading
@@ -25,7 +29,7 @@
  */
 
 import * as THREE from 'three';
-import { nearness, normalizeYaw, sanitizeName, stepSpring, wrapAngle } from '@forge/lobby';
+import { isHelperBot, nearness, normalizeYaw, sanitizeName, stepSpring, wrapAngle } from '@forge/lobby';
 import type { Spring, Vec3 } from '@forge/lobby';
 
 import type { PeerState } from '../presence/types';
@@ -41,6 +45,8 @@ export interface PeerClasses {
   peer: string;
   tag: string;
   talking: string;
+  /** A helper bot's (its tag says "Bot"). */
+  bot: string;
 }
 
 /** What robots need, when avatars are on. */
@@ -93,7 +99,7 @@ export interface Peers {
   updateSelf(dt: number, t: number, self: SelfFrame | null, reducedMotion: boolean): SelfRobotState;
   /** Loads the shared body again, after it failed: everyone's robot, and yours. */
   retryBody(): void;
-  /** How many peers are drawn as robots now (the rest are orbs). */
+  /** How many peers are drawn as robots now (the rest are orbs); helper bots aren't counted. */
   robotCount(): number;
   /** Where everyone is drawn now, eye positions: what the local member bumps into. */
   bodies(): readonly Vec3[];
@@ -239,6 +245,12 @@ export function createPeers(
     // A right-to-left name keeps its own direction (and its beginning) inside the tag.
     nameEl.dir = 'auto';
     tag.append(dot, nameEl);
+    if (isHelperBot(id)) {
+      el.classList.add(classes.bot);
+      const label = document.createElement('b');
+      label.textContent = 'Bot';
+      tag.append(label);
+    }
     el.append(tag);
     el.style.display = 'none';
     layer.append(el);
@@ -484,7 +496,7 @@ export function createPeers(
     },
     robotCount() {
       let count = 0;
-      for (const view of views.values()) if (view.robot) count += 1;
+      for (const [id, view] of views) if (view.robot && !isHelperBot(id)) count += 1;
       return count;
     },
     dispose() {

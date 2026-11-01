@@ -111,6 +111,18 @@
   box-shadow: 0 0 0 3px rgba(var(--cave-accent-rgb), 0.35);
 }
 
+/* A helper bot: a square light, and "Bot" after its name. */
+.peer.bot .tag i {
+  border-radius: 1px;
+}
+
+.tag b {
+  font-weight: 400;
+  opacity: 0.6;
+  padding-left: 6px;
+  border-left: 1px solid rgba(var(--cave-line-rgb), 0.4);
+}
+
 /* ---- the overlay ---- */
 
 .overlay {

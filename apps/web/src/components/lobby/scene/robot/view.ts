@@ -21,6 +21,10 @@
  * this robot's colours (any other material keeps its own), and every one is
  * lit by the robots' environment map.
  *
+ * A head the lobby ships with (builtin.ts: the helper bot's) is worn the same
+ * way, from its own file; one with a beacon gets it spinning on its dome
+ * (beacon.ts), and says where its beam points (`beacon`) for the scene's light.
+ *
  * Until a library head or a chest image arrives, the robot wears its own
  * head and the chestplate shows its loading scan; neither ever leaves a gap.
  * One that fails to load (offline for a moment, a 5xx) is tried again every
@@ -54,6 +58,9 @@ import type { AvatarCape, AvatarChestBlend, AvatarHead } from '@forge/shared';
 
 import { createBackArm } from './backArm';
 import type { BackArm } from './backArm';
+import { createBeacon } from './beacon';
+import type { Beacon } from './beacon';
+import { headBeacon } from './builtin';
 import type { ChestClip, RobotAssets, RobotBody } from './assets';
 import { createCape } from './cape';
 import type { CapeView } from './cape';
@@ -68,6 +75,9 @@ import { JOINT_COLOR, createBodyMaterial, finish, paint } from './material';
  * little longer than robot/assets.ts keeps a failure cached.
  */
 export const RETRY_MS = 35_000;
+
+/** A beacon's light: amber, whatever the robot's paint (it's the lamp's own glass). */
+const BEACON_COLOR = 0xffa62b;
 
 /** The robot's size in the lobby: 1.4 m tall, so it hovers about a third of a metre up at eye height. */
 export const ROBOT_SCALE = 1.4;
@@ -206,6 +216,12 @@ export interface RobotView {
   spout(at: THREE.Vector3, dir: THREE.Vector3): boolean;
   /** A worn head's talking mouth: shut, open, or pouring blocks; 'none' without one. */
   readonly mouth: MouthLook | 'none';
+  /**
+   * Where the worn head's beacon shines from (into `at`) and which way its
+   * beam points now (into `direction`, unit length), in the cave. False with
+   * no beacon worn, or while it holds still (reduced motion).
+   */
+  beacon(at: THREE.Vector3, direction: THREE.Vector3): boolean;
   /**
    * The colour of the worn head's surface seen straight on at (x, y) in its
    * file's own frame (its texture, or its material's colour), as '#rrggbb';
@@ -627,6 +643,8 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
   /** A talking mouth on the worn head, and how it looks now. */
   let mouth: TalkingMouth | null = null;
   let mouthLook: MouthLook | 'none' = 'none';
+  /** The worn head's rotating beacon (builtin.ts says which heads have one). */
+  let lamp: Beacon | null = null;
   const mouthSeed = Math.floor(Math.random() * 1e9);
   let headMaterials: THREE.Material[] = [];
   // What flies over the head (placement.flyer), where it may fly, and the roofs it shines on.
@@ -868,10 +886,24 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
     if (mouthLook === 'none') mouthLook = 'shut';
   };
 
+  /** Puts the worn head's beacon on its dome, or takes it off. */
+  const placeBeacon = (head: AvatarHead): void => {
+    const dome = headObject ? headBeacon(head) : null;
+    if (!dome) {
+      lamp?.dispose();
+      lamp = null;
+      return;
+    }
+    lamp ??= createBeacon(glow, BEACON_COLOR);
+    if (lamp.root.parent !== headPivot) headPivot.add(lamp.root);
+    lamp.fit(dome);
+  };
+
   /** Fits the worn head as `head.placement` says, and puts what flies over it. */
   const placeHead = (head: AvatarHead): void => {
     fitHead(head);
     placeMouth(head);
+    placeBeacon(head);
     placeFlyer('head', head);
   };
 
@@ -881,6 +913,8 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
     mouth?.dispose();
     mouth = null;
     mouthLook = 'none';
+    lamp?.dispose();
+    lamp = null;
     if (headObject) {
       headObject.removeFromParent();
       // Geometry and textures belong to the cached head; the materials are this robot's.
@@ -1402,6 +1436,9 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
     get mouth() {
       return mouthLook;
     },
+    beacon(at, direction) {
+      return lamp?.aim(at, direction) ?? false;
+    },
     get look() {
       return look;
     },
@@ -1477,6 +1514,7 @@ export function createRobot(deps: RobotDeps, initial: RobotLook): RobotView {
       }
       clip?.want(viewer, chestPlays({ viewerDistance: frame.chestDistance ?? frame.viewerDistance, reducedMotion: frame.reducedMotion }));
       if (flyer && flight) flyer.fly(flight.area, flight.grid, frame.t, flyerStart, frame.reducedMotion);
+      lamp?.update(frame.t, frame.viewerBearing, frame.reducedMotion);
       if (mouth) {
         // The blocks fly in whatever the robot stands in.
         if (root.parent && mouth.stream.parent !== root.parent) root.parent.add(mouth.stream);
