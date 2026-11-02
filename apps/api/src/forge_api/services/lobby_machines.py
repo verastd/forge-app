@@ -129,7 +129,7 @@ def _bump(db: StateDB) -> int:
 
 
 def _member(user: Identity) -> str:
-    return f"gh:{user.sub}"
+    return user.member_id
 
 
 def _stamp(value: str) -> str:

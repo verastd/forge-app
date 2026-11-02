@@ -29,7 +29,7 @@ from forge_api.models import (
     BrickStandIn,
     BrickTakenDown,
 )
-from forge_api.routers.members import Db, Member, Now, body_doc, json_body, read_capped
+from forge_api.routers.members import AnyMember, Db, Now, body_doc, json_body, read_capped
 from forge_api.services import flags as flags_service
 from forge_api.services import lobby_bricks as bricks_service
 from forge_api.services import proposals as proposals_service
@@ -61,7 +61,7 @@ BuildId = Annotated[str, Depends(_build_id)]
 
 
 def _member_id(user: Identity) -> str:
-    return f"gh:{user.sub}"
+    return user.member_id
 
 
 router = APIRouter(
@@ -75,7 +75,7 @@ def list_bricks(db: Db, now: Now, since: Annotated[int | None, Query(ge=0)] = No
 
 
 @router.get("/me", response_model=BrickMe)
-def my_bricks(user: Member, db: Db) -> BrickMe:
+def my_bricks(user: AnyMember, db: Db) -> BrickMe:
     return bricks_service.me(db, user)
 
 
@@ -93,7 +93,7 @@ async def _build_body(request: Request) -> BrickBuild:
     openapi_extra=body_doc(BrickBuild),
 )
 def build_bricks(
-    user: Member,
+    user: AnyMember,
     db: Db,
     now: Now,
     body: Annotated[BrickBuild, Depends(_build_body)],
@@ -104,7 +104,7 @@ def build_bricks(
 
 @router.put("/me/stand-in", response_model=BrickMe, openapi_extra=body_doc(BrickStandIn))
 def put_stand_in(
-    user: Member,
+    user: AnyMember,
     db: Db,
     now: Now,
     body: Annotated[BrickStandIn, Depends(json_body(BrickStandIn))],
@@ -120,7 +120,7 @@ def put_stand_in(
     openapi_extra=body_doc(BrickMake),
 )
 def make_brick(
-    user: Member,
+    user: AnyMember,
     db: Db,
     now: Now,
     body: Annotated[BrickMake, Depends(json_body(BrickMake))],
@@ -129,7 +129,7 @@ def make_brick(
 
 
 @router.put("/{brickId}/pick", response_model=BrickChange, response_model_exclude_none=True)
-def pick_brick(user: Member, db: Db, now: Now, brick_id: BrickId) -> BrickChange:
+def pick_brick(user: AnyMember, db: Db, now: Now, brick_id: BrickId) -> BrickChange:
     return bricks_service.pick(db, user, brick_id, now)
 
 
@@ -140,7 +140,7 @@ def pick_brick(user: Member, db: Db, now: Now, brick_id: BrickId) -> BrickChange
     openapi_extra=body_doc(BrickPlace),
 )
 def place_brick(
-    user: Member,
+    user: AnyMember,
     db: Db,
     now: Now,
     brick_id: BrickId,
@@ -150,11 +150,11 @@ def place_brick(
 
 
 @router.delete("/builds/{buildId}", response_model=BrickTakenDown)
-def delete_build(user: Member, db: Db, now: Now, build_id: BuildId) -> BrickTakenDown:
+def delete_build(user: AnyMember, db: Db, now: Now, build_id: BuildId) -> BrickTakenDown:
     """The brick maker takes a whole blueprint build out of the cave, all at once."""
     return bricks_service.take_down(db, user, build_id, now)
 
 
 @router.delete("/{brickId}", response_model=BrickChange, response_model_exclude_none=True)
-def delete_brick(user: Member, db: Db, now: Now, brick_id: BrickId) -> BrickChange:
+def delete_brick(user: AnyMember, db: Db, now: Now, brick_id: BrickId) -> BrickChange:
     return bricks_service.remove(db, user, brick_id, now)

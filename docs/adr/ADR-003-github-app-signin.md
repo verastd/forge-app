@@ -7,7 +7,9 @@ GitHub").
 
 ## Status
 
-Accepted (Phase 1). Tightened after the Phase 1 security review: the
+Accepted (Phase 1). Amended 2026-10-31 by
+[Google as a second way in](#addendum-google-as-a-second-way-in-2026-10-31): the operator asked
+for Google sign-in beside GitHub, so "GitHub only" below no longer holds for signing in. Tightened after the Phase 1 security review: the
 transaction cookie's `__Host-` prefix, admins by GitHub id, a practice-only
 dev secret, and practice sign-in fixed at build time (all below).
 
@@ -143,3 +145,54 @@ sign-in is simply off.
   "signed out" or "Data app unreachable" rather than toward silently
   accepting a forged identity — but it does mean two things to get right
   instead of one.
+
+## Addendum: Google as a second way in, 2026-10-31
+
+The operator asked for Google sign-in "as an additional OAuth sign-in option", decided
+three things up front, and the rest follows from keeping GitHub's guarantees intact:
+
+- **Google members are members, minus GitHub work.** They get the lobby (voice, their
+  robot, bricks and machines), the Data app, `/me`, notifications and the Propose floor.
+  Anything that acts on GitHub (contributing, Send for review, starting an agent, the
+  FORGE connector) needs a GitHub account, and says so in words: `github_required`.
+- **Two accounts, never linked.** A person who signs in once with each is two members.
+  Linking by verified email can come later.
+- **Its own branch and pull request.**
+
+**Same flow, its own client.** `@forge/auth`'s `google.ts` is the GitHub client's twin:
+the code flow with PKCE (S256) and `state`, `openid email profile` and nothing wider,
+Google's account chooser every time, the token used once for the userinfo and dropped.
+An unverified email is refused. The attempt is sealed as its own transaction kind
+(`purpose: 'google'`): only `/auth/google/callback` takes it, and GitHub's `/auth/callback`
+refuses it (as the Google callback refuses a GitHub attempt). Configured by
+`GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`, with no flag besides; `github_signin` still
+switches signing in off altogether.
+
+**A Google member can never pass for a GitHub account.** Their session `sub` is
+`google:<Google's sub>`, which every GitHub-id check refuses, and their handle is `g.`
+and a slug of their name (never their email, which would go on every name tag), which
+no GitHub login can be. Session, assertion and API all accept a GitHub id with a GitHub
+login or a Google sub with a Google handle, never one with the other. Their member id
+is `go:<id>` (LiveKit identity, avatars, bricks and machines) beside GitHub's `gh:<id>`.
+Admins stay GitHub ids, so a Google member is never one.
+
+**Fail closed in the API.** `require_identity`, and so every existing `Member` route,
+answers a Google member `403 github_required`. Only routes that opt in (`AnyMember`,
+`MaybeAnyMember`, `require_any_identity`) take them: the members hello, the Data app
+(`/api/upland`, `/api/ledger`), the lobby's bricks and machines, `/api/avatars/me`,
+notifications and proposals. A route added later is GitHub-only until someone decides
+otherwise.
+
+**Consequences.**
+
+- **One more client to provision.** A Google Cloud OAuth client of type "Web
+  application", its authorized redirect URI `<FORGE_PUBLIC_ORIGIN>/auth/google/callback`,
+  on an OAuth consent screen with the `openid`, `email` and `profile` scopes. Until it is
+  set, `/signin` offers GitHub alone.
+- **Proposals count two votes for one person with two accounts.** The eligible set is
+  members, and a Google account is a member. The operator chose separate accounts; a
+  Propose floor that must be one vote per person needs linking, or Google members kept
+  out of the eligible set.
+- **More identity code to own,** under the same 100% coverage floor as the rest of
+  `packages/auth`.
+

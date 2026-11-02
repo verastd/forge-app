@@ -3,8 +3,11 @@
  * and the agents you connected to it, then the contribution record.
  * Server-rendered so the identity comes straight from the session cookie —
  * nothing here is fetched twice or flashes in after paint. The two agent
- * sections load through the BFF; the practice account has neither.
+ * sections load through the BFF; the practice account has neither, and nor
+ * does a Google member: agents and contributions are GitHub work, so their
+ * page says that, once, in place of all three.
  */
+import { isGitHubSession } from '@forge/auth';
 
 import { redirect } from 'next/navigation';
 
@@ -23,6 +26,7 @@ export default async function MePage() {
   }
 
   const displayName = session.name ?? session.login;
+  const google = !session.demo && !isGitHubSession(session);
 
   return (
     <main className="page stack-lg">
@@ -56,6 +60,8 @@ export default async function MePage() {
             <p className="muted" style={{ marginTop: 6 }}>
               {session.demo ? (
                 'Practice account (demo)'
+              ) : google ? (
+                'Signed in with Google'
               ) : (
                 <>
                   Signed in with GitHub ·{' '}
@@ -69,11 +75,24 @@ export default async function MePage() {
         </div>
       </section>
 
-      <AgentKeys practice={session.demo} />
-      <ConnectedAgents practice={session.demo} />
+      {google ? (
+        <section className="card stack">
+          <h2 className="section-title">Agents and contributions</h2>
+          <p className="muted">
+            These are GitHub work: an agent opens pull requests as you, and your record is your merged ones. You’re
+            signed in with Google, so sign out and sign in with GitHub to use them. The lobby and the Data app work
+            either way.
+          </p>
+        </section>
+      ) : (
+        <>
+          <AgentKeys practice={session.demo} />
+          <ConnectedAgents practice={session.demo} />
 
-      <h2 className="section-title">Your contributions</h2>
-      <ContributionRecord />
+          <h2 className="section-title">Your contributions</h2>
+          <ContributionRecord />
+        </>
+      )}
     </main>
   );
 }

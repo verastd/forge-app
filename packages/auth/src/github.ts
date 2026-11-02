@@ -261,9 +261,10 @@ export async function revokeGitHubToken({
  * The JSON object `url` answers with, or AuthError(`failure`). The error never
  * carries the request, so the client secret, the code and the token cannot
  * reach a log through it. `redirect: 'error'` means the body and headers,
- * credentials included, only ever go to the URL given here.
+ * credentials included, only ever go to the URL given here. Shared with
+ * google.ts.
  */
-async function fetchJson(
+export async function fetchJson(
   fetchImpl: FetchLike,
   url: string,
   init: RequestInit,

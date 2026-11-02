@@ -3,6 +3,7 @@
  * side, and the same sign-out as the account menu.
  */
 
+import { isGitHubSession } from '@forge/auth';
 import { redirect } from 'next/navigation';
 
 import { getSession } from '../../../lib/session';
@@ -14,6 +15,7 @@ export default async function MeSettingsPage() {
     // Belt-and-braces, same as /me: the middleware already gates /me/*.
     redirect('/signin?next=%2Fme%2Fsettings');
   }
+  const google = !session.demo && !isGitHubSession(session);
 
   return (
     <main className="page stack-lg">
@@ -26,7 +28,7 @@ export default async function MeSettingsPage() {
         <h2 className="section-title">Account</h2>
         <dl className={styles.details}>
           <div>
-            <dt>GitHub login</dt>
+            <dt>{google ? 'Handle' : 'GitHub login'}</dt>
             <dd>@{session.login}</dd>
           </div>
           <div>
@@ -35,7 +37,7 @@ export default async function MeSettingsPage() {
           </div>
           <div>
             <dt>Signed in with</dt>
-            <dd>{session.demo ? 'Practice account (demo)' : 'GitHub'}</dd>
+            <dd>{session.demo ? 'Practice account (demo)' : google ? 'Google' : 'GitHub'}</dd>
           </div>
         </dl>
       </section>

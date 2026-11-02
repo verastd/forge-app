@@ -39,9 +39,9 @@ from forge_api.models import (
 )
 from forge_api.routers.members import (
     AdminMember,
+    AnyMember,
     Db,
-    MaybeMember,
-    Member,
+    MaybeAnyMember,
     Now,
     body_doc,
     json_body,
@@ -90,7 +90,7 @@ def list_proposals(
 
 
 @router.get("/me", response_model=ProposalMe, response_model_exclude_none=True)
-def me(floor: Floor, user: Member) -> ProposalMe:
+def me(floor: Floor, user: AnyMember) -> ProposalMe:
     return floor.me(user)
 
 
@@ -117,14 +117,14 @@ def settings(
 )
 def move(
     floor: Floor,
-    user: Member,
+    user: AnyMember,
     request: Annotated[NewProposal, Depends(proposal_body)],
 ) -> ProposalDetail:
     return floor.move(user, request)
 
 
 @router.get("/{proposal_id}", response_model=ProposalDetail, response_model_exclude_none=True)
-def detail(proposal_id: str, floor: Floor, user: MaybeMember) -> ProposalDetail:
+def detail(proposal_id: str, floor: Floor, user: MaybeAnyMember) -> ProposalDetail:
     return floor.detail(proposals_service.parse_id(proposal_id), user)
 
 
@@ -137,7 +137,7 @@ def detail(proposal_id: str, floor: Floor, user: MaybeMember) -> ProposalDetail:
 def edit(
     proposal_id: str,
     floor: Floor,
-    user: Member,
+    user: AnyMember,
     request: Annotated[NewProposal, Depends(proposal_body)],
 ) -> ProposalDetail:
     return floor.edit(user, proposals_service.parse_id(proposal_id), request)
@@ -146,7 +146,7 @@ def edit(
 @router.post(
     "/{proposal_id}/withdraw", response_model=ProposalDetail, response_model_exclude_none=True
 )
-def withdraw(proposal_id: str, floor: Floor, user: Member) -> ProposalDetail:
+def withdraw(proposal_id: str, floor: Floor, user: AnyMember) -> ProposalDetail:
     return floor.withdraw(user, proposals_service.parse_id(proposal_id))
 
 
@@ -159,7 +159,7 @@ def withdraw(proposal_id: str, floor: Floor, user: Member) -> ProposalDetail:
 def second(
     proposal_id: str,
     floor: Floor,
-    user: Member,
+    user: AnyMember,
     request: Annotated[SecondRequest, Depends(json_body(SecondRequest))],
 ) -> ProposalDetail:
     """Second the revision of the text the caller read (409 proposal_changed otherwise)."""
@@ -175,7 +175,7 @@ def second(
 def consent(
     proposal_id: str,
     floor: Floor,
-    user: Member,
+    user: AnyMember,
     request: Annotated[ConsentRequest, Depends(json_body(ConsentRequest))],
 ) -> ProposalDetail:
     return floor.consent(user, proposals_service.parse_id(proposal_id), request)
@@ -204,7 +204,7 @@ def comments(proposal_id: str, floor: Floor, before: str | None = None) -> Propo
 def comment(
     proposal_id: str,
     floor: Floor,
-    user: Member,
+    user: AnyMember,
     request: Annotated[CommentRequest, Depends(json_body(CommentRequest))],
 ) -> ProposalDetail:
     return floor.comment(user, proposals_service.parse_id(proposal_id), request)
@@ -219,7 +219,7 @@ def comment(
 def vote(
     proposal_id: str,
     floor: Floor,
-    user: Member,
+    user: AnyMember,
     request: Annotated[VoteRequest, Depends(json_body(VoteRequest))],
 ) -> ProposalDetail:
     return floor.vote(user, proposals_service.parse_id(proposal_id), request)

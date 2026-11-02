@@ -22,6 +22,7 @@
  * The environment is read per request, not at module load, so a build with
  * no LiveKit settings still succeeds, and this route then answers 503.
  */
+import { memberId } from '@forge/auth';
 import { sanitizeName } from '@forge/lobby';
 import { AccessToken, TrackSource } from 'livekit-server-sdk';
 
@@ -51,6 +52,9 @@ export async function POST(request: Request): Promise<Response> {
   }
   // The practice account is nobody on GitHub, so there is nobody to put in the room.
   if (session.demo) return jsonError(403, 'practice_session');
+  // `gh:<id>`, or `go:<id>` for a Google member: never one passing for the other.
+  const identity = memberId(session);
+  if (identity === null) return jsonError(403, 'practice_session');
   if (!fromThisOrigin(request)) return jsonError(403, 'bad_origin');
 
   const livekit = liveKitConfig();
@@ -59,7 +63,7 @@ export async function POST(request: Request): Promise<Response> {
   if (livekit === null || sessionKeys()?.practiceOnly !== false) return jsonError(503, 'voice_unavailable');
 
   const token = new AccessToken(livekit.apiKey, livekit.apiSecret, {
-    identity: `gh:${session.sub}`,
+    identity,
     name: sanitizeName(session.login),
     ttl: TOKEN_TTL,
   });

@@ -19,6 +19,7 @@ import {
   COOKIE,
   cookieOptions,
   createPkcePair,
+  isGitHubSession,
   randomToken,
   sealTransaction,
 } from '@forge/auth';
@@ -52,6 +53,8 @@ export async function POST(request: NextRequest): Promise<Response> {
   const session = await getSession();
   if (session === null) return redirectTo(`/signin?${new URLSearchParams({ next: taskPage }).toString()}`);
   if (session.demo) return jsonError(403, 'practice_session');
+  // Copilot starts as the member's own GitHub account: a Google member has none.
+  if (!isGitHubSession(session)) return jsonError(403, 'github_required');
 
   const config = githubAppConfig();
   const keys = sessionKeys();

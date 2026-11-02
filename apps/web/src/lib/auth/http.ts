@@ -6,7 +6,7 @@
 const NO_STORE = { 'Cache-Control': 'no-store' } as const;
 
 /** The `error` values the /signin page explains. */
-export type SignInError = 'unavailable' | 'expired' | 'state' | 'denied' | 'github';
+export type SignInError = 'unavailable' | 'expired' | 'state' | 'denied' | 'github' | 'google' | 'google_denied' | 'google_unverified';
 
 /**
  * A redirect. A same-origin path stays relative, so the browser resolves it

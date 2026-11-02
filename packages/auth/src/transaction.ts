@@ -14,6 +14,9 @@
  *   one action it authorizes, `copy` or `review`, so its own callback spends
  *   the one-time token on that action and nothing else.
  *
+ * - a `google` attempt is a sign-in with Google, sealed apart so that only
+ *   Google's callback opens it and GitHub's never does.
+ *
  * Each kind's fields are all or nothing, and belong to that kind alone: a
  * payload with only some of them, another kind's field, or a purpose this
  * code does not know, opens as no transaction at all.
@@ -64,6 +67,17 @@ export type SignInAttempt = {
   action?: undefined;
 };
 
+/** One sign-in attempt with Google. Only Google's callback takes it. */
+export type GoogleAttempt = {
+  state: string;
+  verifier: string;
+  next: string;
+  purpose: 'google';
+  taskId?: undefined;
+  rail?: undefined;
+  action?: undefined;
+};
+
 /** One authorization that starts an agent on a task. Never signs anyone in. */
 export type AgentAttempt = {
   state: string;
@@ -94,7 +108,7 @@ export type RepoAttempt = {
 };
 
 /** What callers seal. `sealTransaction` adds `iat` and `exp`. */
-export type TransactionInput = SignInAttempt | AgentAttempt | RepoAttempt;
+export type TransactionInput = SignInAttempt | GoogleAttempt | AgentAttempt | RepoAttempt;
 
 export type TransactionClaims = TransactionInput & { iat: number; exp: number };
 
@@ -115,6 +129,9 @@ function readAttempt(value: unknown): TransactionInput | null {
   }
   if (purpose === undefined && taskId === undefined && rail === undefined && action === undefined) {
     return { state, verifier, next };
+  }
+  if (purpose === 'google' && taskId === undefined && rail === undefined && action === undefined) {
+    return { state, verifier, next, purpose };
   }
   if (purpose === 'agent' && isTaskId(taskId) && isRail(rail) && action === undefined) {
     return { state, verifier, next, purpose, taskId, rail };

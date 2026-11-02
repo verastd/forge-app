@@ -33,7 +33,7 @@ from forge_api.models import (
     MachineUpload,
     MachineUploadStart,
 )
-from forge_api.routers.members import Db, Member, Now, body_doc, json_body, read_capped
+from forge_api.routers.members import AnyMember, Db, Now, body_doc, json_body, read_capped
 from forge_api.services import flags as flags_service
 from forge_api.services import lobby_machines as machines_service
 from forge_api.services import proposals as proposals_service
@@ -83,13 +83,13 @@ def list_machines(
 
 
 @router.get("/me", response_model=MachineMe)
-def my_machines(user: Member, db: Db) -> MachineMe:
+def my_machines(user: AnyMember, db: Db) -> MachineMe:
     return machines_service.me(db, user)
 
 
 @router.put("/me/stand-in", response_model=MachineMe, openapi_extra=body_doc(MachineStandIn))
 def put_stand_in(
-    user: Member,
+    user: AnyMember,
     db: Db,
     now: Now,
     body: Annotated[MachineStandIn, Depends(json_body(MachineStandIn))],
@@ -107,7 +107,7 @@ def list_blueprints(db: Db) -> MachineBlueprintList:
     "/blueprints", response_model=MachineUpload, openapi_extra=body_doc(MachineUploadStart)
 )
 def start_upload(
-    user: Member,
+    user: AnyMember,
     db: Db,
     now: Now,
     body: Annotated[MachineUploadStart, Depends(json_body(MachineUploadStart))],
@@ -122,7 +122,7 @@ def start_upload(
     openapi_extra=body_doc(MachineChunk),
 )
 def put_chunk(
-    user: Member,
+    user: AnyMember,
     db: Db,
     blueprint_id: BlueprintId,
     n: Annotated[int, Path(ge=0, le=64)],
@@ -133,12 +133,12 @@ def put_chunk(
 
 
 @router.post("/blueprints/{blueprintId}/finish", response_model=MachineBlueprint)
-def finish_upload(user: Member, db: Db, now: Now, blueprint_id: BlueprintId) -> MachineBlueprint:
+def finish_upload(user: AnyMember, db: Db, now: Now, blueprint_id: BlueprintId) -> MachineBlueprint:
     return machines_service.finish_upload(db, user, blueprint_id, now)
 
 
 @router.delete("/blueprints/{blueprintId}", status_code=204, response_class=Response)
-def delete_blueprint(user: Member, db: Db, blueprint_id: BlueprintId) -> Response:
+def delete_blueprint(user: AnyMember, db: Db, blueprint_id: BlueprintId) -> Response:
     machines_service.delete_blueprint(db, user, blueprint_id)
     return Response(status_code=204)
 
@@ -167,7 +167,7 @@ def get_asset_chunk(sha256: str, n: Annotated[int, Path(ge=0, le=64)], db: Db) -
     openapi_extra=body_doc(MachineBuild),
 )
 def build_machine(
-    user: Member,
+    user: AnyMember,
     db: Db,
     now: Now,
     body: Annotated[MachineBuild, Depends(json_body(MachineBuild))],
@@ -176,5 +176,5 @@ def build_machine(
 
 
 @router.delete("/{machineId}", response_model=MachineChange, response_model_exclude_none=True)
-def take_down(user: Member, db: Db, now: Now, machine_id: MachineId) -> MachineChange:
+def take_down(user: AnyMember, db: Db, now: Now, machine_id: MachineId) -> MachineChange:
     return machines_service.take_down(db, user, machine_id, now)

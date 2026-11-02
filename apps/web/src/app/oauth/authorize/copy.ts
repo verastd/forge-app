@@ -15,6 +15,11 @@ export const NOTICES = {
     title: 'Practice accounts can’t connect agents.',
     message: 'Sign in with GitHub.',
   },
+  /** Signed in with Google: an agent works on GitHub as you, so it needs your GitHub account. */
+  google: {
+    title: 'Connecting an agent needs a GitHub account.',
+    message: 'You’re signed in with Google. Sign out, then sign in with GitHub to connect an agent.',
+  },
   /** The `mcp_connector` flag is off. Same words as /connect's fail-closed message. */
   off: {
     title: 'The FORGE connector is switched off right now.',

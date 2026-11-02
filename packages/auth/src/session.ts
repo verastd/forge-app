@@ -13,6 +13,7 @@ import type { JWTPayload } from 'jose';
 import { SESSION_TTL_SECONDS } from './cookies.js';
 import { AuthError } from './errors.js';
 import { isAvatarUrl, isDisplayName, isGitHubLogin, isGitHubUserId } from './github.js';
+import { isGoogleLogin, isGoogleSub } from './google.js';
 
 /** The shortest secret this package seals, opens or signs with. */
 export const MIN_SECRET_LENGTH = 32;
@@ -32,8 +33,12 @@ export interface TimeOptions {
 
 export interface SessionClaims {
   v: 1;
-  /** The GitHub user id in decimal, or `'demo'` for the practice account. */
+  /**
+   * Who they are: a GitHub user id in decimal, `google:<id>` for someone signed
+   * in with Google, or `'demo'` for the practice account.
+   */
   sub: string;
+  /** A GitHub login, or a Google member's `g.` handle (google.ts). */
   login: string;
   name: string | null;
   avatarUrl: string | null;
@@ -169,9 +174,13 @@ function readIdentity(value: unknown): SessionInput | null {
   const { sub, login, name, avatarUrl, demo } = value as Record<string, unknown>;
   if (
     typeof demo !== 'boolean' ||
-    // A GitHub user id, or `'demo'`, which only the practice account may carry.
-    !(isGitHubUserId(sub) || (demo && sub === 'demo')) ||
-    !isGitHubLogin(login) ||
+    // A GitHub id and login, a Google member's sub and handle (never mixed), or
+    // `'demo'`, which only the practice account may carry.
+    !(
+      (isGitHubUserId(sub) && isGitHubLogin(login)) ||
+      (!demo && isGoogleSub(sub) && isGoogleLogin(login)) ||
+      (demo && sub === 'demo' && isGitHubLogin(login))
+    ) ||
     !isDisplayName(name) ||
     !isAvatarUrl(avatarUrl)
   ) {
@@ -203,7 +212,7 @@ function readSession(payload: Record<string, unknown>, now: number): SessionClai
 export async function sealSession(claims: SessionInput, secret: string, options?: TimeOptions): Promise<string> {
   const identity = readIdentity(claims);
   if (identity === null) {
-    throw new AuthError('invalid_claims', 'a session holds a valid GitHub identity or the practice account');
+    throw new AuthError('invalid_claims', 'a session holds a valid GitHub or Google identity, or the practice account');
   }
   return sealToken({ v: 1, ...identity }, secret, SESSION_INFO, SESSION_TTL_SECONDS, options);
 }
@@ -215,6 +224,22 @@ export async function sealSession(claims: SessionInput, secret: string, options?
  * wrongly-keyed token is null, and so is a transaction token or a payload
  * that fails any check.
  */
+/**
+ * A signed-in member's id in the lobby and everything keyed by member:
+ * `gh:<id>` for GitHub, `go:<id>` for Google; null for the practice account.
+ */
+export function memberId(session: Pick<SessionClaims, 'sub' | 'demo'>): string | null {
+  const { sub, demo } = session;
+  if (demo) return null;
+  if (isGitHubUserId(sub)) return `gh:${sub}`;
+  return isGoogleSub(sub) ? `go:${(sub as string).slice('google:'.length)}` : null;
+}
+
+/** Whether the session is a GitHub account (and so can do what needs one: contributing, the connector). */
+export function isGitHubSession(session: Pick<SessionClaims, 'sub' | 'demo'>): boolean {
+  return !session.demo && isGitHubUserId(session.sub);
+}
+
 export async function openSession(
   token: string | null | undefined,
   secrets: readonly (string | null | undefined)[],

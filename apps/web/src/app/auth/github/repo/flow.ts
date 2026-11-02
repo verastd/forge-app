@@ -83,7 +83,14 @@ const TASK_ID = /^[1-9][0-9]{0,8}$/;
 /** The `@forge/auth` calls the flow makes: the routes pass the package's own. */
 export type AuthKit = Pick<
   typeof Auth,
-  'AuthError' | 'constantTimeEqual' | 'createPkcePair' | 'isRepoAction' | 'publicRepoAuthorizeUrl' | 'randomToken' | 'sealTransaction'
+  | 'AuthError'
+  | 'constantTimeEqual'
+  | 'createPkcePair'
+  | 'isGitHubSession'
+  | 'isRepoAction'
+  | 'publicRepoAuthorizeUrl'
+  | 'randomToken'
+  | 'sealTransaction'
 >;
 
 /** FORGE's OAuth App (`githubRepoConfig`). */
@@ -93,7 +100,7 @@ export type RepoApp = RepoAppSettings;
 export type Visitor = Pick<SessionClaims, 'sub' | 'login' | 'demo'>;
 
 export interface StartSteps {
-  auth: Pick<AuthKit, 'createPkcePair' | 'isRepoAction' | 'publicRepoAuthorizeUrl' | 'randomToken' | 'sealTransaction'>;
+  auth: Pick<AuthKit, 'createPkcePair' | 'isGitHubSession' | 'isRepoAction' | 'publicRepoAuthorizeUrl' | 'randomToken' | 'sealTransaction'>;
   /** The form came from a page on this origin (`isSameOrigin`). */
   sameOrigin: (request: Request) => boolean;
   session: () => Promise<Visitor | null>;
@@ -137,6 +144,8 @@ export async function startRepoAuthorization(request: Request, steps: StartSteps
   const session = await steps.session();
   if (session === null) return redirectTo(`/signin?${new URLSearchParams({ next: taskPage }).toString()}`);
   if (session.demo) return jsonError(403, 'practice_session');
+  // A copy is a GitHub fork: a Google member has none to make.
+  if (!auth.isGitHubSession(session)) return jsonError(403, 'github_required');
 
   const setup = await steps.setup();
   if (setup === null) return redirectTo(`${taskPage}?repo_error=not_configured`);
@@ -169,7 +178,7 @@ export type RepoActOutcome =
   | { ok: false; code: string; status?: number; files?: number; pr?: number };
 
 export interface CallbackSteps {
-  auth: Pick<AuthKit, 'AuthError' | 'constantTimeEqual'>;
+  auth: Pick<AuthKit, 'AuthError' | 'constantTimeEqual' | 'isGitHubSession'>;
   /** The sealed attempt, opened and spent: the cookie is cleared, whatever happens next. */
   attempt: () => Promise<TransactionClaims | null>;
   session: () => Promise<Visitor | null>;
@@ -225,6 +234,7 @@ export async function finishRepoAuthorization(url: URL, steps: CallbackSteps): P
   if (app === null) return failed('not_configured');
   const session = await steps.session();
   if (session === null || session.demo) return failed('signed_out');
+  if (!auth.isGitHubSession(session)) return failed('github_required');
   const code = params.get('code');
   if (!code) return failed('github_failed');
 

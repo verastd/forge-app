@@ -198,6 +198,7 @@ export const START_ERROR_CODES: ReadonlySet<string> = new Set([
   'already_shipped',
   'unauthenticated',
   'practice_session',
+  'github_required',
   'bad_origin',
   'bridge-disabled',
   'service_unreachable',
@@ -215,6 +216,8 @@ function common(code: string): string | null {
       return 'Your sign-in has ended. Sign in again, then try once more.';
     case 'practice_session':
       return "Practice accounts can't do that. Sign in with GitHub to do it for real.";
+    case 'github_required':
+      return "That needs a GitHub account, and you're signed in with Google. Sign out, then sign in with GitHub to contribute.";
     case 'bad_origin':
       return "FORGE refused that because it didn't come from this page. Reload the page and try again.";
     case 'service_unreachable':
@@ -508,6 +511,7 @@ export const REPO_ERROR_CODES: ReadonlySet<string> = new Set([
   'task_not_found',
   'bridge-disabled',
   'unauthenticated',
+  'github_required',
   'invalid_request',
   'body_too_large',
   'service_unreachable',

@@ -111,6 +111,10 @@ export default defineConfig({
         // ever reaching github.com.
         GITHUB_APP_CLIENT_ID: 'Iv1.e2e0000000000000',
         GITHUB_APP_CLIENT_SECRET: 'e2e-fake-client-secret',
+        // Live-only: a fake Google client, so /signin offers Google and /auth/google and its
+        // callback's error paths are testable without ever reaching accounts.google.com.
+        GOOGLE_CLIENT_ID: 'e2e-0000.apps.googleusercontent.com',
+        GOOGLE_CLIENT_SECRET: 'e2e-fake-google-secret',
         // Live-only: a fake OAuth App for "your copy" and "Send for review",
         // so the task page offers them and POST /auth/github/repo and its
         // callback's error paths are testable without GitHub (live-repo.spec.ts).

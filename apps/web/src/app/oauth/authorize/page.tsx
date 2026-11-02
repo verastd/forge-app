@@ -20,7 +20,7 @@
  * no-store` and `X-Frame-Options: DENY` here, on top of the site-wide
  * `frame-ancestors 'none'`.
  */
-import { safeNext } from '@forge/auth';
+import { isGitHubSession, safeNext } from '@forge/auth';
 import type { AuthorizeCheck, AuthorizeParams } from '@forge/shared';
 import type { Metadata } from 'next';
 import Link from 'next/link';
@@ -188,6 +188,8 @@ export default async function AuthorizePage({ searchParams }: { searchParams: Se
   }
   // The practice account is nobody on GitHub, so there is nobody to connect.
   if (session.demo) return <NoticePage kind="practice" />;
+  // A Google member is nobody on GitHub either: the connector's tasks are GitHub work.
+  if (!isGitHubSession(session)) return <NoticePage kind="google" />;
 
   if (!mapped.ok) return <NoticePage kind={mapped.reason === 'empty' ? 'empty' : 'invalid'} />;
 

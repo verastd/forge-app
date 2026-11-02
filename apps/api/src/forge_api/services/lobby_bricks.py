@@ -227,7 +227,7 @@ def list_bricks(db: StateDB, since: int | None, now: datetime) -> BrickList:
 
 
 def _member(user: Identity) -> str:
-    return f"gh:{user.sub}"
+    return user.member_id
 
 
 def _standing_in(db: StateDB, user: Identity) -> bool:

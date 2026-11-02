@@ -10,7 +10,7 @@ from fastapi.responses import Response
 
 from forge_api.services import flags as flags_service
 from forge_api.services.errors import ApiError
-from forge_api.services.identity import require_identity
+from forge_api.services.identity import require_any_identity
 from forge_api.services.ledger import gateway
 
 FLAG = "upland_ledger"
@@ -37,7 +37,7 @@ router = APIRouter(
     prefix="/api/ledger",
     tags=["ledger"],
     # In this order: 404 while `upland_ledger` is off, then 401 without a valid assertion.
-    dependencies=[Depends(require_ledger_enabled), Depends(require_identity)],
+    dependencies=[Depends(require_ledger_enabled), Depends(require_any_identity)],
 )
 
 #: Every method lands here, so anything off the allowlist is the same 404, never a 405.

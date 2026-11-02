@@ -23,7 +23,13 @@ from forge_api.models import NewProposal
 from forge_api.services import members as members_service
 from forge_api.services import proposals as proposals_service
 from forge_api.services.errors import ApiError
-from forge_api.services.identity import Identity, is_admin, require_admin, require_identity
+from forge_api.services.identity import (
+    Identity,
+    is_admin,
+    require_admin,
+    require_any_identity,
+    require_identity,
+)
 from forge_api.services.state import StateDB, get_state_db
 
 #: The largest body read (but an admin's proposal, below): a 4000-character pitch, every
@@ -62,9 +68,30 @@ def admin_member(
     return identity
 
 
+def any_member(
+    identity: Annotated[Identity, Depends(require_any_identity)], db: Db, now: Now
+) -> Identity:
+    """The verified caller, GitHub or Google (401 without one), recorded as a member."""
+    members_service.touch_member(db, identity, now)
+    return identity
+
+
+def maybe_any_member(
+    db: Db, now: Now, authorization: Annotated[str | None, Header()] = None
+) -> Identity | None:
+    """`maybe_member`, for routes a Google member may use too."""
+    if authorization is None:
+        return None
+    return any_member(require_any_identity(authorization), db, now)
+
+
+#: GitHub members only (403 github_required for a Google member): the default.
 Member = Annotated[Identity, Depends(member)]
 MaybeMember = Annotated[Identity | None, Depends(maybe_member)]
 AdminMember = Annotated[Identity, Depends(admin_member)]
+#: GitHub or Google members: only on routes that make sense without a GitHub account.
+AnyMember = Annotated[Identity, Depends(any_member)]
+MaybeAnyMember = Annotated[Identity | None, Depends(maybe_any_member)]
 
 
 async def read_capped(request: Request, limit: int = MAX_BODY) -> bytes:
@@ -87,7 +114,7 @@ def json_body[ModelT: BaseModel](model: type[ModelT]) -> Callable[[Request], Awa
     return read
 
 
-async def proposal_body(request: Request, user: Member) -> NewProposal:
+async def proposal_body(request: Request, user: AnyMember) -> NewProposal:
     """A proposal's body (bringing one, or editing it), read up to the caller's cap
     (ADMIN_PROPOSAL_BODY for an admin, MAX_BODY otherwise) with its pitch held to the
     caller's limit (proposals.parse_proposal). Resolved after `member`, so a request with
@@ -110,6 +137,6 @@ router = APIRouter(prefix="/api/members", tags=["members"])
 
 
 @router.post("/hello", status_code=204, response_class=Response)
-def hello(user: Member) -> Response:
+def hello(user: AnyMember) -> Response:
     """Record the caller as a member (`member` already did). Not behind any flag."""
     return Response(status_code=204)

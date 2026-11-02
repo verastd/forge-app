@@ -12,14 +12,14 @@ from typing import Annotated
 from fastapi import APIRouter, Depends
 
 from forge_api.models import NotificationList, NotificationReadRequest
-from forge_api.routers.members import Db, Member, Now, body_doc, json_body
+from forge_api.routers.members import AnyMember, Db, Now, body_doc, json_body
 from forge_api.services import notifications as notifications_service
 
 router = APIRouter(prefix="/api/notifications", tags=["notifications"])
 
 
 @router.get("", response_model=NotificationList, response_model_exclude_none=True)
-def list_notifications(user: Member, db: Db) -> NotificationList:
+def list_notifications(user: AnyMember, db: Db) -> NotificationList:
     return notifications_service.list_notifications(db, user.sub)
 
 
@@ -30,7 +30,7 @@ def list_notifications(user: Member, db: Db) -> NotificationList:
     openapi_extra=body_doc(NotificationReadRequest, required=False),
 )
 def mark_read(
-    user: Member,
+    user: AnyMember,
     db: Db,
     now: Now,
     request: Annotated[NotificationReadRequest, Depends(json_body(NotificationReadRequest))],

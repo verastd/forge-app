@@ -14,6 +14,7 @@ import {
   constantTimeEqual,
   COOKIE,
   cookieOptions,
+  isGitHubSession,
   exchangeCode,
   fetchGitHubUser,
   openTransaction,
@@ -40,7 +41,7 @@ export const maxDuration = 60;
 export async function GET(request: NextRequest): Promise<Response> {
   const startedAt = Date.now();
   return finishRepoAuthorization(request.nextUrl, {
-    auth: { AuthError, constantTimeEqual },
+    auth: { AuthError, constantTimeEqual, isGitHubSession },
     attempt: async () => {
       const store = await cookies();
       const prod = isProduction();

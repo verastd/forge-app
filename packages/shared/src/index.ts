@@ -1266,14 +1266,17 @@ export type ContributorProfile = z.infer<typeof ContributorProfileSchema>;
 // Mirrored in apps/api/src/forge_api/models.py.
 // ---------------------------------------------------------------------------
 
-/** A member's id in the lobby: `gh:` and their numeric GitHub user id (the LiveKit identity). */
-export const AVATAR_MEMBER_ID = /^gh:[0-9]{1,20}$/;
 /**
- * A robot an admin can dress: a member's (`gh:<id>`) or one of the cave's
- * helper bots (`bot:<name>`, @forge/lobby's HELPER_BOTS; the API takes only
- * the ones it lists).
+ * A member's id in the lobby (the LiveKit identity): `gh:` and their numeric
+ * GitHub user id, or `go:` and the id of someone signed in with Google.
  */
-export const AVATAR_ROBOT_ID = /^(?:gh:[0-9]{1,20}|bot:[a-z0-9][a-z0-9-]{0,31})$/;
+export const AVATAR_MEMBER_ID = /^(?:gh:[0-9]{1,20}|go:[0-9]{1,40})$/;
+/**
+ * A robot an admin can dress: a member's (`gh:<id>` or `go:<id>`) or one of
+ * the cave's helper bots (`bot:<name>`, @forge/lobby's HELPER_BOTS; the API
+ * takes only the ones it lists).
+ */
+export const AVATAR_ROBOT_ID = /^(?:gh:[0-9]{1,20}|go:[0-9]{1,40}|bot:[a-z0-9][a-z0-9-]{0,31})$/;
 /** A library head's id: lower-case letters, digits and dashes. */
 export const AVATAR_HEAD_ID = /^[a-z0-9][a-z0-9-]{0,39}$/;
 /** A lower-case sha256, hex. */

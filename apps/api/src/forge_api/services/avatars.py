@@ -52,6 +52,7 @@ from forge_api.models import (
     AvatarMemberList,
     AvatarUpdate,
 )
+from forge_api.services import identity as identity_service
 from forge_api.services import members as members_service
 from forge_api.services.errors import ApiError
 from forge_api.services.identity import Identity, is_admin
@@ -66,8 +67,8 @@ HELPER_BOTS: Final = (AvatarMember(memberId="bot:helper", login="helper-bot"),)
 
 
 def is_robot(robot_id: str) -> bool:
-    """Whether `robot_id` names a robot an admin can dress: a member's (`gh:<id>`; whether
-    they've signed in isn't asked), or a helper bot in HELPER_BOTS."""
+    """Whether `robot_id` names a robot an admin can dress: a member's (`gh:<id>` or
+    `go:<id>`; whether they've signed in isn't asked), or a helper bot in HELPER_BOTS."""
     if robot_id.startswith("bot:"):
         return any(bot.memberId == robot_id for bot in HELPER_BOTS)
     return re.fullmatch(AVATAR_MEMBER_ID, robot_id) is not None
@@ -691,7 +692,7 @@ def list_members(db: StateDB) -> AvatarMemberList:
         members=[
             *HELPER_BOTS,
             *(
-                AvatarMember(memberId=f"gh:{m.sub}", login=m.login)
+                AvatarMember(memberId=identity_service.member_id(m.sub), login=m.login)
                 for m in members_service.all_members(db)
             ),
         ]
