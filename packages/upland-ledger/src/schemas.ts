@@ -452,6 +452,22 @@ export const PropertySchema = z.object({
   last_sale_upx: num,
   last_sale_at: IsoInstant.nullable(),
   observations: num,
+  /** Current owner (EOS account / Upland username); null when unknown. */
+  owner_account: str.nullable(),
+  owner_username: str.nullable(),
+  owner_since: IsoInstant.nullable(),
+  owner_seen_at: IsoInstant.nullable(),
+  /** How the owner was learned, e.g. `listing_created`. */
+  owner_source: str.nullable(),
+  /** Has an open listing. The ask fields below are null unless `listed`. */
+  listed: z.boolean(),
+  ask_upx: num.nullable(),
+  ask_fiat: num.nullable(),
+  ask_currency: z.enum(['upx', 'fiat']).nullable(),
+  ask_to_mint: num.nullable(),
+  listed_at: IsoInstant.nullable(),
+  /** Exact size in UP2 from Upland's game API; null until the ledger has fetched it. */
+  size_up2: num.nullable(),
   /** floor(log2(mint_price_upx)); null when there is no mint price. */
   mint_band: num.nullable(),
 });
@@ -474,6 +490,8 @@ export const PropertyDetailSchema = PropertySchema.extend({
   /** False: the property has never traded inside the chain window; fields come from the API dimension. */
   chain_known: z.boolean(),
   upland_api: UplandApiPropertySchema.nullable(),
+  /** Lot outline from the game API as GeoJSON ([lng, lat]); null until fetched. */
+  boundaries: z.object({ type: z.literal('Polygon'), coordinates: NestedNumbersSchema }).nullable(),
 });
 export type PropertyDetail = z.infer<typeof PropertyDetailSchema>;
 
@@ -533,6 +551,8 @@ export const ListingSchema = z.object({
   ask_upx: num,
   ask_fiat: num,
   ask_to_mint: num,
+  /** Exact size in UP2 from Upland's game API; null until the ledger has fetched it. */
+  size_up2: num.nullable(),
 });
 export type Listing = z.infer<typeof ListingSchema>;
 export const ListingPageSchema = offsetPage(ListingSchema);
@@ -552,6 +572,8 @@ export const SaleSchema = z.object({
   seller_proceeds_upx: num,
   community_fee_upx: num,
   price_to_mint: num,
+  /** Exact size in UP2 from Upland's game API; null until the ledger has fetched it. */
+  size_up2: num.nullable(),
 });
 export type Sale = z.infer<typeof SaleSchema>;
 export const SalePageSchema = offsetPage(SaleSchema);
@@ -574,6 +596,8 @@ export const OfferSchema = z.object({
   price_to_mint: num,
   /** `address` | `mint_trx` | `both` */
   resolved_by: str,
+  /** Exact size in UP2 from Upland's game API; null until the ledger has fetched it. */
+  size_up2: num.nullable(),
 });
 export type Offer = z.infer<typeof OfferSchema>;
 export const OfferPageSchema = offsetPage(OfferSchema);
@@ -640,7 +664,7 @@ export const RatePageSchema = offsetPage(RateRowSchema);
 export const SearchResultSchema = z.object({
   query: str,
   properties: z
-    .array(z.object({ property_id: str, address: str, city: str, neighborhood: str, mint_price_upx: num, sales: num }))
+    .array(z.object({ property_id: str, address: str, city: str, neighborhood: str, mint_price_upx: num, sales: num, size_up2: num.nullable() }))
     .optional(),
   accounts: z
     .array(

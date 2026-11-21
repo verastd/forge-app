@@ -7,7 +7,8 @@
       "city": "Vancouver",
       "neighborhood": "",
       "mint_price_upx": 3720381,
-      "sales": 0
+      "sales": 0,
+      "size_up2": 1043
     },
     {
       "property_id": "86706683708904",
@@ -15,7 +16,8 @@
       "city": "Vancouver",
       "neighborhood": "",
       "mint_price_upx": 445875,
-      "sales": 0
+      "sales": 0,
+      "size_up2": 375
     }
   ],
   "accounts": [

@@ -321,7 +321,20 @@ interface Ordered<S extends string> extends OffsetParams {
   order?: SortDir;
 }
 
-export const PROPERTY_SORTS = ['mint_price_upx', 'last_sale_upx', 'last_sale_at', 'minted_at', 'sales', 'address'] as const;
+export const PROPERTY_SORTS = [
+  'mint_price_upx',
+  'last_sale_upx',
+  'last_sale_at',
+  'minted_at',
+  'sales',
+  'address',
+  'ask_upx',
+  'ask_fiat',
+  'ask_to_mint',
+  'listed_at',
+  'owner_since',
+  'size_up2',
+] as const;
 export interface PropertyListParams extends ChainParam, Ordered<(typeof PROPERTY_SORTS)[number]> {
   city?: string;
   neighborhood?: string;
@@ -335,6 +348,21 @@ export interface PropertyListParams extends ChainParam, Ordered<(typeof PROPERTY
   traded?: boolean;
   /** Case-insensitive substring. */
   address?: string;
+  /** Current owner, by EOS account or Upland username (case-insensitive). */
+  owner?: string;
+  /** Open listings only (`true`), or unlisted only (`false`). */
+  listed?: boolean;
+  /** The order book an open listing is in. Implies `listed`. */
+  currency?: 'upx' | 'fiat';
+  /** Inclusive bounds on the open ask, in the listing's own currency. */
+  min_ask?: number;
+  max_ask?: number;
+  /** Inclusive bounds on UPX ask ÷ mint price (1.5 = 50 % markup). Implies a UPX listing. */
+  min_markup?: number;
+  max_markup?: number;
+  /** Inclusive bounds on size in UP2. Either bound excludes properties whose size is not fetched yet. */
+  min_size?: number;
+  max_size?: number;
 }
 
 export interface PropertyHistoryParams extends ChainParam, OffsetParams {

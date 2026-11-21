@@ -159,7 +159,7 @@ Paths relative to `/bff/ledger`. Envelope: **C** = cursor `{data,next_cursor,cou
 | GET | `/rates` | `rates.list` | O | Raw daily rate rows per method (prefer `/market/upx-usd` for charts) |
 | GET | `/search` | `search` | {} | Global search box |
 
-## Gotchas (verified 2026-10-09)
+## Gotchas (verified 2026-11-21)
 
 Checked against the source and the live ledger; see `openapi.yaml` descriptions.
 
@@ -185,14 +185,22 @@ Checked against the source and the live ledger; see `openapi.yaml` descriptions.
    anything else is a 400 `validation_error`, so validate user input first. The
    gateway allowlist also limits `{account}`/`{contract}` path segments to
    `[a-z1-5.]{1,13}` and rejects percent-encoded paths.
-6. Property ids are up to 20 digits: keep them strings. `/properties` only
-   holds properties seen on chain (~398 K of ~4.9 M); `/properties/{id}` falls
-   back to the Upland API row (`chain_known: false`).
+6. Property ids are up to 20 digits: keep them strings. `/properties` now
+   holds all ~4.9 M properties (chain plus the Upland API dimension);
+   `chain_known: false` on `/properties/{id}` marks one that never traded on
+   chain.
 7. `/market/cities` medians are `null` on days with no data;
    `/neighborhoods` `boundaries` is parsed JSON (nested `[lng, lat]` arrays) or
    `null`. Numbers elsewhere are never null unless the schema says so.
 8. Derived layers lag the chain (see Freshness): a sale is in `/sales` within
    15 min but `/properties/{id}` counts it only after the next 6-hourly build.
+9. **Size (`size_up2`) is filling in.** It is Upland's exact UP2, crawled from
+   the game API at 3 req/s starting 2026-11-21: open listings and traded
+   properties first (~40 h), everything else after (~19 days). Until then it
+   is `null`: show "—", never 0, and don't estimate. `min_size`/`max_size`
+   drop unsized properties, and `sort=size_up2` puts them last. List routes
+   pick up new sizes at the 6-hourly build; `/properties/{id}` shows them
+   (and the lot outline, `boundaries`, a GeoJSON Polygon) as soon as fetched.
 
 ## Re-capturing the examples
 

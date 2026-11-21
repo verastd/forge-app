@@ -38,6 +38,12 @@ const SORT_LABELS: Record<Sort, string> = {
   minted_at: 'Mint date',
   sales: 'Sales',
   address: 'Address',
+  ask_upx: 'Ask (UPX)',
+  ask_fiat: 'Ask (USD)',
+  ask_to_mint: 'Ask ÷ mint',
+  listed_at: 'Listed date',
+  owner_since: 'Owned since',
+  size_up2: 'Size (UP2)',
 };
 
 const COLUMNS: Column<Property>[] = [
