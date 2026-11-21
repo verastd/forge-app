@@ -14,7 +14,46 @@
   "last_sale_upx": 29999,
   "last_sale_at": "2026-10-09T00:12:28.000Z",
   "observations": 1,
+  "owner_account": "ymc55j4fboxi",
+  "owner_username": "kingbo",
+  "owner_since": "2026-10-09T00:12:28.000Z",
+  "owner_seen_at": "2026-10-09T00:12:28.000Z",
+  "owner_source": "property_sale",
+  "listed": false,
+  "ask_upx": null,
+  "ask_fiat": null,
+  "ask_currency": null,
+  "ask_to_mint": null,
+  "listed_at": null,
+  "size_up2": 44,
   "mint_band": null,
   "chain_known": true,
-  "upland_api": null
+  "upland_api": null,
+  "boundaries": {
+    "type": "Polygon",
+    "coordinates": [
+      [
+        [
+          -81.70128652259905,
+          41.43711020664156
+        ],
+        [
+          -81.70128971470459,
+          41.43741208001608
+        ],
+        [
+          -81.70143559584389,
+          41.43741120984615
+        ],
+        [
+          -81.7014324043182,
+          41.43710933198158
+        ],
+        [
+          -81.70128652259905,
+          41.43711020664156
+        ]
+      ]
+    ]
+  }
 }

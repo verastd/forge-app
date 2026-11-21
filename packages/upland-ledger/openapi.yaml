@@ -680,7 +680,16 @@ paths:
         - { name: min_sales, in: query, schema: { type: integer, minimum: 0 } }
         - { $ref: '#/components/parameters/traded' }
         - { name: address, in: query, description: Case-insensitive substring., schema: { type: string, minLength: 1, maxLength: 120 } }
-        - { name: sort, in: query, schema: { type: string, enum: [mint_price_upx, last_sale_upx, last_sale_at, minted_at, sales, address], default: mint_price_upx } }
+        - { name: owner, in: query, description: Current owner by EOS account or Upland username (case-insensitive)., schema: { type: string, minLength: 1, maxLength: 64 } }
+        - { name: listed, in: query, description: Open listings only (true) or unlisted only (false)., schema: { $ref: '#/components/schemas/EntityFlag' } }
+        - { name: currency, in: query, description: Order book of the open listing. Implies listed., schema: { type: string, enum: [upx, fiat] } }
+        - { name: min_ask, in: query, description: Inclusive; in the listing's own currency., schema: { type: number } }
+        - { name: max_ask, in: query, schema: { type: number } }
+        - { name: min_markup, in: query, description: Inclusive UPX ask ÷ mint price (1.5 = 50 % markup). Implies a UPX listing., schema: { type: number } }
+        - { name: max_markup, in: query, schema: { type: number } }
+        - { name: min_size, in: query, description: Inclusive size in UP2. Excludes properties whose size is not fetched yet., schema: { type: integer, minimum: 0 } }
+        - { name: max_size, in: query, description: Inclusive size in UP2. Excludes properties whose size is not fetched yet., schema: { type: integer, minimum: 0 } }
+        - { name: sort, in: query, description: Absent values (no ask, no size, unknown date) sort last in either direction., schema: { type: string, enum: [mint_price_upx, last_sale_upx, last_sale_at, minted_at, sales, address, ask_upx, ask_fiat, ask_to_mint, listed_at, owner_since, size_up2], default: mint_price_upx } }
         - { $ref: '#/components/parameters/order' }
         - { $ref: '#/components/parameters/entityLimit' }
         - { $ref: '#/components/parameters/offset' }
@@ -698,7 +707,7 @@ paths:
       tags: [entities]
       operationId: getProperty
       summary: One property
-      description: The derived row plus `chain_known` and the Upland API row (`upland_api`, or null). A property that never traded inside the chain window but is in the API dimension still answers 200 with `chain_known:false`. 404 only when neither knows it.
+      description: The derived row plus `chain_known`, the Upland API row (`upland_api`, or null) and the lot outline (`boundaries`, or null). `size_up2` here is read straight from the game-API table, so it can be set before the list routes show it (they refresh every 6 h). A property that never traded inside the chain window but is in the API dimension still answers 200 with `chain_known:false`. 404 only when neither knows it.
       x-example: examples/GET_properties_{propertyId}.json
       parameters:
         - { $ref: '#/components/parameters/propertyId' }
@@ -1586,7 +1595,7 @@ components:
         has_more: { type: boolean, description: 'count === limit; page until false.' }
     Property:
       type: object
-      required: [property_id, address, city, region, neighborhood, neighborhood_id, mint_price_upx, mint_price_source, mint_kind, api_status, minted_at, sales, last_sale_upx, last_sale_at, observations, mint_band]
+      required: [property_id, address, city, region, neighborhood, neighborhood_id, mint_price_upx, mint_price_source, mint_kind, api_status, minted_at, sales, last_sale_upx, last_sale_at, observations, owner_account, owner_username, owner_since, owner_seen_at, owner_source, listed, ask_upx, ask_fiat, ask_currency, ask_to_mint, listed_at, size_up2, mint_band]
       properties:
         property_id: { type: string, pattern: '^\d{1,20}$' }
         address: { type: string }
@@ -1603,6 +1612,18 @@ components:
         last_sale_upx: { type: number }
         last_sale_at: { type: [string, 'null'], format: date-time }
         observations: { type: number }
+        owner_account: { type: [string, 'null'] }
+        owner_username: { type: [string, 'null'] }
+        owner_since: { type: [string, 'null'], format: date-time }
+        owner_seen_at: { type: [string, 'null'], format: date-time }
+        owner_source: { type: [string, 'null'], description: 'How the owner was learned, e.g. listing_created.' }
+        listed: { type: boolean, description: Has an open listing. The ask fields are null unless listed. }
+        ask_upx: { type: [number, 'null'] }
+        ask_fiat: { type: [number, 'null'] }
+        ask_currency: { type: [string, 'null'], enum: [upx, fiat, null] }
+        ask_to_mint: { type: [number, 'null'] }
+        listed_at: { type: [string, 'null'], format: date-time }
+        size_up2: { type: [number, 'null'], description: Exact size in UP2 from Upland's game API; null until the ledger has fetched it. }
         mint_band: { type: [number, 'null'], description: 'floor(log2(mint_price_upx)); null without a mint price.' }
     PropertyPage:
       allOf:
@@ -1612,9 +1633,16 @@ components:
       allOf:
         - { $ref: '#/components/schemas/Property' }
         - type: object
-          required: [chain_known, upland_api]
+          required: [chain_known, upland_api, boundaries]
           properties:
             chain_known: { type: boolean }
+            boundaries:
+              description: Lot outline from Upland's game API as a GeoJSON Polygon ([lng, lat]); null until fetched.
+              type: [object, 'null']
+              required: [type, coordinates]
+              properties:
+                type: { type: string, const: Polygon }
+                coordinates: { $ref: '#/components/schemas/NestedNumbers' }
             upland_api:
               type: [object, 'null']
               required: [address, city, neighborhood, neighborhood_id, collection, status, mint_price_upx]
@@ -1675,7 +1703,7 @@ components:
             income: { type: object, required: [yield_upx, visit_upx, yield_collections], properties: { yield_upx: { type: number }, visit_upx: { type: number }, yield_collections: { type: number } } }
     Listing:
       type: object
-      required: [timestamp, property_id, seller, address, city, neighborhood, mint_price_upx, ask_upx, ask_fiat, ask_to_mint]
+      required: [timestamp, property_id, seller, address, city, neighborhood, mint_price_upx, ask_upx, ask_fiat, ask_to_mint, size_up2]
       properties:
         timestamp: { type: [string, 'null'], format: date-time }
         property_id: { type: string }
@@ -1687,13 +1715,14 @@ components:
         ask_upx: { type: number }
         ask_fiat: { type: number }
         ask_to_mint: { type: number }
+        size_up2: { type: [number, 'null'], description: Exact size in UP2 from Upland's game API; null until the ledger has fetched it. }
     ListingPage:
       allOf:
         - { $ref: '#/components/schemas/OffsetPageMeta' }
         - { type: object, required: [data], properties: { data: { type: array, items: { $ref: '#/components/schemas/Listing' } } } }
     Sale:
       type: object
-      required: [timestamp, property_id, buyer, seller, trx_id, address, city, neighborhood, mint_price_upx, price_upx, buyer_paid_upx, seller_proceeds_upx, community_fee_upx, price_to_mint]
+      required: [timestamp, property_id, buyer, seller, trx_id, address, city, neighborhood, mint_price_upx, price_upx, buyer_paid_upx, seller_proceeds_upx, community_fee_upx, price_to_mint, size_up2]
       properties:
         timestamp: { type: [string, 'null'], format: date-time }
         property_id: { type: string }
@@ -1709,13 +1738,14 @@ components:
         seller_proceeds_upx: { type: number }
         community_fee_upx: { type: number }
         price_to_mint: { type: number }
+        size_up2: { type: [number, 'null'], description: Exact size in UP2 from Upland's game API; null until the ledger has fetched it. }
     SalePage:
       allOf:
         - { $ref: '#/components/schemas/OffsetPageMeta' }
         - { type: object, required: [data], properties: { data: { type: array, items: { $ref: '#/components/schemas/Sale' } } } }
     Offer:
       type: object
-      required: [timestamp, property_id, trx_id, offer_id, seller, buyer, buyer_username, price_upx, seller_proceeds_upx, community_fee_upx, address, city, region, mint_price_upx, price_to_mint, resolved_by]
+      required: [timestamp, property_id, trx_id, offer_id, seller, buyer, buyer_username, price_upx, seller_proceeds_upx, community_fee_upx, address, city, region, mint_price_upx, price_to_mint, resolved_by, size_up2]
       properties:
         timestamp: { type: [string, 'null'], format: date-time }
         property_id: { type: string }
@@ -1733,6 +1763,7 @@ components:
         mint_price_upx: { type: number }
         price_to_mint: { type: number }
         resolved_by: { type: string }
+        size_up2: { type: [number, 'null'], description: Exact size in UP2 from Upland's game API; null until the ledger has fetched it. }
     OfferPage:
       allOf:
         - { $ref: '#/components/schemas/OffsetPageMeta' }
@@ -1812,7 +1843,7 @@ components:
       required: [query]
       properties:
         query: { type: string }
-        properties: { type: array, items: { type: object, required: [property_id, address, city, neighborhood, mint_price_upx, sales], properties: { property_id: { type: string }, address: { type: string }, city: { type: string }, neighborhood: { type: string }, mint_price_upx: { type: number }, sales: { type: number } } } }
+        properties: { type: array, items: { type: object, required: [property_id, address, city, neighborhood, mint_price_upx, sales, size_up2], properties: { property_id: { type: string }, address: { type: string }, city: { type: string }, neighborhood: { type: string }, mint_price_upx: { type: number }, sales: { type: number }, size_up2: { type: [number, 'null'] } } } }
         accounts: { type: array, items: { type: object, required: [account, username, buys, sells, likely_bot], properties: { account: { type: string }, username: { type: string }, buys: { type: number }, sells: { type: number }, likely_bot: { type: boolean } } } }
         neighborhoods: { type: array, items: { type: object, required: [neighborhood_id, name, city_id, center_lat, center_lng], properties: { neighborhood_id: { type: number }, name: { type: string }, city_id: { type: number }, center_lat: { type: number }, center_lng: { type: number } } } }
         collections: { type: array, items: { type: object, required: [collection_id, name, city_id, yield_boost, one_time_reward, requirements], properties: { collection_id: { type: number }, name: { type: string }, city_id: { type: number }, yield_boost: { type: number }, one_time_reward: { type: number }, requirements: { type: string } } } }

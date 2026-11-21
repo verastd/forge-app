@@ -14,7 +14,8 @@
       "buyer_paid_upx": 31498.95,
       "seller_proceeds_upx": 28499.05,
       "community_fee_upx": 2999.9,
-      "price_to_mint": 0
+      "price_to_mint": 0,
+      "size_up2": 44
     },
     {
       "timestamp": "2026-10-09T00:12:08.500Z",
@@ -30,7 +31,8 @@
       "buyer_paid_upx": 21000,
       "seller_proceeds_upx": 19000,
       "community_fee_upx": 2000,
-      "price_to_mint": 0
+      "price_to_mint": 0,
+      "size_up2": 53
     },
     {
       "timestamp": "2026-10-09T00:11:38.000Z",
@@ -46,7 +48,8 @@
       "buyer_paid_upx": 7381.5,
       "seller_proceeds_upx": 6678.5,
       "community_fee_upx": 703,
-      "price_to_mint": 0
+      "price_to_mint": 0,
+      "size_up2": 32
     }
   ],
   "count": 3,

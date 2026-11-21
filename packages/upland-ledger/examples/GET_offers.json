@@ -16,7 +16,8 @@
       "region": "SG",
       "mint_price_upx": 0,
       "price_to_mint": 0,
-      "resolved_by": "mint_trx"
+      "resolved_by": "mint_trx",
+      "size_up2": 28
     },
     {
       "timestamp": "2026-10-08T12:51:03.000Z",
@@ -34,7 +35,8 @@
       "region": "NE",
       "mint_price_upx": 0,
       "price_to_mint": 0,
-      "resolved_by": "mint_trx"
+      "resolved_by": "mint_trx",
+      "size_up2": 65
     },
     {
       "timestamp": "2026-10-08T11:25:33.000Z",
@@ -52,7 +54,8 @@
       "region": "RM",
       "mint_price_upx": 0,
       "price_to_mint": 0,
-      "resolved_by": "mint_trx"
+      "resolved_by": "mint_trx",
+      "size_up2": 219
     }
   ],
   "count": 3,

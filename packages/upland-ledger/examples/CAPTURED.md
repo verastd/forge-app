@@ -24,6 +24,16 @@
   an Upland API row could be found through the API. Its shape comes from the
   source (`entities/queries.ts` `getProperty`) and migration
   `0008_ext_upland.sql`.
+- **2026-11-21 additions (upland-ledger PRs #4 and #5):** rather than a full
+  re-capture (the web UI's tests pin values from the 2026-10-09 run), the
+  new fields were copied into these files from the live
+  `/v1/properties/{id}` of the same property ids: the owner and listing
+  fields (`owner_*`, `listed`, `ask_*`, `listed_at`) and `size_up2` on
+  `GET_properties.json`, plus `boundaries` on
+  `GET_properties_{propertyId}.json`; `size_up2` alone on `GET_listings`,
+  `GET_sales`, `GET_offers` and `GET_search`. Sizes were fetched for these
+  ids with `pnpm ext:upland details --ids …`, so none is null here; expect
+  nulls in real responses until the crawl finishes.
 - Errors: `ERROR_validation_error.json` (`GET /v1/actions?limit=5000`, 400) and
   `ERROR_not_found.json` (`GET /v1/properties/1`, 404). Gateway errors
   (`{"error":"unauthenticated"}` etc.) come from forge-app, not the ledger, and

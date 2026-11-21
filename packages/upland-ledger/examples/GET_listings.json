@@ -10,7 +10,8 @@
       "mint_price_upx": 0,
       "ask_upx": 0,
       "ask_fiat": 7.99,
-      "ask_to_mint": 0
+      "ask_to_mint": 0,
+      "size_up2": 60
     },
     {
       "timestamp": "2026-10-09T00:08:41.000Z",
@@ -22,7 +23,8 @@
       "mint_price_upx": 0,
       "ask_upx": 0,
       "ask_fiat": 7.99,
-      "ask_to_mint": 0
+      "ask_to_mint": 0,
+      "size_up2": 69
     },
     {
       "timestamp": "2026-10-09T00:03:20.000Z",
@@ -34,7 +36,8 @@
       "mint_price_upx": 0,
       "ask_upx": 0,
       "ask_fiat": 8,
-      "ask_to_mint": 0
+      "ask_to_mint": 0,
+      "size_up2": 80
     }
   ],
   "count": 3,
